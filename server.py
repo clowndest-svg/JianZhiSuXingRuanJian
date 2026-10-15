@@ -216,18 +216,22 @@ def compute_metrics(p):
     bmr = round(bmr)
     tdee = round(bmr * 1.35)
 
-    gt = p.get("goal_type", "tone")
-    if gt == "loss":
-        deficit = 550
+    gt = p.get("goal_type", "female_hourglass")
+    if gt in ["male_v_taper", "tone", "female_hourglass"]:
+        deficit = 420
+        target = max(1300, tdee - deficit)
+        protein_ratio, carbs_ratio, fat_ratio = 0.35, 0.40, 0.25
+    elif gt in ["male_lean", "loss", "female_lean"]:
+        deficit = 500
         target = max(1200, tdee - deficit)
-        protein_ratio, carbs_ratio, fat_ratio = 0.35, 0.35, 0.30
-    elif gt == "muscle":
-        deficit = -250
+        protein_ratio, carbs_ratio, fat_ratio = 0.30, 0.45, 0.25
+    elif gt in ["male_muscular", "muscle", "female_athletic"]:
+        deficit = -250  # 盈余促肌肥大
         target = tdee + 250
-        protein_ratio, carbs_ratio, fat_ratio = 0.30, 0.50, 0.20
-    elif gt == "tight":
-        deficit = 250
-        target = tdee - deficit
+        protein_ratio, carbs_ratio, fat_ratio = 0.35, 0.45, 0.20
+    elif gt in ["male_steady", "tight", "female_steady"]:
+        deficit = 550  # 大基数/啤酒肚稳健减脂
+        target = max(1300, tdee - deficit)
         protein_ratio, carbs_ratio, fat_ratio = 0.30, 0.45, 0.25
     else:
         deficit = 420

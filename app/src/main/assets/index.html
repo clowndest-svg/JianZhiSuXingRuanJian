@@ -535,14 +535,21 @@
                 <span class="tag-offline-free" id="cycle-badge-tag">进行中</span>
             </div>
 
-            <!-- 用户自选身材目标预览卡片 (放几张图片让用户自己选要哪种身材) -->
+            <!-- 用户自选身材目标预览卡片 (分男女、选身材) -->
             <div class="card">
                 <div class="card-title">
                     <span class="title-left">🎯 我所追求的理想身材目标</span>
-                    <button style="font-size: 11px; color: var(--primary-dark); background: none; border: none; cursor: pointer; font-weight: 700;" onclick="openProfileModal()">切换身材 ➔</button>
+                    <div class="gender-mini-tabs">
+                        <button type="button" class="gender-mini-btn active" id="tab-gender-female" onclick="switchShapeGender('female')">👩 女性塑形</button>
+                        <button type="button" class="gender-mini-btn" id="tab-gender-male" onclick="switchShapeGender('male')">👨 男性塑形</button>
+                    </div>
                 </div>
                 <div id="target-physique-summary-card">
                     <!-- 动态渲染当前选中的身材图与规划 -->
+                </div>
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); margin: 10px 0 6px;">👇 挑选心仪身材（点击立即生效并动态自适应训练与饮食）：</div>
+                <div class="body-shape-selector-grid" id="main-body-shapes-grid">
+                    <!-- JS 根据当前性别动态渲染 4 款专属身材卡片 -->
                 </div>
             </div>
 
@@ -764,7 +771,7 @@
                 <div class="form-row-2 form-group">
                     <div>
                         <label class="form-label">生理性别</label>
-                        <select id="prof-gender" class="input-control">
+                        <select id="prof-gender" class="input-control" onchange="onProfileGenderChanged(this.value)">
                             <option value="female">👩 女 (女性代谢算法)</option>
                             <option value="male">👨 男 (男性代谢算法)</option>
                         </select>
@@ -793,77 +800,19 @@
                     <input type="number" step="0.1" id="prof-target-jin" value="120" class="input-control">
                 </div>
 
-                <!-- 管理目标类型 (4大类视觉身材形态卡片，带生动图示) -->
+                <!-- 管理目标类型 (根据性别动态渲染男女身材形态卡片，带生动图示) -->
                 <div class="form-group">
-                    <label class="form-label">挑选您所追求的目标身材形态</label>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <label class="form-label" style="margin-bottom: 0;">挑选目标身材形态</label>
+                        <div class="gender-mini-tabs">
+                            <button type="button" class="gender-mini-btn active" id="modal-tab-female" onclick="onProfileGenderChanged('female')">👩 女性款 (4款)</button>
+                            <button type="button" class="gender-mini-btn" id="modal-tab-male" onclick="onProfileGenderChanged('male')">👨 男性款 (4款)</button>
+                        </div>
+                    </div>
                     <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">点击挑选心仪体型，系统将全自动定制专属代谢卡路里与训练规划：</div>
                     
-                    <div class="body-shape-selector-grid">
-                        <!-- 目标 1: S型沙漏/马甲线紧致 -->
-                        <div class="body-shape-card selected" id="shape-card-tone" onclick="selectVisualGoalShape('tone')">
-                            <span class="body-shape-selected-tag">已选目标</span>
-                            <div class="body-shape-svg-box">
-                                <svg viewBox="0 0 68 96" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <circle cx="34" cy="14" r="8" fill="#10B981" />
-                                    <path d="M26 23 C28 26 40 26 42 23 C48 27 50 31 51 36 C45 37 42 44 41 50 C44 58 48 64 47 72 C46 80 44 94 40 94 C38 94 36 80 34 68 C32 80 30 94 28 94 C24 94 22 80 21 72 C20 64 24 58 27 50 C26 44 23 37 17 36 C18 31 20 27 26 23 Z" fill="#D1FAE5" stroke="#10B981" stroke-width="2" stroke-linejoin="round" />
-                                    <path d="M34 32 L34 46" stroke="#047857" stroke-width="1.5" stroke-linecap="round" />
-                                    <path d="M30 40 Q34 42 38 40" stroke="#047857" stroke-width="1.5" stroke-linecap="round" />
-                                    <path d="M28 48 Q34 50 40 48" stroke="#047857" stroke-width="1.5" stroke-linecap="round" />
-                                </svg>
-                            </div>
-                            <div class="body-shape-title">⏳ S型沙漏·马甲线</div>
-                            <div class="body-shape-desc">纤细腰腹 · 紧翘臀线 · 挺拔体态</div>
-                            <div class="body-shape-specs">缺口420k · 蛋白30% · 臀腹抗阻</div>
-                        </div>
-
-                        <!-- 目标 2: 修长轻盈/纤细模特型 -->
-                        <div class="body-shape-card" id="shape-card-loss" onclick="selectVisualGoalShape('loss')">
-                            <span class="body-shape-selected-tag">已选目标</span>
-                            <div class="body-shape-svg-box">
-                                <svg viewBox="0 0 68 96" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <circle cx="34" cy="12" r="7.5" fill="#3B82F6" />
-                                    <path d="M28 21 C30 23 38 23 40 21 C45 25 46 29 46 34 C43 40 40 46 39 52 C41 60 43 68 42 76 C41 84 39 94 36 94 C35 94 34 82 34 68 C34 82 33 94 32 94 C29 94 27 84 26 76 C25 68 27 60 29 52 C28 46 25 40 22 34 C22 29 23 25 28 21 Z" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2" stroke-linejoin="round" />
-                                    <path d="M34 26 L34 50" stroke="#1D4ED8" stroke-width="1.5" stroke-dasharray="2 2" />
-                                </svg>
-                            </div>
-                            <div class="body-shape-title">🏃 修长轻盈·显瘦型</div>
-                            <div class="body-shape-desc">四肢修长 · 全身去脂 · 穿衣显瘦</div>
-                            <div class="body-shape-specs">缺口500k · 慢碳40% · 全身循环</div>
-                        </div>
-
-                        <!-- 目标 3: 运动力量/健美微肌型 -->
-                        <div class="body-shape-card" id="shape-card-muscle" onclick="selectVisualGoalShape('muscle')">
-                            <span class="body-shape-selected-tag">已选目标</span>
-                            <div class="body-shape-svg-box">
-                                <svg viewBox="0 0 68 96" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <circle cx="34" cy="13" r="8" fill="#F59E0B" />
-                                    <path d="M23 23 C27 26 41 26 45 23 C53 28 55 33 55 38 C47 40 44 44 43 51 C46 59 50 67 49 76 C48 85 46 94 41 94 C38 94 36 78 34 65 C32 78 30 94 27 94 C22 94 20 85 19 76 C18 67 22 59 25 51 C24 44 21 40 13 38 C13 33 15 28 23 23 Z" fill="#FEF3C7" stroke="#F59E0B" stroke-width="2" stroke-linejoin="round" />
-                                    <path d="M26 33 Q34 35 42 33" stroke="#B45309" stroke-width="1.5" />
-                                    <circle cx="30" cy="42" r="1.5" fill="#B45309" />
-                                    <circle cx="38" cy="42" r="1.5" fill="#B45309" />
-                                    <circle cx="30" cy="48" r="1.5" fill="#B45309" />
-                                    <circle cx="38" cy="48" r="1.5" fill="#B45309" />
-                                </svg>
-                            </div>
-                            <div class="body-shape-title">🏋️ 紧致力量·健美型</div>
-                            <div class="body-shape-desc">腹肌线条 · 直角肩背 · 充满活力</div>
-                            <div class="body-shape-specs">高蛋白35% · 渐进抗阻 · 提升代谢</div>
-                        </div>
-
-                        <!-- 目标 4: 健康平稳/大基数脱脂型 -->
-                        <div class="body-shape-card" id="shape-card-tight" onclick="selectVisualGoalShape('tight')">
-                            <span class="body-shape-selected-tag">已选目标</span>
-                            <div class="body-shape-svg-box">
-                                <svg viewBox="0 0 68 96" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <circle cx="34" cy="14" r="8" fill="#8B5CF6" />
-                                    <path d="M26 23 C29 25 39 25 42 23 C49 28 51 34 50 42 C45 46 44 54 44 60 C46 67 47 76 46 84 C45 92 43 94 39 94 C37 94 35 80 34 68 C33 80 31 94 29 94 C25 94 23 92 22 84 C21 76 22 67 24 60 C24 54 23 46 18 42 C17 34 19 28 26 23 Z" fill="#F3E8FF" stroke="#8B5CF6" stroke-width="2" stroke-linejoin="round" />
-                                    <path d="M34 32 L34 50 M30 45 L34 50 L38 45" stroke="#6D28D9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                                </svg>
-                            </div>
-                            <div class="body-shape-title">📉 稳健大基数脱脂</div>
-                            <div class="body-shape-desc">保护关节 · 击退水钠 · 稳扎稳打</div>
-                            <div class="body-shape-specs">缺口550k · 低冲击有氧 · 稳降体脂</div>
-                        </div>
+                    <div class="body-shape-selector-grid" id="modal-body-shapes-grid">
+                        <!-- JS 根据当前性别动态渲染 4 款专属身材卡片 -->
                     </div>
                 </div>
 

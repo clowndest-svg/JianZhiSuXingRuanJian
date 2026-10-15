@@ -1368,6 +1368,33 @@ body {
     font-weight: 700;
 }
 
+/* 性别切换迷你胶囊 */
+.gender-mini-tabs {
+    display: flex;
+    background: #F1F5F9;
+    border-radius: var(--radius-full);
+    padding: 2px;
+    gap: 2px;
+}
+
+.gender-mini-btn {
+    border: none;
+    background: transparent;
+    padding: 4px 10px;
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.gender-mini-btn.active {
+    background: #FFFFFF;
+    color: var(--primary-deep);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
 /* ================= 周期身材照更新与形体蜕变相册 ================= */
 .cycle-badge-header {
     display: flex;

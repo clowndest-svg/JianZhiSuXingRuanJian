@@ -145,6 +145,7 @@ window.addEventListener("DOMContentLoaded", () => {
     setupTimer();
     renderShoppingList();
     renderRecipePlan(state.selectedPlan || "A");
+    switchShapeGender(state.profile.gender || "female", false);
 });
 
 async function initAuthAndData() {
@@ -280,6 +281,7 @@ function applyDashboardData(data) {
     renderDashboard();
     renderMealDiary();
     renderWaterCups();
+    switchShapeGender(data.profile.gender || "female", false);
     renderWorkoutExercises();
     renderTargetPhysiqueCard();
     renderCyclePhotos();
@@ -324,8 +326,22 @@ async function syncRemoteCharts() {
 }
 
 function getGoalName(type) {
-    const map = { tone: "留肌塑形", loss: "减脂脱脂", muscle: "增肌充能", tight: "体态马甲线" };
-    return map[type] || "塑形";
+    if (typeof BODY_SHAPES_DATA !== "undefined") {
+        if (BODY_SHAPES_DATA.female && BODY_SHAPES_DATA.female[type]) {
+            return BODY_SHAPES_DATA.female[type].title;
+        }
+        if (BODY_SHAPES_DATA.male && BODY_SHAPES_DATA.male[type]) {
+            return BODY_SHAPES_DATA.male[type].title;
+        }
+    }
+    const map = {
+        tone: "留肌塑形", loss: "减脂脱脂", muscle: "增肌充能", tight: "体态马甲线",
+        female_hourglass: "S型沙漏马甲线", female_lean: "修长轻盈显瘦",
+        female_athletic: "紧致力量健美", female_steady: "稳健脱脂保护",
+        male_v_taper: "倒三角铠甲腹肌", male_lean: "修长衣架子显瘦",
+        male_muscular: "饱满力量硬核", male_steady: "啤酒肚专项击退"
+    };
+    return map[type] || "减脂塑形";
 }
 
 // ==========================================
@@ -1103,26 +1119,239 @@ function logoutUser() {
 }
 
 // ==========================================
-// 视觉形态选择与卡片联动
+// 8大类男女专属身材形态数据库与生动矢量图示 (严谨科学细分)
 // ==========================================
-function selectVisualGoalShape(type, showToast = true) {
-    document.querySelectorAll(".body-shape-card").forEach(c => c.classList.remove("selected"));
-    const card = document.getElementById("shape-card-" + type);
-    if (card) card.classList.add("selected");
-    state.profile.goalType = type;
+const BODY_SHAPES_DATA = {
+    female: {
+        female_hourglass: {
+            title: "⏳ S型沙漏 · 马甲线",
+            subTitle: "腰臀比0.7 · 紧致马甲线",
+            desc: "追求纤细腰腹、饱满翘臀、挺拔直背。聚焦腰臀比与马甲线刻画。",
+            specs: "缺口420k · 慢碳40% · 臀腹抗阻",
+            dietSpec: "高蛋白30% · 晚餐低碳轻负 · 排钠利水",
+            workoutSpec: "臀桥深蹲 + 核心卷腹抗阻 + 提膝心率",
+            svg: `<svg viewBox="0 0 68 96" fill="none" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="34" cy="14" r="8" fill="#10B981" />
+                <path d="M26 23 C28 26 40 26 42 23 C48 27 50 31 51 36 C45 37 42 44 41 50 C44 58 48 64 47 72 C46 80 44 94 40 94 C38 94 36 80 34 68 C32 80 30 94 28 94 C24 94 22 80 21 72 C20 64 24 58 27 50 C26 44 23 37 17 36 C18 31 20 27 26 23 Z" fill="#D1FAE5" stroke="#10B981" stroke-width="2" stroke-linejoin="round" />
+                <path d="M34 32 L34 46" stroke="#047857" stroke-width="1.5" stroke-linecap="round" />
+                <path d="M30 40 Q34 42 38 40" stroke="#047857" stroke-width="1.5" stroke-linecap="round" />
+                <path d="M28 48 Q34 50 40 48" stroke="#047857" stroke-width="1.5" stroke-linecap="round" />
+            </svg>`
+        },
+        female_lean: {
+            title: "🏃 修长轻盈 · 纤细显瘦",
+            subTitle: "四肢修长 · 消除泡芙",
+            desc: "追求全身去脂、修长无水肿线条、穿衣显瘦，消除假胯宽与泡芙感。",
+            specs: "缺口500k · 慢碳45% · 芭蕾普拉提",
+            dietSpec: "高纤维高钾蔬菜 · 排水肿 · 戒反式脂肪",
+            workoutSpec: "低冲击全身循环 + 30分钟超慢跑刷脂",
+            svg: `<svg viewBox="0 0 68 96" fill="none" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="34" cy="12" r="7.5" fill="#3B82F6" />
+                <path d="M28 21 C30 23 38 23 40 21 C45 25 46 29 46 34 C43 40 40 46 39 52 C41 60 43 68 42 76 C41 84 39 94 36 94 C35 94 34 82 34 68 C34 82 33 94 32 94 C29 94 27 84 26 76 C25 68 27 60 29 52 C28 46 25 40 22 34 C22 29 23 25 28 21 Z" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2" stroke-linejoin="round" />
+                <path d="M34 26 L34 50" stroke="#1D4ED8" stroke-width="1.5" stroke-dasharray="2 2" />
+            </svg>`
+        },
+        female_athletic: {
+            title: "🏋️ 紧致力量 · 健美微肌",
+            subTitle: "清晰腹肌 · 直角肩背",
+            desc: "追求饱满肩颈直角肩、紧实蜜桃臀、腹肌分块，提高骨骼肌率与燃脂代谢。",
+            specs: "高蛋白35% · 渐进负荷 · 紧致饱满",
+            dietSpec: "优质蛋白 1.6-1.8g/kg · 练后黄金补给",
+            workoutSpec: "负重深蹲硬拉 + 离心控制 + 悬垂举腿",
+            svg: `<svg viewBox="0 0 68 96" fill="none" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="34" cy="13" r="8" fill="#F59E0B" />
+                <path d="M23 23 C27 26 41 26 45 23 C53 28 55 33 55 38 C47 40 44 44 43 51 C46 59 50 67 49 76 C48 85 46 94 41 94 C38 94 36 78 34 65 C32 78 30 94 27 94 C22 94 20 85 19 76 C18 67 22 59 25 51 C24 44 21 40 13 38 C13 33 15 28 23 23 Z" fill="#FEF3C7" stroke="#F59E0B" stroke-width="2" stroke-linejoin="round" />
+                <path d="M26 33 Q34 35 42 33" stroke="#B45309" stroke-width="1.5" />
+                <circle cx="30" cy="42" r="1.5" fill="#B45309" />
+                <circle cx="38" cy="42" r="1.5" fill="#B45309" />
+                <circle cx="30" cy="48" r="1.5" fill="#B45309" />
+                <circle cx="38" cy="48" r="1.5" fill="#B45309" />
+            </svg>`
+        },
+        female_steady: {
+            title: "📉 稳健脱脂 · 关节保护",
+            subTitle: "保护膝盖 · 稳降围度",
+            desc: "追求大基数健康平稳脱脂，避免剧烈跳跃磨损半月板，重点击退内脏脂肪与水钠。",
+            specs: "缺口550k · 零跳跃低冲击 · 稳扎稳打",
+            dietSpec: "温水排钠 2000ml · 断绝深加工零食",
+            workoutSpec: "椅子半蹲 + 靠墙推胸 + 30分钟快步走",
+            svg: `<svg viewBox="0 0 68 96" fill="none" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="34" cy="14" r="8" fill="#8B5CF6" />
+                <path d="M26 23 C29 25 39 25 42 23 C49 28 51 34 50 42 C45 46 44 54 44 60 C46 67 47 76 46 84 C45 92 43 94 39 94 C37 94 35 80 34 68 C33 80 31 94 29 94 C25 94 23 92 22 84 C21 76 22 67 24 60 C24 54 23 46 18 42 C17 34 19 28 26 23 Z" fill="#F3E8FF" stroke="#8B5CF6" stroke-width="2" stroke-linejoin="round" />
+                <path d="M34 32 L34 50 M30 45 L34 50 L38 45" stroke="#6D28D9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>`
+        }
+    },
+    male: {
+        male_v_taper: {
+            title: "👑 经典倒三角 · 铠甲腹肌",
+            subTitle: "宽肩阔背 · 铠甲人鱼线",
+            desc: "追求霸气倒三角(V-Taper)、清晰六块腹肌与人鱼线，低体脂(10-12%)竞技感。",
+            specs: "缺口420k · 蛋白35% · 阔背肩腹",
+            dietSpec: "优质蛋白2.0g/kg · 碳水循环 · 优质坚果油",
+            workoutSpec: "高位下拉/引体 + 侧平举 + 悬垂举腿卷腹",
+            svg: `<svg viewBox="0 0 68 96" fill="none" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="34" cy="13" r="8" fill="#0EA5E9" />
+                <path d="M12 25 C16 23 52 23 56 25 C58 31 56 38 52 42 C48 44 42 46 40 54 C39 62 44 68 45 76 C46 84 43 94 38 94 C36 94 35 82 34 70 C33 82 32 94 30 94 C25 94 22 84 23 76 C24 68 29 62 28 54 C26 46 20 44 16 42 C12 38 10 31 12 25 Z" fill="#E0F2FE" stroke="#0EA5E9" stroke-width="2" stroke-linejoin="round" />
+                <path d="M24 33 Q34 36 44 33 M34 26 L34 39" stroke="#0284C7" stroke-width="1.6" stroke-linecap="round" />
+                <rect x="29" y="41" width="4.5" height="4" rx="1" fill="#0284C7" />
+                <rect x="34.5" y="41" width="4.5" height="4" rx="1" fill="#0284C7" />
+                <rect x="29.5" y="46.5" width="4" height="4" rx="1" fill="#0284C7" />
+                <rect x="34.5" y="46.5" width="4" height="4" rx="1" fill="#0284C7" />
+                <rect x="30" y="52" width="3.5" height="3.5" rx="1" fill="#0284C7" />
+                <rect x="34.5" y="52" width="3.5" height="3.5" rx="1" fill="#0284C7" />
+            </svg>`
+        },
+        male_lean: {
+            title: "👔 修长衣架子 · 少年显瘦",
+            subTitle: "挺拔身姿 · 穿衣有型",
+            desc: "追求无肚腩啤酒肚、干净平坦腹部、挺拔肩颈，穿衬衫西装如衣架子(体脂12-14%)。",
+            specs: "微缺口350k · 慢碳45% · 徒手健身",
+            dietSpec: "高蛋白均衡 · 绝不吃夜宵大排档 · 清淡过水",
+            workoutSpec: "俯卧撑多变式 + 核心平板 + 坡度快走刷脂",
+            svg: `<svg viewBox="0 0 68 96" fill="none" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="34" cy="12" r="7.5" fill="#6366F1" />
+                <path d="M19 24 C23 23 45 23 49 24 C52 28 51 34 48 38 C45 42 41 46 40 54 C39 62 42 70 42 78 C42 86 40 94 37 94 C35 94 34 82 34 68 C34 82 33 94 31 94 C28 94 26 86 26 78 C26 70 29 62 28 54 C27 46 23 42 20 38 C17 34 16 28 19 24 Z" fill="#EEF2FF" stroke="#6366F1" stroke-width="2" stroke-linejoin="round" />
+                <path d="M34 25 L34 49" stroke="#4F46E5" stroke-width="1.5" stroke-dasharray="3 2" />
+                <path d="M26 32 Q34 34 42 32" stroke="#4F46E5" stroke-width="1.5" stroke-linecap="round" />
+            </svg>`
+        },
+        male_muscular: {
+            title: "💪 饱满力量 · 硬核猛男",
+            subTitle: "厚实胸背 · 粗壮手臂",
+            desc: "追求厚实胸大肌、粗壮麒麟臂(肱二三头肌)、强壮大腿与厚实斜方肌，荷尔蒙爆棚。",
+            specs: "盈余+300k · 高蛋白35% · 大重量抗阻",
+            dietSpec: "高蛋白2.2g/kg · 全天5餐多餐 · 充足肌糖原",
+            workoutSpec: "杠铃卧推 + 杠铃深蹲 + 罗马尼亚硬拉复合动作",
+            svg: `<svg viewBox="0 0 68 96" fill="none" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="34" cy="13" r="8" fill="#F97316" />
+                <path d="M9 25 C15 22 53 22 59 25 C63 30 62 38 56 42 C51 45 45 46 43 54 C42 62 46 68 47 77 C48 86 45 94 39 94 C37 94 36 80 34 66 C32 80 31 94 29 94 C23 94 20 86 21 77 C22 68 26 62 25 54 C23 46 17 45 12 42 C6 38 5 30 9 25 Z" fill="#FFEDD5" stroke="#F97316" stroke-width="2" stroke-linejoin="round" />
+                <path d="M22 34 C25 38 33 39 34 35 C35 39 43 38 46 34" stroke="#C2410C" stroke-width="1.8" stroke-linecap="round" />
+                <path d="M34 26 L34 50" stroke="#C2410C" stroke-width="1.8" />
+                <path d="M8 31 Q6 36 11 39 M60 31 Q62 36 57 39" stroke="#C2410C" stroke-width="1.8" stroke-linecap="round" />
+            </svg>`
+        },
+        male_steady: {
+            title: "📉 啤酒肚专项 · 减内脏脂",
+            subTitle: "消除脂肪肝 · 保护膝关节",
+            desc: "专项击退向心性内脏大肚子、降血脂消脂肪肝，平稳保护半月板，重塑健康体态。",
+            specs: "缺口550k · 严格断酒 · 零膝盖冲击",
+            dietSpec: "断绝啤酒与高油烧烤 · 清蒸鱼虾 · 2500ml水",
+            workoutSpec: "动感单车/椭圆机刷脂 + 核心转体抗扭 + 椅子深蹲",
+            svg: `<svg viewBox="0 0 68 96" fill="none" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="34" cy="14" r="8" fill="#14B8A6" />
+                <path d="M16 25 C20 23 48 23 52 25 C55 30 54 36 51 42 C48 47 44 54 44 62 C45 71 47 80 45 88 C44 94 41 94 38 94 C36 94 35 82 34 68 C33 82 32 94 30 94 C27 94 24 94 23 88 C21 80 23 71 24 62 C24 54 20 47 17 42 C14 36 13 30 16 25 Z" fill="#CCFBF1" stroke="#14B8A6" stroke-width="2" stroke-linejoin="round" />
+                <path d="M34 34 L34 52 M29 46 L34 52 L39 46" stroke="#0F766E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>`
+        }
+    }
+};
 
-    renderWorkoutExercises();
+// 获取身材数据对象 (支持老版本 goalType 映射)
+function getShapeData(gender, goalType) {
+    const g = (gender === "male") ? "male" : "female";
+    const shapes = BODY_SHAPES_DATA[g];
+    if (shapes[goalType]) return { gender: g, key: goalType, data: shapes[goalType] };
+
+    const legacyMap = {
+        female: { tone: "female_hourglass", loss: "female_lean", muscle: "female_athletic", tight: "female_steady" },
+        male: { tone: "male_v_taper", loss: "male_lean", muscle: "male_muscular", tight: "male_steady" }
+    };
+    const mappedKey = (legacyMap[g] && legacyMap[g][goalType]) || Object.keys(shapes)[0];
+    return { gender: g, key: mappedKey, data: shapes[mappedKey] };
+}
+
+// 动态渲染身材卡片至指定网格容器
+function renderBodyShapeCards(containerId, gender, activeKey) {
+    const box = document.getElementById(containerId);
+    if (!box) return;
+    const g = (gender === "male") ? "male" : "female";
+    const shapes = BODY_SHAPES_DATA[g];
+    let html = "";
+    for (const [key, item] of Object.entries(shapes)) {
+        const isSelected = (key === activeKey);
+        html += `
+            <div class="body-shape-card ${isSelected ? 'selected' : ''}" id="shape-card-${key}" onclick="selectVisualGoalShape('${key}')">
+                <span class="body-shape-selected-tag">已选目标</span>
+                <div class="body-shape-svg-box">
+                    ${item.svg}
+                </div>
+                <div class="body-shape-title">${item.title}</div>
+                <div class="body-shape-desc">${item.desc}</div>
+                <div class="body-shape-specs">${item.specs}</div>
+            </div>
+        `;
+    }
+    box.innerHTML = html;
+}
+
+// 切换身材性别展示 (男女分流)
+function switchShapeGender(gender, updateProfile = true) {
+    const g = (gender === "male") ? "male" : "female";
+    if (updateProfile) {
+        state.profile.gender = g;
+        const profGenderSelect = document.getElementById("prof-gender");
+        if (profGenderSelect) profGenderSelect.value = g;
+    }
+
+    const tabF = document.getElementById("tab-gender-female");
+    const tabM = document.getElementById("tab-gender-male");
+    const modF = document.getElementById("modal-tab-female");
+    const modM = document.getElementById("modal-tab-male");
+
+    if (g === "male") {
+        if (tabM) tabM.classList.add("active");
+        if (tabF) tabF.classList.remove("active");
+        if (modM) modM.classList.add("active");
+        if (modF) modF.classList.remove("active");
+    } else {
+        if (tabF) tabF.classList.add("active");
+        if (tabM) tabM.classList.remove("active");
+        if (modF) modF.classList.add("active");
+        if (modM) modM.classList.remove("active");
+    }
+
+    const currentInfo = getShapeData(g, state.profile.goalType);
+    state.profile.goalType = currentInfo.key;
+
+    renderBodyShapeCards("main-body-shapes-grid", g, currentInfo.key);
+    renderBodyShapeCards("modal-body-shapes-grid", g, currentInfo.key);
+
     renderTargetPhysiqueCard();
+    renderWorkoutExercises();
+}
 
+function onProfileGenderChanged(gender) {
+    const profGenderSelect = document.getElementById("prof-gender");
+    if (profGenderSelect) profGenderSelect.value = gender;
+    switchShapeGender(gender, true);
+    if (state.token) {
+        saveProfileSilent();
+    }
+}
+
+// 视觉身材形态卡片点击选中
+function selectVisualGoalShape(key, showToast = true) {
+    let g = state.profile.gender || "female";
+    if (BODY_SHAPES_DATA.male[key]) {
+        g = "male";
+    } else if (BODY_SHAPES_DATA.female[key]) {
+        g = "female";
+    }
+
+    state.profile.gender = g;
+    state.profile.goalType = key;
+
+    switchShapeGender(g, false);
+
+    const info = getShapeData(g, key);
     if (showToast) {
-        const shapeNames = {
-            tone: "⏳ S型沙漏·马甲线紧致",
-            loss: "🏃 修长轻盈·纤细显瘦",
-            muscle: "🏋️ 紧致力量·健美微肌",
-            tight: "📉 稳健大基数脱脂"
-        };
-        callNativeToast(`已选身材：【${shapeNames[type] || '个性塑形'}】，系统已重新定制规划！`);
+        callNativeToast(`已选身材：【${info.data.title}】，系统已更新代谢方案与训练！`);
         callNativeVibrate(50);
+    }
+
+    if (state.token) {
+        saveProfileSilent();
     }
 }
 
@@ -1132,7 +1361,9 @@ function selectGoalType(type) {
 
 function openProfileModal() {
     const p = state.profile;
-    document.getElementById("prof-gender").value = p.gender || "female";
+    const g = p.gender || "female";
+    const profGenderSelect = document.getElementById("prof-gender");
+    if (profGenderSelect) profGenderSelect.value = g;
     document.getElementById("prof-age").value = p.age || 26;
     document.getElementById("prof-height").value = p.height || 165;
     document.getElementById("prof-weight-jin").value = p.weightJin || 140;
@@ -1142,7 +1373,7 @@ function openProfileModal() {
     const diningEl = document.getElementById("prof-dining-mode");
     if (diningEl) diningEl.value = state.diningMode || p.diningMode || "takeout";
 
-    selectVisualGoalShape(p.goalType || "tone", false);
+    switchShapeGender(g, false);
     document.getElementById("profile-modal").classList.add("show");
 }
 
@@ -1180,6 +1411,34 @@ async function saveCustomProfile() {
     } catch (e) {
         closeProfileModal();
         callNativeToast("方案已更新！");
+    }
+}
+
+async function saveProfileSilent() {
+    if (!state.token) return;
+    try {
+        const p = state.profile;
+        await fetch(`${API_BASE}/api/profile/update`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${state.token}`
+            },
+            body: JSON.stringify({
+                gender: p.gender,
+                age: p.age,
+                height: p.height,
+                weight_jin: p.weightJin,
+                target_weight_jin: p.targetWeightJin,
+                goal_type: p.goalType,
+                dining_mode: p.diningMode,
+                scene: p.scene
+            })
+        });
+        await syncRemoteDashboard();
+        await syncRemoteCharts();
+    } catch(e) {
+        console.warn("Silent profile sync error", e);
     }
 }
 
@@ -1237,118 +1496,142 @@ function fallbackCopy(text) {
     callNativeVibrate(50);
 }
 
-// 目标身材预览卡片
+// 目标身材预览卡片 (男女分流 + 8大形态精准对应)
 function renderTargetPhysiqueCard() {
     const card = document.getElementById("target-physique-summary-card");
     if (!card) return;
 
-    const goal = state.profile.goalType || "tone";
-    const shapeData = {
-        tone: {
-            title: "⏳ S型沙漏 / 马甲线紧致",
-            desc: "追求纤细腰腹、紧翘臀线、挺拔直背。专注腰臀比与马甲线刻画。",
-            dietSpec: "每日目标约 " + (state.calculated.restCal || 1400) + " - " + (state.calculated.workoutCal || 1550) + " kcal · 蛋白质 30% · 晚餐低碳轻负",
-            workoutSpec: "20分钟臀桥深蹲核心抗阻 + 20分钟有氧提膝 · 锁肌塑形",
-            svg: `<svg viewBox="0 0 68 96" fill="none" width="46" height="66" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="34" cy="14" r="8" fill="#10B981" />
-                <path d="M26 23 C28 26 40 26 42 23 C48 27 50 31 51 36 C45 37 42 44 41 50 C44 58 48 64 47 72 C46 80 44 94 40 94 C38 94 36 80 34 68 C32 80 30 94 28 94 C24 94 22 80 21 72 C20 64 24 58 27 50 C26 44 23 37 17 36 C18 31 20 27 26 23 Z" fill="#D1FAE5" stroke="#10B981" stroke-width="2" stroke-linejoin="round" />
-            </svg>`
-        },
-        loss: {
-            title: "🏃 修长轻盈 / 纤细显瘦",
-            desc: "追求全身去脂、修长四肢线条、轻快体感、穿衣显瘦，消除泡芙脂肪。",
-            dietSpec: "拉大缺口至 500 kcal · 复合慢碳 40% · 控油控盐防储水",
-            workoutSpec: "全身波比跳/提膝循环 + 30分钟超慢跑 · 高频燃脂心率",
-            svg: `<svg viewBox="0 0 68 96" fill="none" width="46" height="66" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="34" cy="12" r="7.5" fill="#3B82F6" />
-                <path d="M28 21 C30 23 38 23 40 21 C45 25 46 29 46 34 C43 40 40 46 39 52 C41 60 43 68 42 76 C41 84 39 94 36 94 C35 94 34 82 34 68 C34 82 33 94 32 94 C29 94 27 84 26 76 C25 68 27 60 29 52 C28 46 25 40 22 34 C22 29 23 25 28 21 Z" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2" stroke-linejoin="round" />
-            </svg>`
-        },
-        muscle: {
-            title: "🏋️ 紧致力量 / 健美微肌",
-            desc: "追求倒三角背部线条、清晰腹肌块、挺拔肩颈与紧实肌肉，提高骨骼肌率与代谢。",
-            dietSpec: "蛋白质提升至 35% (约 1.8g/kg) · 练后30分钟黄金补给",
-            workoutSpec: "渐进抗阻力量训练 + 离心收缩控制 + 核心腹部力竭组",
-            svg: `<svg viewBox="0 0 68 96" fill="none" width="46" height="66" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="34" cy="13" r="8" fill="#F59E0B" />
-                <path d="M23 23 C27 26 41 26 45 23 C53 28 55 33 55 38 C47 40 44 44 43 51 C46 59 50 67 49 76 C48 85 46 94 41 94 C38 94 36 78 34 65 C32 78 30 94 27 94 C22 94 20 85 19 76 C18 67 22 59 25 51 C24 44 21 40 13 38 C13 33 15 28 23 23 Z" fill="#FEF3C7" stroke="#F59E0B" stroke-width="2" stroke-linejoin="round" />
-            </svg>`
-        },
-        tight: {
-            title: "📉 稳健大基数脱脂 / 关节保护",
-            desc: "追求健康平稳脱脂，避免剧烈蹦跳损伤膝关节，重点击退内脏脂肪与水钠水肿。",
-            dietSpec: "缺口稳健 550 kcal · 每日饮水 2000ml 利尿排钠 · 断绝深加工零食",
-            workoutSpec: "低冲击椅子深蹲 + 靠墙静蹲 + 30分钟平地快走刷脂",
-            svg: `<svg viewBox="0 0 68 96" fill="none" width="46" height="66" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="34" cy="14" r="8" fill="#8B5CF6" />
-                <path d="M26 23 C29 25 39 25 42 23 C49 28 51 34 50 42 C45 46 44 54 44 60 C46 67 47 76 46 84 C45 92 43 94 39 94 C37 94 35 80 34 68 C33 80 31 94 29 94 C25 94 23 92 22 84 C21 76 22 67 24 60 C24 54 23 46 18 42 C17 34 19 28 26 23 Z" fill="#F3E8FF" stroke="#8B5CF6" stroke-width="2" stroke-linejoin="round" />
-            </svg>`
-        }
-    };
+    const info = getShapeData(state.profile.gender, state.profile.goalType);
+    const cur = info.data;
+    const genderTag = (info.gender === "male") ? "👨 男士专属形体" : "👩 女士专属形体";
 
-    const cur = shapeData[goal] || shapeData.tone;
     card.innerHTML = `
-        <div style="flex-shrink: 0; background: #FFFFFF; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px; display: flex; align-items: center; justify-content: center;">
+        <div style="flex-shrink: 0; width: 66px; height: 84px; background: #FFFFFF; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
             ${cur.svg}
         </div>
         <div style="flex: 1;">
-            <div style="font-size: 13.5px; font-weight: 800; color: var(--text-main); margin-bottom: 2px;">${cur.title}</div>
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
+                <span style="font-size: 13.5px; font-weight: 800; color: var(--text-main);">${cur.title}</span>
+                <span style="font-size: 10px; background: rgba(16,185,129,0.12); color: #047857; padding: 1px 6px; border-radius: 99px; font-weight: 700;">${genderTag}</span>
+            </div>
             <div style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin-bottom: 4px;">${cur.desc}</div>
-            <div style="font-size: 10.5px; color: var(--primary-dark); font-weight: 700;">🥗 饮食：${cur.dietSpec}</div>
-            <div style="font-size: 10.5px; color: #2563EB; font-weight: 700;">🏋️ 训练：${cur.workoutSpec}</div>
+            <div style="font-size: 10.5px; color: var(--primary-dark); font-weight: 700; margin-bottom: 2px;">🥗 饮食重点：${cur.dietSpec}</div>
+            <div style="font-size: 10.5px; color: #2563EB; font-weight: 700;">🏋️ 训练专攻：${cur.workoutSpec}</div>
         </div>
     `;
 }
 
-// 动态生成动作库
+// 动态生成动作库 (男女分流 8款针对性训练库)
 function renderWorkoutExercises() {
     const container = document.getElementById("workout-exercises-card");
     const badge = document.getElementById("workout-plan-badge");
     const callout = document.getElementById("workout-summary-callout");
     if (!container) return;
 
-    const goal = state.profile.goalType;
+    const info = getShapeData(state.profile.gender, state.profile.goalType);
+    const key = info.key;
+
+    let planTitle = "";
+    let calloutHtml = "";
     let list = [];
 
-    if (goal === "loss") {
-        if (badge) badge.innerText = "🏃 大基数高效脱脂计划";
-        if (callout) callout.innerHTML = "<strong>脱脂建议：</strong> 低冲击核心燃脂 + 30分钟快走刷脂，保护下肢膝关节，稳步消耗多余脂肪！";
-        list = [
-            { name: "1. 椅子辅助半蹲 (Chair Squats)", reps: "15次 × 3组", tip: "触椅即起，膝盖不内扣，大腿发力，保护膝关节并高效消耗能量。" },
-            { name: "2. 站姿对角提膝 (Knee to Elbow)", reps: "20次 × 3组", tip: "提膝触肘核心收紧，低冲击零跳跃，平稳刺激腹部代谢。" },
-            { name: "3. 靠墙推胸俯卧撑 (Wall Push-ups)", reps: "15次 × 3组", tip: "双手推墙收紧手臂与肩背，唤醒上肢肌力。" },
-            { name: "4. 30分钟超慢跑/快走", reps: "持续 30分钟", tip: "保持微喘可说话节奏，燃脂效率最高，避免皮质醇上升。" }
-        ];
-    } else if (goal === "muscle") {
-        if (badge) badge.innerText = "💪 增肌增重充能计划";
-        if (callout) callout.innerHTML = "<strong>增肌建议：</strong> 增加抗阻负重与每组力竭度，练后补充充足蛋白质与慢碳水！";
-        list = [
-            { name: "1. 负重/深蹲跳 (Weighted Squats)", reps: "12次 × 4组", tip: "蹲至大腿低于水平面，臀腿大肌群全负荷收缩，强力刺激肌肥大。" },
-            { name: "2. 标准俯卧撑 / 窄距推胸", reps: "12-15次 × 4组", tip: "胸口贴地推起时胸肌内收顶峰挤压，雕刻饱满胸肌轮廓。" },
-            { name: "3. 弹力带站姿开肘划船 (Band Rows)", reps: "15次 × 4组", tip: "双肘贴近躯干大力后拉，后背肌群顶峰收缩2秒，打造倒三角身材。" },
-            { name: "4. 仰卧卷腹 + 悬垂提膝", reps: "15次 × 4组", tip: "下背贴地卷起上半身，充分挤压腹直肌雕刻块状腹肌。" }
-        ];
-    } else if (goal === "tight") {
-        if (badge) badge.innerText = "🧘 紧致体态与马甲线计划";
-        if (callout) callout.innerHTML = "<strong>体态建议：</strong> 强化腹横肌与骨盆稳定肌群，告别小肚子前突与圆肩驼背，雕刻薄背马甲线！";
-        list = [
-            { name: "1. 死虫子腹横肌抗旋 (Dead Bug)", reps: "16次 × 3组", tip: "腰部死死贴地，对角线手脚伸展，内收腹横肌，平坦小腹。" },
-            { name: "2. 侧向支撑提膝 (Side Plank Knee)", reps: "12次 × 3组", tip: "骨盆中立抬起，收紧侧腹人鱼线，紧致腰部两侧线条。" },
-            { name: "3. 蚌式开合与单腿臀桥", reps: "15次 × 3组", tip: "激活臀中肌，矫正骨盆前倾与假胯宽，拉长双腿比例。" },
-            { name: "4. 靠墙 W-Y 肩胛滑动", reps: "15次 × 3组", tip: "后脑、肩背贴墙上推形成Y字，打造气质天鹅颈。" }
-        ];
-    } else {
-        if (badge) badge.innerText = "🏋️ 留肌塑形黄金计划";
-        if (callout) callout.innerHTML = "<strong>结构建议：</strong> 20分钟四大抗阻核心动作 ➔ 25分钟快走刷脂有氧。先抗阻消耗糖原再有氧，紧致线条效率翻倍！";
-        list = [
-            { name: "1. 自重深蹲 (Squats)", reps: "15次 × 3组", tip: "双脚比肩略宽，臀后下坐大腿平行，强化臀腿大肌群拉升全天静息代谢。" },
-            { name: "2. 仰卧臀桥 (Glute Bridge)", reps: "20次 × 3组", tip: "脚跟踏地臀部顶起至一条线，顶峰收缩2秒，紧致臀肌改善体态。" },
-            { name: "3. 跪姿俯卧撑 (Kneeling Push-ups)", reps: "10-12次 × 3组", tip: "收紧腹部核心屈肘推起，雕刻胸肩线，收紧手臂拜拜肉。" },
-            { name: "4. 弹力带坐姿划船 (Band Rows)", reps: "15次 × 3组", tip: "双腿踩住弹力带，挺胸沉肩双肘后拉收紧后背，改善圆肩驼背。" }
-        ];
+    switch(key) {
+        // 女性专属动作库
+        case "female_hourglass":
+            planTitle = "⏳ S型沙漏 · 核心马甲线与翘臀雕刻";
+            calloutHtml = "<strong>形态专攻：</strong> 激活臀大肌与臀中肌上部，强化腹横肌收紧内脏腰围，打造0.7极致腰臀比！";
+            list = [
+                { name: "1. 仰卧臀桥顶峰收缩 (Glute Bridge)", reps: "20次 × 4组", tip: "脚后跟踏地顶起，顶峰夹紧臀大肌2秒，雕刻饱满翘臀线条。" },
+                { name: "2. 死虫子腹横肌抗旋 (Dead Bug)", reps: "16次 × 3组", tip: "腰椎紧贴地面，对角线手脚延伸，内收腹横肌，强力紧致下腹围度。" },
+                { name: "3. 弹力带侧向行走与蚌式开合", reps: "15次 × 3组", tip: "膝盖上方套弹力带，激活臀中肌，消除假胯宽并拉长腿部线条。" },
+                { name: "4. 跪姿超人式核心支撑", reps: "15次 × 3组", tip: "对角伸展维持躯干稳定，收紧后侧链条与下背部，改善骨盆前倾。" }
+            ];
+            break;
+
+        case "female_lean":
+            planTitle = "🏃 修长轻盈 · 芭蕾普拉提去水肿显瘦";
+            calloutHtml = "<strong>形态专攻：</strong> 肌肉离心拉长无水肿，低冲击不粗腿，配合30分钟超慢跑全身高效刷脂！";
+            list = [
+                { name: "1. 芭蕾式宽距深蹲 (Plie Squats)", reps: "20次 × 3组", tip: "脚尖外展45度，直上直下拉长内收肌，紧致大腿内侧线条。" },
+                { name: "2. 站姿直腿后踢与侧抬腿", reps: "20次 × 3组", tip: "轻量高频，收紧臀腿连接处，消除臀下松弛泡芙脂肪。" },
+                { name: "3. 跪姿俯卧撑 / 弹力带推胸", reps: "12次 × 3组", tip: "收紧手臂拜拜肉与副乳，塑造修长紧致的直角肩臂线条。" },
+                { name: "4. 30分钟超慢跑 (Zone2燃脂心率)", reps: "持续 30分钟", tip: "平稳微喘，高频刷脂排水肿，完全保护下肢关节体感轻盈。" }
+            ];
+            break;
+
+        case "female_athletic":
+            planTitle = "🏋️ 紧致力量 · 健美微肌与直角肩背";
+            calloutHtml = "<strong>形态专攻：</strong> 渐进式抗阻复合动作，提升骨骼肌率与静息代谢率，打造紧致直角肩、马甲线分块！";
+            list = [
+                { name: "1. 高脚杯负重深蹲 (Goblet Squats)", reps: "12次 × 4组", tip: "胸前持负重下蹲，全腿及臀大肌高负荷离心刺激，强效拉升代谢。" },
+                { name: "2. 罗马尼亚硬拉 (RDL)", reps: "12次 × 4组", tip: "屈髋微屈膝，感知腘绳肌与臀肌强力受拉，挺拔臀腿线条。" },
+                { name: "3. 仰卧卷腹 + 悬垂提膝", reps: "15次 × 4组", tip: "下背贴地卷起上半身，充分挤压腹直肌雕刻块状腹肌轮廓。" },
+                { name: "4. 弹力带面拉与俯身飞鸟", reps: "15次 × 4组", tip: "强化三角肌后束与上背菱形肌，改善圆肩驼背，立现气质直角肩。" }
+            ];
+            break;
+
+        case "female_steady":
+            planTitle = "📉 稳健脱脂 · 零跳跃低冲击膝盖保护";
+            calloutHtml = "<strong>形态专攻：</strong> 椅子半蹲与零冲击核心动作，100%保护膝关节半月板，大基数平稳脱脂防反弹！";
+            list = [
+                { name: "1. 椅子辅助半蹲 (Chair Squats)", reps: "15次 × 3组", tip: "触椅即起，膝盖不内扣，大腿发力，保护膝关节并高效消耗能量。" },
+                { name: "2. 靠墙推胸俯卧撑 (Wall Push-ups)", reps: "15次 × 3组", tip: "双手推墙收紧手臂与肩背，零重力负担唤醒上肢肌力。" },
+                { name: "3. 站姿对角提膝 (Knee to Elbow)", reps: "20次 × 3组", tip: "提膝触肘核心收紧，低冲击零跳跃，平稳刺激腹部代谢。" },
+                { name: "4. 30分钟平地快步走", reps: "持续 30分钟", tip: "大步摆臂平稳快走，心率稳定在燃脂区间，避免软骨磨损。" }
+            ];
+            break;
+
+        // 男性专属动作库
+        case "male_v_taper":
+            planTitle = "👑 经典倒三角 · 宽肩阔背铠甲腹肌";
+            calloutHtml = "<strong>形态专攻：</strong> 聚焦背阔肌宽度、三角肌中束与下腹人鱼线，以低体脂塑造威猛V-Taper霸气倒三角！";
+            list = [
+                { name: "1. 引体向上 / 弹力带高位下拉", reps: "10-12次 × 4组", tip: "沉肩下拉挤压背阔肌两侧，加宽上半身V-Taper倒三角轮廓。" },
+                { name: "2. 哑铃/水瓶站姿侧平举 (Lateral Raises)", reps: "15次 × 4组", tip: "肘微屈平举至水平，精准轰炸三角肌中束，加宽肩部骨架感。" },
+                { name: "3. 仰卧双腿反向卷腹与剪刀腿", reps: "15次 × 4组", tip: "下腹收紧骨盆后倾，强力刻画下腹铠甲腹肌与前锯肌人鱼线。" },
+                { name: "4. 钻石俯卧撑 + 上斜俯卧撑", reps: "12次 × 3组", tip: "强化胸肌中缝与上胸线条，提升上肢爆发力与饱满轮廓。" }
+            ];
+            break;
+
+        case "male_lean":
+            planTitle = "👔 修长衣架子 · 挺拔肩背穿衣有型";
+            calloutHtml = "<strong>形态专攻：</strong> 消除腰腹部游泳圈，矫正含胸驼背，强化核心抗屈曲，穿衬衫西装如衣架子！";
+            list = [
+                { name: "1. 标准俯卧撑多握距循环", reps: "15次 × 3组", tip: "宽窄距交替，激活胸大肌与核心稳定性，增强上身挺拔感。" },
+                { name: "2. 核心平板支撑转体 (Plank Twist)", reps: "45秒 × 3组", tip: "收紧腹横肌与侧腹斜肌，消除腰部两侧松垮赘肉。" },
+                { name: "3. 靠墙 W-Y 肩胛滑动", reps: "15次 × 3组", tip: "后脑肩胛贴墙滑动，打开胸廓纠正圆肩驼背，拉长颈部线条。" },
+                { name: "4. 25分钟跑步机大坡度快走", reps: "持续 25分钟", tip: "坡度8-10，速度5km/h，高倾角燃脂保护膝盖消平小肚子。" }
+            ];
+            break;
+
+        case "male_muscular":
+            planTitle = "💪 饱满力量 · 厚实胸大肌与粗壮麒麟臂";
+            calloutHtml = "<strong>形态专攻：</strong> 大重量高抗阻复合动作，刺激睾酮分泌与肌纤维肥大，打造澎湃肌肉量！";
+            list = [
+                { name: "1. 负重深蹲 / 爆发力半蹲跳", reps: "10次 × 4组", tip: "深蹲强化臀腿大肌群，拉升全身睾酮与高代谢合成环境。" },
+                { name: "2. 深度离心俯卧撑 / 哑铃卧推", reps: "10-12次 × 4组", tip: "下落3秒缓慢离心，爆发力推起顶峰夹胸，深度撕裂胸肌。" },
+                { name: "3. 俯身单臂哑铃划船 (One-arm Rows)", reps: "12次 × 4组", tip: "背阔肌主导向后提拉，增加背部厚度与倒三角饱满度。" },
+                { name: "4. 窄距俯卧撑 + 椅子臂屈伸", reps: "12-15次 × 4组", tip: "轰炸肱三头肌外侧头，快速充血围度粗壮麒麟臂。" }
+            ];
+            break;
+
+        case "male_steady":
+        default:
+            planTitle = "📉 啤酒肚专项 · 击退内脏脂肪与脂肪肝";
+            calloutHtml = "<strong>形态专攻：</strong> 专项击退向心性腹部脂肪，保护承重膝关节，配合核心转体紧致下腹壁！";
+            list = [
+                { name: "1. 动感单车/椭圆机恒速刷脂", reps: "25-30分钟", tip: "零膝盖落地冲击，高效消耗内脏周围储积甘油三酯。" },
+                { name: "2. 坐姿核心俄罗斯转体 (Russian Twists)", reps: "20次 × 3组", tip: "双脚微抬，躯干左右旋转，收紧内脏肌壁消减腰围。" },
+                { name: "3. 椅子辅助半蹲 (Chair Squats)", reps: "15次 × 3组", tip: "触椅即起保护半月板，维持基础代谢，防止减脂掉肌肉。" },
+                { name: "4. 弹力带站姿水平夹胸", reps: "15次 × 3组", tip: "挺胸沉肩双臂前夹，打开胸廓，改善大肚引发的骨盆前倾。" }
+            ];
+            break;
     }
 
-    let html = `<div style="font-weight: 700; font-size: 13.5px; color: var(--text-main); margin-bottom: 10px;">📋 针对${badge ? badge.innerText : '当前目标'}的动作循环：</div>`;
+    if (badge) badge.innerText = planTitle;
+    if (callout) callout.innerHTML = calloutHtml;
+
+    let html = `<div style="font-weight: 700; font-size: 13.5px; color: var(--text-main); margin-bottom: 10px;">📋 针对【${planTitle}】的动作循环：</div>`;
     list.forEach(item => {
         html += `
             <div class="exercise-card">
