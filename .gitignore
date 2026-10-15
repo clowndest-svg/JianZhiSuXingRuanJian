@@ -17,3 +17,6 @@ __pycache__/
 # 审计沙箱与临时产物
 _audit_sandbox/
 _build.log
+
+# 待推送的提交包（一次性备份，不入库）
+*.bundle
