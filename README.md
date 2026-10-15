@@ -12,13 +12,13 @@ Android WebView 壳 + 单页 H5 + 腾讯云 FastAPI 后端的减脂记录工具�
 | --- | --- |
 | 公网直链 | http://124.220.54.64/qingsu.apk |
 | 二维码 | http://124.220.54.64/qr.svg |
-| 仓库内安装包（本轮重打） | 5,588,679 字节，md5 `da0f54c0fc38da7e9e3209904fbc7494` |
-| 线上当前那份 | 5,554,752 字节，md5 `f1a75da39820dc32c4423c89e1b6e370`（**改动前的包，还没替换**） |
+| 仓库内安装包 | 5,588,679 字节，md5 `da0f54c0fc38da7e9e3209904fbc7494` |
+| 线上当前那份 | 5,588,679 字节，md5 `da0f54c0fc38da7e9e3209904fbc7494`（**与仓库同一个包**） |
 | 下载实测 | 0.33 MB/s，约 16 秒下完（这台服务器带宽就这个水平，别指望"高速"） |
 
 服务器：腾讯云 OpenCloudOS 4C4G，Docker 里的 nginx 容器 `xiaoye-release` 反代到宿主机 `172.17.0.1:8000` 的 uvicorn（`qingsu.service` 守护）。**只有 HTTP 80 端口，没有域名、没有证书。**
 
-> 本轮只改了仓库里的源码与安装包，**线上三样东西都还是旧的**：`/app.js` 是改动前的前端，`/qingsu.apk` 是改动前的包，`server.py` 也没热修——所以公网大屏那个 XSS 在线上此刻仍然可以触发。部署动作见文末。
+> 本轮改动**已于 2026-10-15 23:15 上线**（后端 `server.py`、前端 `web/app.js`、安装包 `web/qingsu.apk` 三样都换了，服务已重启）。上线后从公网重新拉取做了四项独立验收，逐条结果见文末「线上部署」一节。历史脏数据也已在同日清理完毕。
 
 ---
 
@@ -74,7 +74,7 @@ Android WebView 壳 + 单页 H5 + 腾讯云 FastAPI 后端的减脂记录工具�
 | 后端 | `server.py` 约 842 行，FastAPI + SQLite，19 条路由，7 张表（users, profiles, food_logs, weight_logs, workout_logs, water_logs, body_cycles） |
 | 线上静态 | `/` `/app.js` `/style.css` `/qr.svg` `/qingsu.apk` 由服务端从 `/opt/qingsu/web` 读文件返回 |
 
-线上当前三份前端与包都是 v5.0 那版。审计时（本轮改动之前）逐字节比过：`/` 首页、`/app.js`、`/style.css`、`/qr.svg` 与仓库内 assets 完全相同，说明"多端同步"当时是真的。本轮改了 `app.js` 后**尚未部署**，所以现在线上那份 `app.js` 比仓库旧一版。
+本轮上线后再次逐字节比对：线上 `/app.js` md5 `618b697b6331e08fa50a7b34279feae8`、线上 `qingsu.apk` 内 `assets/app.js` 也是同一个 md5，与仓库源码一致。审计当时（改动前）线上三份前端与仓库也逐字节相同，说明"多端同步"这条一直是真的。
 
 ---
 
@@ -111,9 +111,19 @@ node _audit_harness.mjs --mutant    # 同上，改动前那版实测红 21 条
 
 ---
 
-## 线上部署（本轮未执行）
+## 线上部署（已于 2026-10-15 23:15 执行）
 
-代码修完不等于线上修完。按下面顺序做，缺一步就是假上线。**只动 qingsu 服务与 `/opt/qingsu/web` 下两个文件，不碰 nginx 配置，`latest.json` 与 `latest-extensions.json` 那两份既有清单不受影响。**
+下面这套命令本轮已照做并验收通过，留在这里是为了下次能一模一样复现，**顺序不能打乱**。**只动 qingsu 服务与 `/opt/qingsu/web` 下两个文件，不碰 nginx 配置，`latest.json` 与 `latest-extensions.json` 那两份既有清单不受影响。**
+
+### 坑：Git Bash 下 `--scp` 会静默换路径
+
+`remote_exec.py --scp` 调的是 PortableGit 自带的 scp.exe，它会把远程路径 `/opt/qingsu/server.py.new` 按 MSYS 规则当成本地路径处理（实测变成 `…/qoder-cn/bin/git/opt/qingsu/server.py.new` 然后报 upload failed）。必须关掉转换：
+
+```bash
+MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1 python remote_exec.py --scp server.py /opt/qingsu/server.py.new
+```
+
+而且**别把这条命令接 `| tail`**——那会让 `$?` 变成 `tail` 的退出码，实测能把失败的传输读成 `SCP_EXIT=0`。要拿真码就单独 `echo $?`，或用 `${PIPESTATUS[0]}`。同理别随手 `2>/dev/null`：本轮清理 SQL 第一次执行就是靠 `sqlite3 -encoding` 这个不存在的选项失败，而 stderr 被吞掉后只剩一个孤零零的退出码 1。
 
 先量影响面（只读，不改任何东西）：
 
@@ -158,7 +168,7 @@ curl -s --max-time 180 -o /tmp/chk.apk http://124.220.54.64/qingsu.apk && md5sum
 python remote_exec.py "cd /opt/qingsu && cp server.py.bak-raudit server.py && cp web/app.js.bak-raudit web/app.js && cp web/qingsu.apk.bak-raudit web/qingsu.apk && systemctl restart qingsu"
 ```
 
-**遗留脏数据**：改代码不会让历史库里那条伪造的 `waist_cm=78.0` 消失。本轮之前注册的用户，`weight_logs` 首条与 `body_cycles` 第 1 周期的腰围仍是 78，他们第一次提交周期照时依然会算出一个假的围度增减。清理脚本见下，**必须在部署新版后端之后跑**，顺序反了会白清一遍。
+**历史脏数据（本轮已清理）**：改了代码不会让库里已存在的伪造 `waist_cm=78.0` 消失，所以后端上线后必须再跑一次数据清理，否则老用户提交周期照时照样算出假的围度增减。本轮的执行结果记在本节末尾。清理脚本如下，**必须在部署新版后端之后跑**，顺序反了会白清一遍。
 
 ### 清理注册时伪造的 78cm 腰围
 
@@ -212,6 +222,22 @@ SELECT 'food='||count(*) FROM food_logs; -- 与清理前一致（本清理不该
 ```
 
 真实测过 78cm 的用户（第 1 条查询里的 `wl_真实78`）不该被动过，复核时他们的值仍应是 78.0。回滚只需要一句：`sqlite3 /opt/qingsu/data/qingsu.db '.restore /opt/qingsu/data/qingsu.db.bak-raudit'`（服务需先 `systemctl stop qingsu`）。
+
+### 本轮执行记录（2026-10-15 23:15）
+
+`.backup` 先落了一份 45056 字节的 `qingsu.db.bak-raudit`，然后在 `BEGIN…COMMIT` 里跑完三条 UPDATE。实际影响行数：
+
+| 步骤 | 命中 |
+| --- | --- |
+| 第 4 条（标注被假基准污染的后续周期报告） | 0 行——库里只有 2 条 `cycle_num=1`，还没有第二次提交 |
+| 第 3 条（第 1 周期腰围归零 + 评级改"待首次打卡"） | 2 行 |
+| 第 2 条（注册生成的体重记录腰围归零） | 2 行 |
+
+复核四条全过：`残留bc1=0`、`残留wl=0`，且 `users=2 / food=1 / weight=2 / cycles=2` 与清理前完全一致（本清理不该碰饮食和记录条数）。再从公网 API 侧确认，不看数据库只看接口：`tiangang` 与 `木木` 的 `latest_cycle.waist_cm` 均为 `0.0`、`tone_score` 均为"待首次打卡"。
+
+线上四项验收同时通过：`/u/<img src=x onerror=alert(1)>` 裸标签 0 次、`&lt;img` 出现 1 次；`/app.js` md5 与仓库一致且含 `reportWriteFailure`(7 处)、`dashboardLoaded`(4 处) 与平台期专答；`/qingsu.apk` 下载的包 5,588,679 字节、md5 `da0f54c0…`，用 aapt 解其清单可见 `E: queries` 带 `com.sankuai.meituan`；真实用户 `tiangang` 的 7 天缺口序列 `[0,0,0,0,0,0,0]`（改动前这里今天那根会是 1511）。
+
+现存两个账号是 `tiangang`（2026-10-15 18:20 注册）和 `木木`（18:40 注册），共 1 条饮食记录——也就是说这个部署还没有真实使用量，上面这些改动对用户侧的实际影响面为零。
 
 ---
 
