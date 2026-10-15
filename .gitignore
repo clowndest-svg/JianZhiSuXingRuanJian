@@ -1,0 +1,15 @@
+# Gradle build cache & outputs
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+
+# Python cache & temp keys
+__pycache__/
+*.pyc
+*.pyo
+*.pem
+*.key

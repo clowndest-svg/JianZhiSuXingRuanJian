@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>轻塑 · 智能减脂塑形严管伴侣</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- ================= 顶部高颜值浅绿状态栏横幅 ================= -->
+    <header class="app-header">
+        <div class="header-top">
+            <div class="app-brand">
+                <div class="brand-icon">塑</div>
+                <div class="brand-text">
+                    <h1>轻塑 · 减脂塑形</h1>
+                    <p id="header-goal-subtitle">智能热量严管 & 动态食谱自适应</p>
+                </div>
+            </div>
+            <!-- 用户登录/注册状态与档案定制胶囊 -->
+            <div style="display: flex; gap: 6px; align-items: center;">
+                <button class="user-account-badge" onclick="openAuthModal()">
+                    <span id="header-user-icon">👤</span>
+                    <span id="header-username-display">登录/注册</span>
+                </button>
+                <button class="profile-pill-btn" onclick="openProfileModal()">
+                    <span id="header-profile-summary">165cm · 70kg · 塑形</span>
+                    <span class="gear-icon">⚙️</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 现代化 iOS/Tailwind 风格分段切换器 (运动日 / 休息日) -->
+        <div class="header-mode-bar">
+            <button class="mode-btn active" id="btn-mode-rest" onclick="switchDayMode('rest')">
+                <span>🧘</span>
+                <span>休息日 · 控卡 <strong id="mode-rest-cal">1400</strong> kcal</span>
+            </button>
+            <button class="mode-btn" id="btn-mode-workout" onclick="switchDayMode('workout')">
+                <span>🏋️</span>
+                <span>运动日 · 充能 <strong id="mode-workout-cal">1550</strong> kcal</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- 主体视窗区域 -->
+    <main id="app-main">
+
+        <!-- ================= TAB 1: 监控大屏 ================= -->
+        <section id="panel-dashboard" class="view-panel active">
+
+            <!-- 🌐 专属公网监督大屏横幅 (满足用户需求：每个用户app上对应有自己的网页地址，用户自己点击查看) -->
+            <div class="user-web-banner" id="user-web-link-card">
+                <div style="flex: 1; overflow: hidden;">
+                    <div style="font-size: 10px; color: #1E40AF; font-weight: 700; margin-bottom: 2px;">🌐 我的专属公网监督网页 (真数据实时查看)：</div>
+                    <div class="link-text" id="display-user-public-url">登录后自动生成专属公网大屏网址</div>
+                </div>
+                <div class="user-web-actions">
+                    <button class="btn-web-action" onclick="copyUserPublicUrl()">📋 复制</button>
+                    <button class="btn-web-action" style="background: #10B981;" onclick="openUserPublicUrl()">🌐 打开</button>
+                </div>
+            </div>
+
+            <!-- 🚨 连续超标强力警报横幅 (满足用户需求：连续几天超标自动警报) -->
+            <div id="consecutive-over-banner" class="alert-banner-danger" style="display: none;">
+                <div class="alert-banner-icon">🚨</div>
+                <div class="alert-banner-content">
+                    <h4>严管警报：你已连续 <span id="banner-over-days">2</span> 天热量超标！</h4>
+                    <p>总富余达 <strong id="banner-over-cal">+580 kcal</strong>，必须立刻拦截零食与夜宵，已启动紧急消脂加练预案！</p>
+                </div>
+            </div>
+
+            <!-- ⚠️ 连续脱离训练计划警报横幅 (满足用户需求：连续脱离计划警告提醒) -->
+            <div id="consecutive-slacking-banner" class="alert-banner-warning" style="display: none;">
+                <div class="alert-banner-icon">⚠️</div>
+                <div class="alert-banner-content">
+                    <h4>脱离计划警告：已连续 <span id="banner-slacking-days">2</span> 天未完成训练！</h4>
+                    <p>骨骼肌静息代谢率正面临滑落，体态紧致度降低，请今天务必抽空 20 分钟唤醒训练！</p>
+                </div>
+            </div>
+
+            <!-- 核心数据 4 格看板 (根据用户自定义身材自动计算更新) -->
+            <div class="kpi-grid">
+                <div class="kpi-card calorie" onclick="openProfileModal()">
+                    <div class="kpi-card-header">🔥 每日目标摄入</div>
+                    <div class="kpi-value" id="kpi-target-cal">1400 - 1500</div>
+                    <div class="kpi-sub" id="kpi-cal-sub">缺口约 450 kcal · 稳减4-6斤/月</div>
+                </div>
+                <div class="kpi-card protein" onclick="openProfileModal()">
+                    <div class="kpi-card-header">🥩 优质蛋白质 (30%)</div>
+                    <div class="kpi-value" id="kpi-target-protein">110 g</div>
+                    <div class="kpi-sub" id="kpi-protein-sub">约 1.6g/kg · 锁肌防松弛</div>
+                </div>
+                <div class="kpi-card carbs" onclick="openProfileModal()">
+                    <div class="kpi-card-header">🌾 复合慢碳水 (40%)</div>
+                    <div class="kpi-value" id="kpi-target-carbs">145 g</div>
+                    <div class="kpi-sub" id="kpi-carbs-sub">低GI粗粮 · 防脱发防暴食</div>
+                </div>
+                <div class="kpi-card fat" onclick="openProfileModal()">
+                    <div class="kpi-card-header">🥑 优质脂肪 (30%)</div>
+                    <div class="kpi-value" id="kpi-target-fat">45 g</div>
+                    <div class="kpi-sub" id="kpi-fat-sub">烹调油≤15g · 维持代谢激素</div>
+                </div>
+            </div>
+
+            <!-- 动态热量与缺口表盘卡片 -->
+            <div class="card calorie-gauge-card">
+                <div class="card-title">
+                    <span class="title-left">🎯 今日热量收支与动态缺口</span>
+                    <span style="font-size: 11px; color: var(--primary-dark); font-weight: 600;" id="mode-tip-text">休息日拉大缺口</span>
+                </div>
+
+                <div class="gauge-container">
+                    <svg class="gauge-svg" width="160" height="160" viewBox="0 0 160 160">
+                        <circle class="gauge-bg" cx="80" cy="80" r="66"></circle>
+                        <circle class="gauge-progress" id="gauge-circle" cx="80" cy="80" r="66" stroke-dasharray="415" stroke-dashoffset="170"></circle>
+                    </svg>
+                    <div class="gauge-center-text">
+                        <div class="gauge-num" id="remain-cal-display">820</div>
+                        <div class="gauge-unit">今日剩余预算 (kcal)</div>
+                    </div>
+                </div>
+
+                <div class="macros-progress-box">
+                    <div class="macro-item">
+                        <div class="macro-name">已摄入</div>
+                        <div class="macro-val" id="consumed-cal-val" style="color: var(--text-main);">680 kcal</div>
+                    </div>
+                    <div class="macro-item">
+                        <div class="macro-name">运动消耗</div>
+                        <div class="macro-val" id="burned-cal-val" style="color: var(--primary-dark);">-220 kcal</div>
+                    </div>
+                    <div class="macro-item">
+                        <div class="macro-name">当前净缺口</div>
+                        <div class="macro-val" id="net-deficit-val" style="color: var(--accent);">+490 kcal</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 🍽️ 核心新增：饮食记忆与每天问我吃什么 (自适应食谱推荐) -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="title-left">🍽️ 今天吃了什么？（随心记录与记忆）</span>
+                    <span style="font-size: 10.5px; color: var(--primary-dark); font-weight: 700;">智能解析热量</span>
+                </div>
+
+                <!-- 餐次选择 -->
+                <div class="meal-slot-chips">
+                    <div class="meal-slot-chip" id="slot-chip-breakfast" onclick="selectMealSlot('breakfast')">🌅 早餐</div>
+                    <div class="meal-slot-chip selected" id="slot-chip-lunch" onclick="selectMealSlot('lunch')">☀️ 午餐</div>
+                    <div class="meal-slot-chip" id="slot-chip-dinner" onclick="selectMealSlot('dinner')">🌙 晚餐</div>
+                    <div class="meal-slot-chip" id="slot-chip-snack" onclick="selectMealSlot('snack')">🍎 加餐</div>
+                </div>
+
+                <!-- 自然语言记录输入框 -->
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" id="input-meal-text" placeholder="直接打字，如：小碗牛肉面加水煮蛋一个" class="input-control" style="flex: 1;" onkeydown="if(event.key==='Enter') logNaturalMeal()">
+                    <button class="btn-primary" style="width: auto; padding: 8px 14px; flex-shrink: 0;" onclick="logNaturalMeal()">记一笔</button>
+                </div>
+
+                <!-- 动态自适应调整提示 -->
+                <div class="adaptive-recipe-callout" id="adaptive-recipe-banner">
+                    ✨ <strong>智能食谱自适应联动：</strong>若某餐吃超或未按食谱走，系统将自动重算并调整后续餐次与明日食谱，保障热量缺口不反弹！
+                </div>
+
+                <!-- 今日饮食日记列表 -->
+                <div id="today-meal-diary-list" style="margin-top: 10px;">
+                    <!-- 动态生成 -->
+                </div>
+            </div>
+
+            <!-- 💧 扩展功能：每日 2000ml 喝水排钠消水肿打卡 -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="title-left">💧 每日饮水打卡 (促进代谢/排钠消肿)</span>
+                    <span style="font-size: 11px; color: #2563EB; font-weight: 700;"><span id="water-consumed-text">1000</span> / 2000 ml</span>
+                </div>
+                <div class="water-cups-grid" id="water-cups-box">
+                    <!-- 8杯水动态渲染 -->
+                </div>
+            </div>
+
+            <!-- 进餐顺序黄金法则 -->
+            <div class="callout">
+                <strong>💡 进餐顺序黄金法则（抑制脂肪合成）：</strong><br>
+                <span>① 先喝水或清汤 ➔ ② 吃一半高纤绿叶菜 ➔ ③ 吃肉蛋鱼虾优质蛋白 ➔ ④ 最后吃复合慢碳主食</span>
+            </div>
+
+            <!-- 周期身材照进化与规划进阶快捷卡片 -->
+            <div class="card" style="background: linear-gradient(135deg, #ECFDF5 0%, #FFFFFF 100%); border-color: var(--primary-border); display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; cursor: pointer;" onclick="switchTab('body')">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 26px;">📷</span>
+                    <div>
+                        <div style="font-weight: 800; font-size: 13.5px; color: var(--primary-deep);">周期身材照进化与下一阶段规划</div>
+                        <div style="font-size: 11px; color: var(--primary-dark);">已进入第 1 周期 · 点击上传身材照对比蜕变并升级</div>
+                    </div>
+                </div>
+                <span style="font-size: 12px; color: var(--primary-dark); font-weight: bold;">进入 ➔</span>
+            </div>
+
+            <!-- 今日晨起体重快速打卡 -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="title-left">⚖️ 今日空腹体重记录</span>
+                    <span style="font-size: 11px; color: var(--text-muted);" id="current-weight-summary">当前 140 斤</span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <input type="number" step="0.1" id="input-weight" placeholder="输入晨起体重，如 69.2" class="input-control" style="flex: 1;">
+                    <select id="weight-unit" class="input-control" style="width: 75px; flex-shrink: 0;">
+                        <option value="jin">斤</option>
+                        <option value="kg">kg</option>
+                    </select>
+                    <button class="btn-primary" style="width: auto; padding: 9px 18px; flex-shrink: 0;" onclick="saveWeight()">打卡</button>
+                </div>
+                <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px;" id="weight-status-text">
+                    已累计记录 7 次，离目标体重还有 9.2 斤！
+                </p>
+            </div>
+
+        </section>
+
+
+        <!-- ================= TAB 2: 外卖严审与智能拦截 ================= -->
+        <section id="panel-takeout" class="view-panel">
+
+            <div class="interceptor-hero">
+                <div class="interceptor-hero-icon">🚨</div>
+                <div class="interceptor-hero-content">
+                    <h3>外卖热量严审与强力拦截网</h3>
+                    <p>一旦点单超出单餐预算或含有隐形地沟油与糖分，将立刻触发警报并智能推荐低卡平替！</p>
+                </div>
+            </div>
+
+            <!-- 外卖软件联动与热量安全门禁 (满足用户需求：每天饭点自动查看，超出热量就限制点单) -->
+            <div class="card" style="border: 2px solid #F59E0B; background: linear-gradient(135deg, #FFFBEB 0%, #FFFFFF 100%);">
+                <div class="card-title">
+                    <span class="title-left" style="color: #92400E;">🛵 外卖软件安全门禁 (饭点防超标)</span>
+                    <span style="font-size: 11px; color: #B45309; font-weight: 700;" id="takeout-gate-status">实时预算门禁</span>
+                </div>
+                <p style="font-size: 12px; color: #78350F; line-height: 1.5; margin-bottom: 10px;">
+                    每次打开外卖前，系统自动核验今日剩余热量额度。<strong>一旦超出全天预算，将强制启动点单锁！</strong>
+                </p>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn-primary" style="background: #FFD100; color: #222; font-weight: 800; border-radius: var(--radius-sm); box-shadow: none;" onclick="launchTakeoutApp('meituan')">
+                        🛵 打开美团外卖 (验卡点单)
+                    </button>
+                    <button class="btn-primary" style="background: #0089FF; color: #FFF; font-weight: 800; border-radius: var(--radius-sm); box-shadow: none;" onclick="launchTakeoutApp('eleme')">
+                        🥡 打开饿了么 (验卡点单)
+                    </button>
+                </div>
+            </div>
+
+            <!-- 外卖输入与快捷识别 -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="title-left">🔍 外卖单品智能审核</span>
+                    <span style="font-size: 11px; color: var(--danger); font-weight: 700;">单餐限额 580 kcal</span>
+                </div>
+
+                <div class="takeout-input-box">
+                    <textarea id="takeout-text" placeholder="输入或粘贴你打算点的外卖名称，例如：'杨国福麻辣烫'、'隆江猪脚饭'、'麦当劳麦辣鸡腿堡套餐'、'黄焖鸡米饭'、'一点点波霸奶茶全糖' ..."></textarea>
+                </div>
+
+                <!-- 常见爆款高危外卖一键快捷评测 -->
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">常见外卖热量雷区（点击秒审）：</div>
+                <div class="preset-chips">
+                    <div class="chip" onclick="quickCheckTakeout('隆江猪脚饭')">🍖 隆江猪脚饭</div>
+                    <div class="chip" onclick="quickCheckTakeout('杨国福麻辣烫(重麻酱)')">🥘 杨国福麻辣烫</div>
+                    <div class="chip" onclick="quickCheckTakeout('麦辣鸡腿堡套餐(含薯条可乐)')">🍔 麦辣鸡腿堡套餐</div>
+                    <div class="chip" onclick="quickCheckTakeout('螺蛳粉+炸蛋+鸭掌')">🍜 螺蛳粉加炸蛋</div>
+                    <div class="chip" onclick="quickCheckTakeout('黄焖鸡米饭(大份多汁)')">🍗 黄焖鸡米饭</div>
+                    <div class="chip" onclick="quickCheckTakeout('烧烤烤五花肉+掌中宝20串')">🍢 烧烤20串</div>
+                    <div class="chip" onclick="quickCheckTakeout('珍珠奶茶大杯(正常糖)')">🧋 珍珠奶茶全糖</div>
+                    <div class="chip" onclick="quickCheckTakeout('轻食鸡胸肉藜麦沙拉(油醋汁)')">🥗 轻食鸡胸沙拉</div>
+                    <div class="chip" onclick="quickCheckTakeout('赛百味6寸香烤牛肉堡')">🥪 赛百味牛肉堡</div>
+                </div>
+
+                <button class="btn-primary" style="background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%); margin-top: 10px; box-shadow: 0 2px 8px rgba(239, 68, 68, 0.25);" onclick="analyzeTakeout()">
+                    ⚡ 开始严审热量与油脂超标度
+                </button>
+            </div>
+
+            <!-- 本周外卖配额计数器 -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="title-left">🛡️ 本周外卖配额限制</span>
+                    <span id="takeout-quota-badge" style="font-size: 11.5px; color: var(--primary-dark); font-weight: 700;">剩余 1 次</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12.5px;">
+                    <div>外卖频次指标：<strong>每周至多 1 次</strong></div>
+                    <div style="color: var(--text-muted); font-size: 11px;">自制控油餐更有保障</div>
+                </div>
+                <div style="margin-top: 10px; background: #F1F5F9; border-radius: var(--radius-full); height: 8px; overflow: hidden;">
+                    <div id="takeout-quota-bar" style="width: 0%; height: 100%; background: var(--danger); transition: width 0.3s;"></div>
+                </div>
+            </div>
+
+            <!-- 外卖黑榜警示常识 -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="title-left">⚠️ 减脂期外卖三大隐形杀手</span>
+                </div>
+                <ul style="font-size: 12px; color: var(--text-muted); padding-left: 18px; line-height: 1.7;">
+                    <li><strong>油炸吸油海绵：</strong>炸蛋、油条吸油率高达 45-50%，吃一颗炸蛋额外吞下 250 kcal 纯油脂！</li>
+                    <li><strong>浓酱酱汁刺客：</strong>麻酱、沙拉酱、照烧酱、红油，2大勺即可达到 300 kcal，直接抵消40分钟慢跑！</li>
+                    <li><strong>高糖勾芡陷阱：</strong>黄焖鸡、鱼香肉丝、糖醋里脊，为了增稠鲜亮往往加入大量水淀粉与白糖！</li>
+                </ul>
+            </div>
+
+        </section>
+
+
+        <!-- ================= TAB 3: 饮食计划 (自己做菜 vs 上班族外卖双模) ================= -->
+        <section id="panel-recipes" class="view-panel">
+
+            <div class="card-title" style="margin-bottom: 8px;">
+                <span class="title-left">🥗 减脂饮食计划与吃瘦宝典</span>
+                <span style="font-size: 11px; color: var(--primary-dark); font-weight: 600;" id="current-dining-badge">自做/外卖随心选</span>
+            </div>
+
+            <!-- 自做菜 vs 外卖党 双模切换栏 -->
+            <div class="dining-mode-bar">
+                <button class="dining-mode-btn active" id="btn-dining-cook" onclick="switchDiningMode('cook')">
+                    <span>🍳</span>
+                    <span>自己做菜 (4套精选家常)</span>
+                </button>
+                <button class="dining-mode-btn" id="btn-dining-takeout" onclick="switchDiningMode('takeout')">
+                    <span>🛵</span>
+                    <span>上班族外卖 (4大场景吃瘦)</span>
+                </button>
+            </div>
+
+            <!-- ================= 子视图 1: 自己做菜内容 ================= -->
+            <div id="dining-cook-view">
+                <!-- 方案选择切换按钮 -->
+                <div class="plan-tabs">
+                    <button class="plan-tab-btn active" onclick="showRecipePlan('A')">方案 A (中式快手)</button>
+                    <button class="plan-tab-btn" onclick="showRecipePlan('B')">方案 B (高饱腹粗粮)</button>
+                    <button class="plan-tab-btn" onclick="showRecipePlan('C')">方案 C (轻食简餐风)</button>
+                    <button class="plan-tab-btn" onclick="showRecipePlan('D')">方案 D (暖胃炖煮风)</button>
+                </div>
+
+                <!-- 食谱内容容器 -->
+                <div class="card" id="recipe-display-card">
+                    <!-- 由 JS 动态渲染 -->
+                </div>
+
+                <!-- 周末40分钟备餐流水线 -->
+                <div class="card">
+                    <div class="card-title">
+                        <span class="title-left">⏱️ 周末 40 分钟“懒人备餐”流水线</span>
+                        <span style="font-size: 11px; color: var(--primary-dark);">工作日10分钟开饭</span>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-main); line-height: 1.6;">
+                        <p style="margin-bottom: 6px;"><strong>Step 1 肉类预腌分装 (15分钟)：</strong>鸡腿肉切丁、牛肉切片按份分装，加生抽、料酒、黑胡椒抓匀，喷油锁水冷冻。</p>
+                        <p style="margin-bottom: 6px;"><strong>Step 2 杂粮饭抗性淀粉法 (10分钟)：</strong>三色糙米饭煮熟分装冷冻，吃前微波加热，生成抗性淀粉，热量吸收更低！</p>
+                        <p><strong>Step 3 蔬菜小料预处理 (15分钟)：</strong>西蓝花焯水沥干冷藏；一次性切好一周葱姜蒜与小米辣密封保存。</p>
+                    </div>
+                </div>
+
+                <!-- 万能减脂酱汁计算器 -->
+                <div class="card">
+                    <div class="card-title">
+                        <span class="title-left">🥣 万能减脂拌菜/炒菜汁比例</span>
+                        <span style="font-size: 11px; color: var(--text-muted);">调一罐冷藏用一周</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 12px; background: #F8FAFC; padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                        <div>• 薄盐生抽：<strong>6 勺</strong></div>
+                        <div>• 陈醋/香醋：<strong>4 勺</strong></div>
+                        <div>• 蚝油：<strong>1 勺</strong></div>
+                        <div>• 零卡代糖：<strong>1 小勺</strong></div>
+                        <div>• 蒜末：<strong>2 勺</strong></div>
+                        <div>• 小米辣圈：<strong>适量</strong></div>
+                        <div>• 凉白开：<strong>4 勺</strong></div>
+                        <div style="color: var(--primary-dark); font-weight: bold;">• 水煮蔬菜淋上拌匀即食！</div>
+                    </div>
+                </div>
+
+                <!-- 一周超市采购打勾清单 -->
+                <div class="card">
+                    <div class="card-title">
+                        <span class="title-left">🛒 一周超市采购打勾清单 (7天量)</span>
+                        <button style="font-size: 11px; color: var(--primary-dark); background: none; border: none; cursor: pointer; font-weight: 600;" onclick="resetChecklist()">重置勾选</button>
+                    </div>
+                    <div id="shopping-checklist-container">
+                        <!-- 动态生成清单 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- ================= 子视图 2: 上班族外卖点单内容 ================= -->
+            <div id="dining-takeout-view" style="display: none;">
+                <!-- 专属提示 -->
+                <div class="callout" style="margin-bottom: 12px;">
+                    <strong>🛵 上班族外卖吃瘦原则：</strong>不需自己起早做饭！选对餐厅、认准【2素1荤+慢碳】、备一碗热水涮油、复制专属备注，外卖照样月减4-6斤！
+                </div>
+
+                <!-- 外卖点单备注金牌模板 -->
+                <div class="card" style="background: linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%); border-color: #FCD34D;">
+                    <div class="card-title">
+                        <span class="title-left" style="color: #92400E;">📋 外卖减脂备注金牌模板 (一键复制)</span>
+                    </div>
+                    <div style="font-size: 12px; color: #78350F; background: #FFFFFF; padding: 10px; border-radius: var(--radius-sm); border: 1px dashed #F59E0B; margin-bottom: 8px;" id="text-takeout-remark">
+                        【减脂期严格控油备注】：老板您好！本人减脂塑形中，烦请帮我【少油少盐、千万不要放糖与味精】，酱汁请单独小盒分装、切勿直接浇在饭菜上，辛苦厨师师傅了！
+                    </div>
+                    <button class="btn-primary" style="background: #F59E0B; padding: 8px;" onclick="copyTakeoutRemark()">
+                        📋 点击一键复制备注到剪贴板
+                    </button>
+                </div>
+
+                <!-- 场景 1: 中式自选快餐 -->
+                <div class="takeout-scene-card">
+                    <div class="takeout-scene-header">
+                        <span class="takeout-brand-badge">中式快餐 · 老乡鸡 / 大米先生 / 真功夫</span>
+                        <strong style="color: var(--primary-dark); font-size: 12px;">约 510 kcal · 优质蛋白34g</strong>
+                    </div>
+                    <div class="takeout-combo-name">🍱 【两素一荤过水吃瘦套餐】</div>
+                    <div class="takeout-order-items">
+                        • <strong>荤菜选择：</strong>手撕鸡 / 去皮卤鸡腿 / 白灼基围虾 / 农家蒸蛋<br>
+                        • <strong>素菜选择：</strong>清炒油麦菜 / 蒜蓉西兰花 / 虾皮冬瓜（拒绝茄子/地三鲜）<br>
+                        • <strong>主食控制：</strong>米饭只要半碗（约 100g 熟重），切忌汤汁拌饭！<br>
+                        • <strong>甩油绝招：</strong>外卖到手后，拿纸杯装温开水，把蔬菜肉类涮一下，立减 15g 浮油（省 135 kcal）！
+                    </div>
+                </div>
+
+                <!-- 场景 2: 品牌西式快餐 -->
+                <div class="takeout-scene-card" style="border-left-color: #3B82F6;">
+                    <div class="takeout-scene-header">
+                        <span class="takeout-brand-badge" style="background: #EFF6FF; color: #1D4ED8;">西式高蛋白 · 赛百味 / 麦当劳 / 肯德基</span>
+                        <strong style="color: #1D4ED8; font-size: 12px;">约 380 - 430 kcal</strong>
+                    </div>
+                    <div class="takeout-combo-name">🥪 【高饱腹低脂快餐组合】</div>
+                    <div class="takeout-order-items">
+                        • <strong>赛百味首选：</strong>6寸全麦面包 + 香烤牛肉/火鸡胸 + 蔬菜全放(不要酸黄瓜) + 黄芥末酱/黑胡椒 (≈360 kcal)<br>
+                        • <strong>麦当劳首选：</strong>板烧鸡腿堡（去沙拉酱/去皮）+ 玉米杯/脆苹果片 + 零度可乐 (≈410 kcal)<br>
+                        • <strong>肯德基首选：</strong>现烤法风烧饼/烤鸡腿帕尼尼 + 美式黑咖啡 (≈350 kcal)<br>
+                        • <strong>禁忌雷区：</strong>坚决不点油炸薯条、炸鸡块、含糖雪碧/奶茶！
+                    </div>
+                </div>
+
+                <!-- 场景 3: 清汤麻辣烫 & 便利店 -->
+                <div class="takeout-scene-card" style="border-left-color: #F59E0B;">
+                    <div class="takeout-scene-header">
+                        <span class="takeout-brand-badge" style="background: #FEF3C7; color: #B45309;">清汤自选 · 杨国福 / 张亮 / 7-11便利店</span>
+                        <strong style="color: #B45309; font-size: 12px;">约 390 kcal</strong>
+                    </div>
+                    <div class="takeout-combo-name">🍲 【无麻酱高纤清汤麻辣烫】</div>
+                    <div class="takeout-order-items">
+                        • <strong>汤底必须选：</strong>清汤 / 纯骨汤（绝不选浓醇麻辣红油汤底）<br>
+                        • <strong>自选食材：</strong>绿叶菜2大份(生菜/菠菜/茼蒿) + 魔芋丝 + 冻豆腐 + 牛肉片/龙利鱼片 (拒绝鱼豆腐/蟹柳淀粉丸子)<br>
+                        • <strong>灵魂蘸料：</strong>【严禁麻酱】！调味只放陈醋2勺 + 蒜泥 + 生抽半勺 + 小米辣少许<br>
+                        • <strong>便利店备选：</strong>关东煮(萝卜+魔芋丝+海带结+豆腐泡) + 烤鸡胸肉 + 无糖乌龙茶
+                    </div>
+                </div>
+
+                <!-- 场景 4: 精选粉面与潮汕牛肉 -->
+                <div class="takeout-scene-card" style="border-left-color: #10B981;">
+                    <div class="takeout-scene-header">
+                        <span class="takeout-brand-badge">清汤粉面 · 兰州牛肉面 / 潮汕鲜牛肉汤</span>
+                        <strong style="color: var(--primary-dark); font-size: 12px;">约 450 kcal</strong>
+                    </div>
+                    <div class="takeout-combo-name">🍜 【控碳牛肉清汤组合】</div>
+                    <div class="takeout-order-items">
+                        • <strong>兰州拉面点法：</strong>备注【只要半份面、加一份切牛肉片、多放白萝卜片、不放辣子辣椒油】(≈460 kcal)<br>
+                        • <strong>潮汕牛肉店点法：</strong>鲜牛肉丸+嫩肉清汤一份，苦瓜/西洋菜一份，少喝或不喝油汤 (≈420 kcal)<br>
+                        • <strong>米线粉店点法：</strong>番茄或清汤牛肉米线，米线吃一半，不加吸油炸蛋与油炸鸭掌！
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+
+        <!-- ================= TAB 4: 形体训练计划 ================= -->
+        <section id="panel-workout" class="view-panel">
+
+            <div class="card-title" style="margin-bottom: 8px;">
+                <span class="title-left">🏋️ 专属形体训练计划</span>
+                <span style="font-size: 11px; color: var(--primary-dark); font-weight: 600;" id="workout-plan-badge">留肌塑形方案</span>
+            </div>
+
+            <div class="callout" id="workout-summary-callout">
+                <strong>训练结构建议：</strong> 20分钟抗阻塑形（先力量消耗糖原） ➔ 25分钟快走/慢跑有氧（塑形紧致效率翻倍）。练后晚餐补足蛋白质抓住修复窗口！
+            </div>
+
+            <!-- 动态动作库容器 (由JS根据用户选定的目标生成) -->
+            <div class="card" id="workout-exercises-card">
+                <!-- 动态动作卡片 -->
+            </div>
+
+            <!-- 互动计时与动态燃脂计算器 (满足用户需求：点开始就实时计算燃脂) -->
+            <div class="timer-box">
+                <div style="font-size: 13px; opacity: 0.9;" id="timer-label">⏱️ 抗阻塑形训练倒计时 (20分钟)</div>
+                <div class="timer-digits" id="timer-display">20:00</div>
+                
+                <!-- 实时燃脂计数器 -->
+                <div class="live-burn-display">
+                    <span>🔥 实时燃脂：</span>
+                    <span class="live-burn-val" id="live-burned-display">0</span>
+                    <span>kcal</span>
+                </div>
+
+                <div class="timer-controls">
+                    <button class="timer-btn start" id="btn-timer-toggle" onclick="toggleTimer()">开始训练</button>
+                    <button class="timer-btn reset" onclick="resetTimer(20)">重置20分</button>
+                    <button class="timer-btn reset" onclick="resetTimer(25)">切为有氧25分</button>
+                </div>
+            </div>
+
+            <!-- 完成训练打卡 -->
+            <div class="card">
+                <button class="btn-primary" onclick="completeWorkoutToday()">
+                    🏆 今日训练已完成！打卡并计入消耗 (-220 kcal)
+                </button>
+            </div>
+
+        </section>
+
+
+        <!-- ================= TAB 4: 周期形体蜕变与身材照档案 ================= -->
+        <section id="panel-body" class="view-panel">
+
+            <div class="card-title" style="margin-bottom: 8px;">
+                <span class="title-left">📷 形体蜕变与身材照档案</span>
+                <span class="tag-offline-free">周期智能进阶</span>
+            </div>
+
+            <!-- 周期状态横幅 -->
+            <div class="cycle-badge-header">
+                <div>
+                    <div class="cycle-step-indicator" id="cycle-title-display">📅 第 1 周期 · 减脂启动期 (第1-7天)</div>
+                    <div class="cycle-step-sub" id="cycle-goal-display">核心目标：排钠消水肿，腰围缩减 1.5-2 cm，建立代谢节奏</div>
+                </div>
+                <span class="tag-offline-free" id="cycle-badge-tag">进行中</span>
+            </div>
+
+            <!-- 用户自选身材目标预览卡片 (放几张图片让用户自己选要哪种身材) -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="title-left">🎯 我所追求的理想身材目标</span>
+                    <button style="font-size: 11px; color: var(--primary-dark); background: none; border: none; cursor: pointer; font-weight: 700;" onclick="openProfileModal()">切换身材 ➔</button>
+                </div>
+                <div id="target-physique-summary-card">
+                    <!-- 动态渲染当前选中的身材图与规划 -->
+                </div>
+            </div>
+
+            <!-- 周期身材照前后对比画廊 (Before & After) -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="title-left">📸 周期身材照进化对比 (Before & After)</span>
+                    <span style="font-size: 10px; color: var(--text-light);">手机本地存储 · 绝对隐私</span>
+                </div>
+
+                <div class="photo-compare-container">
+                    <!-- 左侧：初始基准身材照 -->
+                    <div class="photo-box">
+                        <div class="photo-box-title">📍 起始基准 (Day 1)</div>
+                        <div class="photo-preview-wrap" id="wrap-base-photo">
+                            <img id="img-base-photo" class="photo-preview-img" style="display: none;">
+                            <div id="ph-base-icon" class="photo-placeholder-icon">👤</div>
+                            <div id="ph-base-txt" style="font-size: 10px; color: var(--text-light); text-align: center; padding: 0 4px;">点下方上传基准照</div>
+                            <div class="photo-meta-tag" id="meta-base-photo">基准: 70.0kg / 78cm</div>
+                        </div>
+                        <label class="btn-upload-photo">
+                            <span>📤 上传基准照</span>
+                            <input type="file" accept="image/*" style="display: none;" onchange="handlePhotoUpload(event, 'base')">
+                        </label>
+                    </div>
+
+                    <!-- 右侧：当前周期最新身材照 -->
+                    <div class="photo-box">
+                        <div class="photo-box-title" id="title-cur-cycle-photo">🔥 第 1 周期身材照</div>
+                        <div class="photo-preview-wrap" id="wrap-cur-photo">
+                            <img id="img-cur-photo" class="photo-preview-img" style="display: none;">
+                            <div id="ph-cur-icon" class="photo-placeholder-icon">📸</div>
+                            <div id="ph-cur-txt" style="font-size: 10px; color: var(--text-light); text-align: center; padding: 0 4px;">拍照记录本周变化</div>
+                            <div class="photo-meta-tag" id="meta-cur-photo">本周: 69.2kg / 76cm</div>
+                        </div>
+                        <label class="btn-upload-photo" style="background: var(--primary-soft); color: var(--primary-dark); border-color: var(--primary-border);">
+                            <span>📸 上传最新身材照</span>
+                            <input type="file" accept="image/*" style="display: none;" onchange="handlePhotoUpload(event, 'cur')">
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 周期围度数据录入 -->
+                <div style="background: #F8FAFC; border-radius: var(--radius-sm); padding: 10px; border: 1px solid var(--border); margin-top: 8px;">
+                    <div style="font-size: 11.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">📏 本周期形体围度录入（供AI评估身材变化）：</div>
+                    <div class="form-row-2">
+                        <div>
+                            <label style="font-size: 10.5px; color: var(--text-light);">最新体重 (斤)</label>
+                            <input type="number" step="0.1" id="cycle-input-weight" value="138.4" class="input-control">
+                        </div>
+                        <div>
+                            <label style="font-size: 10.5px; color: var(--text-light);">肚脐腰围 (cm)</label>
+                            <input type="number" step="0.5" id="cycle-input-waist" value="76" class="input-control">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 周期更新大按钮 (满足用户需求：每一个周期要用户身材照更新规划) -->
+                <button class="btn-primary" style="margin-top: 12px; padding: 11px; box-shadow: 0 3px 10px rgba(16, 185, 129, 0.25);" onclick="upgradeCyclePlan()">
+                    🚀 提交本周期身材照并更新下一阶段规划
+                </button>
+            </div>
+
+            <!-- AI 周期评估与进阶规划报告 -->
+            <div class="cycle-ai-report-card" id="cycle-ai-report-box">
+                <div class="cycle-ai-report-title">
+                    <span>✨</span>
+                    <span id="cycle-report-heading">AI 导师周期蜕变检视报告</span>
+                </div>
+                <div class="cycle-diff-pill-bar">
+                    <div class="cycle-diff-pill">
+                        <span>累计减重</span>
+                        <strong id="rep-weight-diff">-1.6 斤</strong>
+                    </div>
+                    <div class="cycle-diff-pill">
+                        <span>腰围缩减</span>
+                        <strong id="rep-waist-diff">-2.0 cm</strong>
+                    </div>
+                    <div class="cycle-diff-pill">
+                        <span>紧致度得分</span>
+                        <strong style="color: #2563EB;" id="rep-tone-level">优+ (89分)</strong>
+                    </div>
+                </div>
+                <div style="font-size: 12px; color: var(--text-main); line-height: 1.6;" id="cycle-report-body">
+                    <!-- 动态生成点评与升级方案 -->
+                </div>
+            </div>
+
+        </section>
+
+
+        <!-- ================= TAB 5: 统计大图 ================= -->
+        <section id="panel-charts" class="view-panel">
+
+            <div class="card-title" style="margin-bottom: 8px;">
+                <span class="title-left">📈 全周期数据统计大图</span>
+                <span style="font-size: 11px; color: var(--primary-dark); font-weight: 600;">趋势清晰可视</span>
+            </div>
+
+            <!-- 图表 1: 体重下降轨迹折线大图 -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="title-left">📉 体重下降走势曲线</span>
+                    <span style="font-size: 11px; color: var(--primary-dark); font-weight: 600;">下行稳健</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="chart-weight" width="340" height="180"></canvas>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+                    <span>起点: <span id="chart-start-wt">70.0 kg</span></span>
+                    <span>当前: <strong id="chart-cur-wt" style="color: var(--primary-dark);">69.2 kg</strong></span>
+                    <span>目标: <span id="chart-target-wt">60.0 kg</span></span>
+                </div>
+            </div>
+
+            <!-- 图表 2: 每日热量缺口柱状大图 -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="title-left">📊 近7天热量缺口柱状图</span>
+                    <span style="font-size: 11px; color: var(--primary-dark); font-weight: 600;" id="chart-deficit-target-label">目标 450 kcal</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="chart-deficit" width="340" height="180"></canvas>
+                </div>
+            </div>
+
+            <!-- 图表 3: 三大营养素分配比例图 & 战报 -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="title-left">🥗 三大营养素摄入配比 (目标)</span>
+                </div>
+                <div style="display: flex; align-items: center; justify-content: space-around; margin: 10px 0;">
+                    <div style="width: 140px; height: 140px; position: relative;">
+                        <canvas id="chart-macros" width="140" height="140"></canvas>
+                    </div>
+                    <div style="font-size: 12px; line-height: 1.8;" id="chart-macros-legend">
+                        <div style="color: #3B82F6;">■ 优质蛋白 <span id="legend-protein">110g (30%)</span></div>
+                        <div style="color: #F59E0B;">■ 复合碳水 <span id="legend-carbs">145g (40%)</span></div>
+                        <div style="color: #EF4444;">■ 优质脂肪 <span id="legend-fat">45g (30%)</span></div>
+                        <div style="color: var(--primary-dark); font-weight: 700; margin-top: 4px;">自制控油率: 92%</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 外卖拦截自律功勋榜 -->
+            <div class="card" style="background: linear-gradient(135deg, #F0FDF4 0%, #FFFFFF 100%); border-color: var(--primary-border);">
+                <div class="card-title">
+                    <span class="title-left">🛡️ 外卖拦截自律功勋榜</span>
+                    <span style="font-size: 11px; color: var(--primary-dark); font-weight: 700;">自律战神</span>
+                </div>
+                <div style="display: flex; justify-content: space-around; text-align: center; margin-top: 8px;">
+                    <div>
+                        <div style="font-size: 22px; font-weight: 800; color: var(--danger);" id="stat-intercept-count">5 次</div>
+                        <div style="font-size: 11px; color: var(--text-muted);">高危外卖已成功拦截</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 22px; font-weight: 800; color: var(--primary-dark);" id="stat-cal-saved">3,850</div>
+                        <div style="font-size: 11px; color: var(--text-muted);">少摄入热量 (kcal)</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 22px; font-weight: 800; color: var(--accent);" id="stat-fat-saved">1.1 斤</div>
+                        <div style="font-size: 11px; color: var(--text-muted);">规避纯脂肪堆积</div>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+
+        <!-- ================= TAB 6: 专属塑形顾问 AI 问答 (100%免费 / 免外网) ================= -->
+        <section id="panel-gemini" class="view-panel">
+            <div class="card-title" style="margin-bottom: 8px;">
+                <span class="title-left">🤖 专属塑形顾问 AI 伴侣</span>
+                <span class="tag-offline-free">🟢 永久免费 · 国内极速 · 零外网</span>
+            </div>
+
+            <!-- 针对用户提问的免费与网络说明卡片 -->
+            <div class="callout" style="margin-bottom: 10px;">
+                <strong>💡 顾问服务说明：</strong> 本顾问基于内置超大轻量化减脂营养模型驱动，<strong>100%永久免费，完全不需要连接外网节点/VPN</strong>，在无网络或国内普通蜂窝网络下均可毫秒级极速响应！
+            </div>
+
+            <div class="card chat-container">
+                <div class="chat-messages" id="chat-messages-box">
+                    <div class="chat-bubble assistant" id="chat-welcome-msg">
+                        您好！我是您的专属塑形顾问（内置免费原生引擎，无需连接外网）。已载入您的专属档案与代谢数据，随时解答任何饮食、外卖避坑、暴食急救与训练问题。您今天想咨询什么？
+                    </div>
+                </div>
+                <div class="chat-input-bar">
+                    <input type="text" id="chat-input" placeholder="输入问题，如：'今天午饭吃超了晚上怎么补救'..." onkeydown="if(event.key==='Enter') sendChatMessage()">
+                    <button onclick="sendChatMessage()">发送</button>
+                </div>
+            </div>
+
+            <!-- 常用快捷提问 -->
+            <div class="card">
+                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">💡 快速咨询热点：</div>
+                <div class="preset-chips">
+                    <div class="chip" onclick="quickAsk('中午吃多了晚上怎么自适应补救？')">🍲 中午吃多应急补救</div>
+                    <div class="chip" onclick="quickAsk('在外聚餐吃火锅该怎么点？')">🥩 外出火锅避坑方案</div>
+                    <div class="chip" onclick="quickAsk('运动完晚上很饿能吃什么？')">🌙 练后极饿吃什么不长胖</div>
+                    <div class="chip" onclick="quickAsk('感觉体重在平台期不掉了怎么办？')">🛑 平台期突破策略</div>
+                    <div class="chip" onclick="quickAsk('今天不小心暴食了一顿怎么补救？')">🆘 暴食后48小时急救</div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+
+    <!-- ================= 核心弹窗 1: 个性化身材档案定制与目标管理弹窗 ================= -->
+    <div class="modal-overlay" id="profile-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>⚙️ 定制个人身材与训练档案</h2>
+                <button class="modal-close-btn" onclick="closeProfileModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- 性别与年龄 -->
+                <div class="form-row-2 form-group">
+                    <div>
+                        <label class="form-label">生理性别</label>
+                        <select id="prof-gender" class="input-control">
+                            <option value="female">👩 女 (女性代谢算法)</option>
+                            <option value="male">👨 男 (男性代谢算法)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label">年龄 (岁)</label>
+                        <input type="number" id="prof-age" value="26" class="input-control">
+                    </div>
+                </div>
+
+                <!-- 身高与当前体重 -->
+                <div class="form-row-2 form-group">
+                    <div>
+                        <label class="form-label">身高 (cm)</label>
+                        <input type="number" id="prof-height" value="165" class="input-control">
+                    </div>
+                    <div>
+                        <label class="form-label">当前体重 (斤)</label>
+                        <input type="number" step="0.1" id="prof-weight-jin" value="140" class="input-control" oninput="syncTargetWeightPlaceholder()">
+                    </div>
+                </div>
+
+                <!-- 目标体重 -->
+                <div class="form-group">
+                    <label class="form-label">目标体重 (斤)</label>
+                    <input type="number" step="0.1" id="prof-target-jin" value="120" class="input-control">
+                </div>
+
+                <!-- 管理目标类型 (4大类视觉身材形态卡片，带生动图示) -->
+                <div class="form-group">
+                    <label class="form-label">挑选您所追求的目标身材形态</label>
+                    <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">点击挑选心仪体型，系统将全自动定制专属代谢卡路里与训练规划：</div>
+                    
+                    <div class="body-shape-selector-grid">
+                        <!-- 目标 1: S型沙漏/马甲线紧致 -->
+                        <div class="body-shape-card selected" id="shape-card-tone" onclick="selectVisualGoalShape('tone')">
+                            <span class="body-shape-selected-tag">已选目标</span>
+                            <div class="body-shape-svg-box">
+                                <svg viewBox="0 0 68 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <circle cx="34" cy="14" r="8" fill="#10B981" />
+                                    <path d="M26 23 C28 26 40 26 42 23 C48 27 50 31 51 36 C45 37 42 44 41 50 C44 58 48 64 47 72 C46 80 44 94 40 94 C38 94 36 80 34 68 C32 80 30 94 28 94 C24 94 22 80 21 72 C20 64 24 58 27 50 C26 44 23 37 17 36 C18 31 20 27 26 23 Z" fill="#D1FAE5" stroke="#10B981" stroke-width="2" stroke-linejoin="round" />
+                                    <path d="M34 32 L34 46" stroke="#047857" stroke-width="1.5" stroke-linecap="round" />
+                                    <path d="M30 40 Q34 42 38 40" stroke="#047857" stroke-width="1.5" stroke-linecap="round" />
+                                    <path d="M28 48 Q34 50 40 48" stroke="#047857" stroke-width="1.5" stroke-linecap="round" />
+                                </svg>
+                            </div>
+                            <div class="body-shape-title">⏳ S型沙漏·马甲线</div>
+                            <div class="body-shape-desc">纤细腰腹 · 紧翘臀线 · 挺拔体态</div>
+                            <div class="body-shape-specs">缺口420k · 蛋白30% · 臀腹抗阻</div>
+                        </div>
+
+                        <!-- 目标 2: 修长轻盈/纤细模特型 -->
+                        <div class="body-shape-card" id="shape-card-loss" onclick="selectVisualGoalShape('loss')">
+                            <span class="body-shape-selected-tag">已选目标</span>
+                            <div class="body-shape-svg-box">
+                                <svg viewBox="0 0 68 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <circle cx="34" cy="12" r="7.5" fill="#3B82F6" />
+                                    <path d="M28 21 C30 23 38 23 40 21 C45 25 46 29 46 34 C43 40 40 46 39 52 C41 60 43 68 42 76 C41 84 39 94 36 94 C35 94 34 82 34 68 C34 82 33 94 32 94 C29 94 27 84 26 76 C25 68 27 60 29 52 C28 46 25 40 22 34 C22 29 23 25 28 21 Z" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2" stroke-linejoin="round" />
+                                    <path d="M34 26 L34 50" stroke="#1D4ED8" stroke-width="1.5" stroke-dasharray="2 2" />
+                                </svg>
+                            </div>
+                            <div class="body-shape-title">🏃 修长轻盈·显瘦型</div>
+                            <div class="body-shape-desc">四肢修长 · 全身去脂 · 穿衣显瘦</div>
+                            <div class="body-shape-specs">缺口500k · 慢碳40% · 全身循环</div>
+                        </div>
+
+                        <!-- 目标 3: 运动力量/健美微肌型 -->
+                        <div class="body-shape-card" id="shape-card-muscle" onclick="selectVisualGoalShape('muscle')">
+                            <span class="body-shape-selected-tag">已选目标</span>
+                            <div class="body-shape-svg-box">
+                                <svg viewBox="0 0 68 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <circle cx="34" cy="13" r="8" fill="#F59E0B" />
+                                    <path d="M23 23 C27 26 41 26 45 23 C53 28 55 33 55 38 C47 40 44 44 43 51 C46 59 50 67 49 76 C48 85 46 94 41 94 C38 94 36 78 34 65 C32 78 30 94 27 94 C22 94 20 85 19 76 C18 67 22 59 25 51 C24 44 21 40 13 38 C13 33 15 28 23 23 Z" fill="#FEF3C7" stroke="#F59E0B" stroke-width="2" stroke-linejoin="round" />
+                                    <path d="M26 33 Q34 35 42 33" stroke="#B45309" stroke-width="1.5" />
+                                    <circle cx="30" cy="42" r="1.5" fill="#B45309" />
+                                    <circle cx="38" cy="42" r="1.5" fill="#B45309" />
+                                    <circle cx="30" cy="48" r="1.5" fill="#B45309" />
+                                    <circle cx="38" cy="48" r="1.5" fill="#B45309" />
+                                </svg>
+                            </div>
+                            <div class="body-shape-title">🏋️ 紧致力量·健美型</div>
+                            <div class="body-shape-desc">腹肌线条 · 直角肩背 · 充满活力</div>
+                            <div class="body-shape-specs">高蛋白35% · 渐进抗阻 · 提升代谢</div>
+                        </div>
+
+                        <!-- 目标 4: 健康平稳/大基数脱脂型 -->
+                        <div class="body-shape-card" id="shape-card-tight" onclick="selectVisualGoalShape('tight')">
+                            <span class="body-shape-selected-tag">已选目标</span>
+                            <div class="body-shape-svg-box">
+                                <svg viewBox="0 0 68 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <circle cx="34" cy="14" r="8" fill="#8B5CF6" />
+                                    <path d="M26 23 C29 25 39 25 42 23 C49 28 51 34 50 42 C45 46 44 54 44 60 C46 67 47 76 46 84 C45 92 43 94 39 94 C37 94 35 80 34 68 C33 80 31 94 29 94 C25 94 23 92 22 84 C21 76 22 67 24 60 C24 54 23 46 18 42 C17 34 19 28 26 23 Z" fill="#F3E8FF" stroke="#8B5CF6" stroke-width="2" stroke-linejoin="round" />
+                                    <path d="M34 32 L34 50 M30 45 L34 50 L38 45" stroke="#6D28D9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                                </svg>
+                            </div>
+                            <div class="body-shape-title">📉 稳健大基数脱脂</div>
+                            <div class="body-shape-desc">保护关节 · 击退水钠 · 稳扎稳打</div>
+                            <div class="body-shape-specs">缺口550k · 低冲击有氧 · 稳降体脂</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 就餐模式选择 (满足用户需求：上班没时间做菜只能点外卖) -->
+                <div class="form-group">
+                    <label class="form-label">平时就餐生活方式</label>
+                    <select id="prof-dining-mode" class="input-control" onchange="syncDiningMode(this.value)">
+                        <option value="cook">🍳 自己做菜备餐（精细控油控盐）</option>
+                        <option value="takeout">🛵 上班族纯外卖（靠外卖智能控卡吃瘦）</option>
+                        <option value="hybrid">🍱 混合模式（中午外卖 + 早晚自制）</option>
+                    </select>
+                </div>
+
+                <!-- 训练计划场景选择 -->
+                <div class="form-group">
+                    <label class="form-label">形体训练计划场景</label>
+                    <select id="prof-scene" class="input-control">
+                        <option value="home">🏠 居家自重经典循环 (深蹲+臀桥+俯卧撑+快走)</option>
+                        <option value="band">🎗️ 弹力带/轻器械塑形 (背部肩线与胸腹紧致)</option>
+                        <option value="cardio">🏃 户外快走慢跑刷脂 (高频燃脂心率模式)</option>
+                        <option value="gym">🏋️ 健身房器械力量进阶</option>
+                    </select>
+                </div>
+
+                <button class="btn-primary" style="margin-top: 14px;" onclick="saveCustomProfile()">
+                    💾 立即保存并重新计算代谢与食谱
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ================= 核心弹窗 2: 外卖高危拦截与强制平替对话框 ================= -->
+    <div class="modal-overlay" id="intercept-modal">
+        <div class="modal-card" style="border: 2px solid var(--danger);">
+            <div class="modal-header" style="background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%); color: #FFFFFF;">
+                <h2 style="color: #FFFFFF;">🚨 外卖严重超标警报！</h2>
+                <button class="modal-close-btn" style="background: rgba(255,255,255,0.2); color: #FFF;" onclick="closeInterceptModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; margin-bottom: 12px;">
+                    <div style="font-size: 16px; font-weight: 800; color: #991B1B;" id="modal-dish-name">隆江猪脚饭加卤蛋</div>
+                    <div style="font-size: 11.5px; color: #B91C1C; margin-top: 2px;" id="modal-warning-summary">单餐热量直接溢出今日总预算！</div>
+                </div>
+
+                <div style="background: #FEF2F2; border-radius: var(--radius-sm); padding: 10px; margin-bottom: 12px; font-size: 13px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                        <span>预估总热量：</span>
+                        <strong class="val" id="modal-dish-cal" style="color: var(--danger);">1180 kcal (超标 600)</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                        <span>隐形烹调油脂：</span>
+                        <strong class="val" id="modal-dish-oil" style="color: var(--danger);">42 g (超标 260%)</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>对今日缺口影响：</span>
+                        <strong class="val" style="color: #991B1B;">全天缺口归零并增脂120g</strong>
+                    </div>
+                </div>
+
+                <!-- 智能低卡平替推荐 -->
+                <div style="background: #F0FDF4; border: 1px solid var(--primary-border); border-radius: var(--radius-sm); padding: 10px; margin-bottom: 14px;">
+                    <div style="color: var(--primary-dark); font-weight: 700; font-size: 12px; margin-bottom: 3px;">✨ 严管教练推荐【一键低卡平替】：</div>
+                    <div style="font-size: 13.5px; font-weight: 800; color: #065F46;" id="modal-sub-name">白切鸡饭(去皮去油)+米饭减半</div>
+                    <div style="font-size: 11.5px; color: var(--primary-dark); margin-top: 2px;" id="modal-sub-benefit">热量仅 490 kcal · 优质蛋白35g · 立省 690 kcal！</div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <button class="btn-primary" onclick="acceptSubstitute()">
+                        ✅ 采纳低卡平替！立刻改单 (省下大几百卡)
+                    </button>
+                    <button class="btn-primary" style="background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);" onclick="cancelTakeoutOrder()">
+                        🛑 果断退单！我不吃了 (奖励自律积分)
+                    </button>
+                    <button style="background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px; font-size: 11px; color: var(--text-muted); cursor: pointer;" onclick="forceEatTakeout()">
+                        🤦 顽固执意要吃（记录惩罚加练）
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ================= 核心弹窗 3: 多用户真实登录与注册弹窗 ================= -->
+    <div class="modal-overlay" id="auth-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2 id="auth-modal-title">👤 用户登录与多账号管理</h2>
+                <button class="modal-close-btn" onclick="closeAuthModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- 登录 / 注册 切换条 -->
+                <div class="dining-mode-bar" style="margin-bottom: 14px;">
+                    <button class="dining-mode-btn active" id="btn-auth-tab-login" onclick="switchAuthTab('login')">登录现有账号</button>
+                    <button class="dining-mode-btn" id="btn-auth-tab-register" onclick="switchAuthTab('register')">注册新用户</button>
+                </div>
+
+                <!-- 登录表单 -->
+                <div id="auth-form-login">
+                    <div class="form-group">
+                        <label class="form-label">用户名</label>
+                        <input type="text" id="login-username" placeholder="请输入您的用户名" class="input-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">密码</label>
+                        <input type="password" id="login-password" placeholder="请输入您的密码" class="input-control">
+                    </div>
+                    <button class="btn-primary" style="margin-top: 10px;" onclick="submitLogin()">
+                        🚀 立即登录并载入真实档案
+                    </button>
+                    <div style="font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 10px;">
+                        新用户请切换至【注册新用户】录入个人真实身高体重
+                    </div>
+                </div>
+
+                <!-- 注册表单 -->
+                <div id="auth-form-register" style="display: none;">
+                    <div class="form-group">
+                        <label class="form-label">用户名 (用于公网链接识别)</label>
+                        <input type="text" id="reg-username" placeholder="英文字母或数字，如：myfit" class="input-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">密码</label>
+                        <input type="password" id="reg-password" placeholder="设置您的密码" class="input-control">
+                    </div>
+                    <div class="form-row-2 form-group">
+                        <div>
+                            <label class="form-label">性别</label>
+                            <select id="reg-gender" class="input-control">
+                                <option value="female">女 (女性代谢)</option>
+                                <option value="male">男 (男性代谢)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label">年龄</label>
+                            <input type="number" id="reg-age" value="26" class="input-control">
+                        </div>
+                    </div>
+                    <div class="form-row-2 form-group">
+                        <div>
+                            <label class="form-label">身高 (cm)</label>
+                            <input type="number" id="reg-height" placeholder="如：168" class="input-control">
+                        </div>
+                        <div>
+                            <label class="form-label">当前体重 (斤)</label>
+                            <input type="number" step="0.1" id="reg-weight" placeholder="如：130" class="input-control">
+                        </div>
+                    </div>
+                    <button class="btn-primary" style="margin-top: 10px;" onclick="submitRegister()">
+                        ✨ 注册并开通专属公网网页
+                    </button>
+                </div>
+
+                <!-- 当前已登录状态 -->
+                <div id="auth-logged-box" style="display: none; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); text-align: center;">
+                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">
+                        当前登录：<strong id="logged-username-text" style="color: var(--primary-dark);">--</strong>
+                    </p>
+                    <button style="background: none; border: 1px solid var(--danger-border); color: var(--danger); padding: 6px 14px; border-radius: var(--radius-sm); font-size: 11px; cursor: pointer;" onclick="logoutUser()">
+                        退出当前账号
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ================= 底部固定导航栏 ================= -->
+    <nav class="bottom-nav">
+        <div class="nav-item active" id="nav-dashboard" onclick="switchTab('dashboard')">
+            <span class="nav-icon">📊</span>
+            <span>监控</span>
+        </div>
+        <div class="nav-item" id="nav-recipes" onclick="switchTab('recipes')">
+            <span class="nav-icon">🥗</span>
+            <span>食谱/外卖</span>
+        </div>
+        <div class="nav-item" id="nav-workout" onclick="switchTab('workout')">
+            <span class="nav-icon">🏋️</span>
+            <span>训练计划</span>
+        </div>
+        <div class="nav-item" id="nav-body" onclick="switchTab('body')">
+            <span class="nav-icon">📷</span>
+            <span>形体照</span>
+        </div>
+        <div class="nav-item highlight" id="nav-takeout" onclick="switchTab('takeout')">
+            <span class="nav-icon">🚨</span>
+            <span>外卖拦截</span>
+        </div>
+        <div class="nav-item" id="nav-charts" onclick="switchTab('charts')">
+            <span class="nav-icon">📈</span>
+            <span>统计图</span>
+        </div>
+        <div class="nav-item" id="nav-gemini" onclick="switchTab('gemini')">
+            <span class="nav-icon">🤖</span>
+            <span>AI顾问</span>
+        </div>
+    </nav>
+
+    <script src="app.js"></script>
+</body>
+</html>
