@@ -1910,3 +1910,67 @@ body.has-floating-dl #app-main { padding-bottom: 140px; }
     white-space: nowrap;
     text-overflow: ellipsis;
 }
+
+
+/* ============================================================
+   2026-10-16 第三批：顶部新结构、每日状态条、动作卡展开、桌面排版
+   ============================================================ */
+.header-row-1 { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.header-tools { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.header-icon-btn {
+    border: 1px solid var(--border); background: #FFFFFF; border-radius: var(--radius-full);
+    width: 34px; height: 34px; font-size: 15px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
+}
+.header-icon-btn:active { transform: scale(0.94); }
+
+/* 档案摘要单独一行，彻底告别竖排 */
+.header-profile-line {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    width: 100%; margin-top: 8px; padding: 7px 12px; border-radius: 12px;
+    background: var(--primary-soft); border: 1px solid var(--primary-border);
+    color: var(--primary-dark); font-size: 12px; font-weight: 700; cursor: pointer;
+    text-align: left;
+}
+.header-profile-line #header-profile-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pill-edit { flex: 0 0 auto; font-size: 10.5px; background: #FFFFFF; border: 1px solid var(--primary-border); border-radius: 99px; padding: 1px 8px; }
+.mode-diff-hint { margin-top: 6px; font-size: 10.5px; color: var(--text-muted); line-height: 1.5; }
+
+.daily-strip {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 8px;
+    align-items: center; background: #FFFFFF; border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 10px;
+}
+.daily-cell { display: flex; flex-direction: column; min-width: 0; }
+.dc-val { font-size: 13px; font-weight: 800; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc-lab { font-size: 10px; color: var(--text-light); }
+.daily-export {
+    flex: 0 0 auto; border: 1px solid var(--primary-border); background: var(--primary-soft);
+    color: var(--primary-dark); border-radius: 99px; padding: 6px 12px; font-size: 11px; font-weight: 700; cursor: pointer;
+}
+
+.shoot-guide { background: #F8FAFC; border: 1px dashed var(--border); border-radius: 12px; padding: 8px 12px; margin: 8px 0; }
+.sg-title { font-size: 12px; font-weight: 800; color: var(--primary-dark); margin-bottom: 4px; }
+.shoot-guide ul { margin: 0; padding-left: 18px; font-size: 11.5px; color: var(--text-muted); line-height: 1.7; }
+
+.ex-actions { display: flex; gap: 8px; margin-top: 8px; }
+.ex-btn { flex: 1 1 0; min-width: 0; border: 1px solid var(--border); background: #FFFFFF; color: var(--text-muted); border-radius: 99px; padding: 5px 8px; font-size: 11px; font-weight: 700; cursor: pointer; }
+.ex-btn.video { border-color: var(--primary-border); background: var(--primary-soft); color: var(--primary-dark); }
+.ex-steps { display: none; margin: 8px 0 0; padding-left: 20px; font-size: 11.5px; color: var(--text-muted); line-height: 1.7; }
+.ex-steps.open { display: block; }
+.ex-wrong { margin-top: 6px; font-size: 11px; color: #B45309; background: #FFFBEB; border-radius: 8px; padding: 5px 8px; }
+
+/* 电脑版排版：更宽的容器 + 卡片双栏，横幅类元素跨满 */
+body.desktop-view #app-main { max-width: 1080px; margin: 0 auto; }
+body.desktop-view main .view-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+body.desktop-view main .view-panel > .user-web-banner,
+body.desktop-view main .view-panel > .web-download-card,
+body.desktop-view main .view-panel > .daily-strip,
+body.desktop-view main .view-panel > .alert-banner-danger,
+body.desktop-view main .view-panel > .alert-banner-warning,
+body.desktop-view main .view-panel > .card-title,
+body.desktop-view main .view-panel > .header-mode-bar { grid-column: 1 / -1; }
+body.desktop-view .app-header { max-width: 1080px; margin: 0 auto; }
+@media (max-width: 700px) {
+    body.desktop-view main .view-panel { grid-template-columns: minmax(0, 1fr); }
+}

@@ -8,32 +8,34 @@
 </head>
 <body>
 
-    <!-- ================= 顶部高颜值浅绿状态栏横幅 ================= -->
+    <!-- ================= 顶部：品牌与账号一行，档案摘要单独一行 ================= -->
     <header class="app-header">
-        <div class="header-top">
+        <div class="header-row-1">
             <div class="app-brand">
                 <div class="brand-icon">塑</div>
                 <div class="brand-text">
-                    <h1>轻塑 · 减脂塑形</h1>
-                    <p id="header-goal-subtitle">智能热量严管 & 动态食谱自适应</p>
+                    <h1>轻塑</h1>
+                    <p>减脂塑形严管伴侣</p>
                 </div>
             </div>
-            <!-- 用户登录/注册状态与档案定制胶囊 -->
-            <div style="display: flex; gap: 6px; align-items: center;">
-                <button class="header-download-btn" onclick="openDownloadModal()" title="下载轻塑安卓手机客户端">
-                    <span>📱</span>
-                    <span>下载App</span>
+            <div class="header-tools">
+                <button class="header-download-btn" id="btn-header-download" onclick="openDownloadModal()">
+                    <span>📱</span><span>下载App</span>
                 </button>
                 <button class="user-account-badge" onclick="openAuthModal()">
                     <span id="header-user-icon">👤</span>
                     <span id="header-username-display">登录/注册</span>
                 </button>
-                <button class="profile-pill-btn" onclick="openProfileModal()">
-                    <span id="header-profile-summary">未绑定档案 · 请先登录</span>
-                    <span class="gear-icon">⚙️</span>
-                </button>
+                <button class="header-icon-btn" id="btn-view-toggle" onclick="toggleViewMode()" title="切换电脑版/手机版排版">🖥️</button>
+                <button class="header-icon-btn" onclick="openProfileModal()" title="我的档案与身形目标">⚙️</button>
             </div>
         </div>
+
+        <!-- 档案摘要从胶囊里拿出来单独一行：以前挤在按钮里会被压成竖排 -->
+        <button class="header-profile-line" onclick="openProfileModal()">
+            <span id="header-profile-summary">未绑定档案 · 请先登录</span>
+            <span class="pill-edit">调整</span>
+        </button>
 
         <!-- 现代化 iOS/Tailwind 风格分段切换器 (运动日 / 休息日) -->
         <div class="header-mode-bar">
@@ -46,6 +48,7 @@
                 <span>运动日 · 充能 <strong id="mode-workout-cal">0</strong> kcal</span>
             </button>
         </div>
+        <div class="mode-diff-hint" id="mode-diff-hint"></div>
     </header>
 
     <!-- 主体视窗区域 -->
@@ -53,6 +56,24 @@
 
         <!-- ================= TAB 1: 监控大屏 ================= -->
         <section id="panel-dashboard" class="view-panel active">
+
+            <!-- 📆 每日状态：连续记录、周期第几天、预计达标、身材记录是否到期 -->
+            <div class="daily-strip">
+                <div class="daily-cell"><span class="dc-val" id="streak-days">0 天</span><span class="dc-lab">连续记录</span></div>
+                <div class="daily-cell"><span class="dc-val" id="cycle-day-text">周期未开始</span><span class="dc-lab">本周期进度</span></div>
+                <div class="daily-cell"><span class="dc-val" id="eta-days">暂无足够数据</span><span class="dc-lab">预计达标</span></div>
+                <button class="daily-export" onclick="exportMyData()">⬇️ 导出我的记录</button>
+            </div>
+
+            <!-- ⏰ 身材记录到期提醒（每 7 天，按真实日期算） -->
+            <div class="alert-banner-warning" id="measure-due-banner" style="display: none;">
+                <div class="alert-banner-icon">📷</div>
+                <div class="alert-banner-content">
+                    <h4>该更新身材记录了</h4>
+                    <p id="measure-due-text">拍照或只填体重与腰围都可以，系统按数字更新下一周期安排。</p>
+                </div>
+                <button class="btn-web-action" onclick="switchTab('body')">去更新</button>
+            </div>
 
             <!-- 🌐 专属公网监督大屏横幅 (满足用户需求：每个用户app上对应有自己的网页地址，用户自己点击查看) -->
             <div class="user-web-banner" id="user-web-link-card">
@@ -190,7 +211,7 @@
             <div class="card">
                 <div class="card-title">
                     <span class="title-left">💧 每日饮水打卡 (促进代谢/排钠消肿)</span>
-                    <span style="font-size: 11px; color: #2563EB; font-weight: 700;"><span id="water-consumed-text">0</span> / 2000 ml</span>
+                    <span style="font-size: 11px; color: #2563EB; font-weight: 700;"><span id="water-consumed-text">0</span> / <span id="water-target-text">2000</span> ml</span>
                 </div>
                 <div class="water-cups-grid" id="water-cups-box">
                     <!-- 8杯水动态渲染 -->
@@ -544,6 +565,16 @@
             <div class="cycle-badge-header">
                 <div>
                     <div class="cycle-step-indicator" id="cycle-title-display">📅 尚未建立周期</div>
+                    <div class="shoot-guide">
+                        <div class="sg-title">📐 怎么拍才算同一张（不然对比没有意义）</div>
+                        <ul>
+                            <li>同一时段：晨起空腹、上完厕所后</li>
+                            <li>同一位置：脚踩同一条线，手机固定高度与距离</li>
+                            <li>同一光线与背景：正面一次、侧面一次，双臂自然下垂</li>
+                            <li>卷尺水平绕肚脐一圈，不吸腹、不勒紧</li>
+                            <li>不想出镜：只填体重与肚脐腰围，一样会更新计划</li>
+                        </ul>
+                    </div>
                     <div class="cycle-step-sub" id="cycle-goal-display">阶段目标：先把每日记录做满，围度与体重变化由你自己的打卡算出来</div>
                 </div>
                 <span class="tag-offline-free" id="cycle-badge-tag">进行中</span>

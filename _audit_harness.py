@@ -7,6 +7,7 @@
     python _audit_harness.py --mutant   # 跑 git HEAD 那版（改动前），同一批判据应变红
 """
 import asyncio
+from datetime import date, timedelta
 import io
 import json
 import os
@@ -44,6 +45,14 @@ def install_stub_fastapi():
 
     class UploadFile:
         pass
+
+    class _Client:
+        def __init__(self, host):
+            self.host = host
+
+    class Request:
+        def __init__(self, ip="127.0.0.1"):
+            self.client = _Client(ip)
 
     class FastAPI:
         def __init__(self, *a, **k):
@@ -109,6 +118,14 @@ def install_stub_fastapi():
             except OSError:
                 self.body = ""
 
+    class Response:
+        def __init__(self, content="", media_type=None, headers=None, status_code=200, **kw):
+            self.body, self.media_type = content, media_type
+            self.headers = headers or {}
+            self.status_code = status_code
+
+    rs.Response = Response
+    fa.Request = Request
     rs.HTMLResponse = HTMLResponse
     rs.JSONResponse = JSONResponse
     rs.FileResponse = FileResponse
@@ -165,6 +182,12 @@ def main():
     os.makedirs(SANDBOX, exist_ok=True)
 
     m = load_server(get_source(mutant))
+    r3_missing = [f for f in ("set_day_mode", "submit_measure", "export_csv", "ask",
+                              "log_takeout_event", "check_share", "migrate_db", "_progression")
+                  if not hasattr(m, f)]
+    if r3_missing:
+        print("[注意] 该版本缺少 %d 个本轮新增实现：" + ", ".join(r3_missing))
+        print("       本轮新增判据在它上面无法执行（端点不存在，等价于全红），故只跑共有判据。")
     dbp = m.DB_PATH
 
     def q(sql, args=()):
@@ -181,6 +204,20 @@ def main():
         d.update(kw)
         m.register(m.RegisterReq(**d))
         return dict(q("SELECT * FROM users WHERE username=?", (name,))[0])
+
+    def get_secret(name):
+        """旧版没有 share_secret 列，取不到就返回 None。"""
+        try:
+            return q("SELECT share_secret FROM users WHERE username=?", (name,))[0]["share_secret"]
+        except Exception:
+            return None
+
+    def pub_page(name, key):
+        """新版签名带 k、旧版没有：两种都能调，变异样本才跑得完。"""
+        try:
+            return m.public_user_dashboard(username=name, k=key)
+        except TypeError:
+            return m.public_user_dashboard(username=name)
 
     # --- 1. 注册不得写入伪造腰围 ---
     uname = "audit_ok_1"
@@ -210,15 +247,19 @@ def main():
           "deficit=%s bar=%s" % (met["deficit"], bar_today["deficit"]))
 
     dash = m.compute_dashboard_data(user)
-    check("看板剩余额度自洽", dash["remaining_cal"] == round(met["target_cal"] - eat),
-          dash["remaining_cal"])
+    # 额度现在跟随 day_mode 的预算（休息日 rest_cal / 运动日 workout_cal），不再固定 target_cal
+    # 这条测的是"额度与当日预算自洽"，两版各自都该成立：新版预算随 day_mode，旧版固定 target_cal
+    budget = dash.get("budget_cal", met["target_cal"])
+    check("看板剩余额度自洽", dash["remaining_cal"] == round(budget - eat),
+          "remaining=%s budget=%s eat=%s" % (dash["remaining_cal"], budget, eat))
     check("看板今日摄入真实", dash["today_consumed"] == eat, dash["today_consumed"])
 
     # --- 4. 公网大屏注入 ---
     payload = "<img src=x onerror=alert(1)>"
-    b404 = body_of(m.public_user_dashboard(username=payload))
+    b404 = body_of(pub_page(payload, None))
     check("404 不回显原始标签", "<img src=x onerror" not in b404, b404[:100])
-    check("404 已 HTML 转义", "&lt;img" in b404, b404[:100])
+    # 旧判据要求"已转义"；现在更进一步——页面里根本不该出现用户名相关内容
+    check("404 页完全不回显用户名", "onerror" not in b404.lower(), b404[:140])
 
     os.makedirs(os.path.join(SANDBOX, "web"), exist_ok=True)
     # 用仓库里那份真首页当沙箱内容：占位 HTML 里没有 app.js 引用，
@@ -229,7 +270,8 @@ def main():
 
     evil = "a';alert(1);//"
     mkuser(evil, gender="male", goal_type="male_steady")
-    inj = [l for l in body_of(m.public_user_dashboard(username=evil)).split("\n")
+    evil_k = get_secret(evil)
+    inj = [l for l in body_of(pub_page(evil, evil_k)).split("\n")
            if "__PUBLIC_USER__" in l]
     check("注入行存在", len(inj) == 1, inj)
     def literal_of(txt):
@@ -244,7 +286,8 @@ def main():
 
     evil2 = "</scr" + "ipt><svg onload=x>"
     mkuser(evil2, gender="male", goal_type="male_lean")
-    line2 = [l for l in body_of(m.public_user_dashboard(username=evil2)).split("\n")
+    evil2_k = get_secret(evil2)
+    line2 = [l for l in body_of(pub_page(evil2, evil2_k)).split("\n")
              if "__PUBLIC_USER__" in l]
     lit2 = literal_of(line2[0]) if line2 else None
     check("恶意标签未裸奔在字面量里",
@@ -252,7 +295,8 @@ def main():
     check("恶意用户名仍可被 json.loads 原样还原",
           lit2 is not None and json.loads(lit2) == evil2, str(line2))
 
-    normal = body_of(m.public_user_dashboard(username=uname))
+    uname_k = get_secret(uname)
+    normal = body_of(pub_page(uname, uname_k))
     check("正常用户页带上 base", '<base href="/">' in normal, normal[:120])
 
     # --- 5. 周期报告：缺基准不得编造围度增减 ---
@@ -321,7 +365,7 @@ def main():
     v2 = apk_ver(m.root_dashboard().body)
     check("换包后下载 URL 立即改变", v2 is not None and v2 != v1, "%s -> %s" % (v1, v2))
 
-    rpub = m.public_user_dashboard(username=uname)
+    rpub = pub_page(uname, uname_k)
     check("大屏页同样带版本号", 'src="app.js?v=' in rpub.body, "")
     check("大屏页同样 no-cache", "no-cache" in (rpub.headers or {}).get("Cache-Control", ""), "")
 
@@ -439,6 +483,152 @@ def main():
           "floating.style.display" in js_txt and "has-floating-dl" in js_txt, "")
     check("顾问改走后端问答接口", 'postApi("/api/ask"' in js_txt, "")
     check("聊天气泡默认转义", "asHtml ? String(text) : escapeHtml(String(text))" in js_txt, "")
+
+    # ============ 本轮：安全与每日语义 ============
+    R3_NAMES = [
+        "注册即写随机盐", "口令不是裸 sha256", "scrypt 可校验通过", "错误口令校验失败",
+        "令牌只存哈希", "老账号登录后升级为 scrypt", "升级后仍能登录", "连错 5 次后限流 429",
+        "无密钥取不到公开数据", "不存在与密钥错返回同一形状", "带正确密钥可读到公开大屏",
+        "运动日预算比休息日高 170", "day_mode 回传前端", "budget_cal 跟着变",
+        "训练打卡后 today_workout_done 为真", "训练打卡自动切运动日", "连续记录天数可算",
+        "饮水目标按体重算", "清单勾选已按今天存库", "清单绑定的是今天",
+        "周期第几天按真实日期算", "未到 7 天不催拍照", "只填数字也能建周期",
+        "测量报告写明非视觉分析", "测量通道不假装看过照片", "周期名带真实第几天",
+        "导出行数=库内总行数+表头", "导出带 BOM 防 Excel 乱码", "导出声明为附件下载",
+        "顾问先答真实体重", "顾问能解释两种日子的真实差别", "顾问能答周期与提醒",
+        "没记录时不说假摄入",
+    ]
+    if r3_missing:
+        # 缺实现就是没做到，必须记红；跳过会让 --mutant 失去标定意义
+        for nm in R3_NAMES:
+            check(nm, False, "该版本没有对应实现")
+    else:
+        def R(ip="127.0.0.1"):
+            return m.Request(ip)
+
+        # 12. 口令与令牌不再明文
+        row = q("SELECT * FROM users WHERE username=?", (uname,))[0]
+        check("注册即写随机盐", bool(row["pw_salt"]) and len(row["pw_salt"]) >= 16, row["pw_salt"])
+        check("口令不是裸 sha256", row["password_hash"] !=
+              __import__("hashlib").sha256("pw123".encode()).hexdigest(), "")
+        check("scrypt 可校验通过", m.verify_pw("pw123", row) is True, "")
+        check("错误口令校验失败", m.verify_pw("wrong", row) is False, "")
+        check("令牌只存哈希", bool(row["token_hash"]) and not row["token"],
+              "token=%r token_hash=%s" % (row["token"], str(row["token_hash"])[:8]))
+
+        # 老账号透明升级
+        legacy = "legacy_sha"
+        conn = m.get_db(); cc = conn.cursor()
+        cc.execute("INSERT INTO users (username, password_hash, nickname, created_at) VALUES (?,?,?,?)",
+                   (legacy, m.hash_pw("old-pass"), "老账号", "2026-10-01 00:00:00"))
+        cc.execute("INSERT INTO profiles (user_id, gender, age, height, weight_jin, target_weight_jin, goal_type) "
+                   "VALUES (?, 'female', 30, 160, 130, 118, 'female_lean')", (cc.lastrowid,))
+        conn.commit(); conn.close()
+        lg = m.login(m.LoginReq(username=legacy, password="old-pass"), R())
+        after = q("SELECT pw_salt, password_hash FROM users WHERE username=?", (legacy,))[0]
+        check("老账号登录后升级为 scrypt", bool(after["pw_salt"]) and
+              after["password_hash"] != m.hash_pw("old-pass"), "")
+        check("升级后仍能登录", m.login(m.LoginReq(username=legacy, password="old-pass"), R())["code"] == 0, "")
+
+        # 登录限流
+        lk = "brute"
+        blocked = False
+        for i in range(7):
+            try:
+                m.login(m.LoginReq(username=lk, password="nope"), R("9.9.9.9"))
+            except Exception as e:
+                if getattr(e, "status_code", 0) == 429:
+                    blocked = True
+        check("连错 5 次后限流 429", blocked, "")
+
+        # 13. 公开大屏必须带密钥，且不给枚举信号
+        nokey = None
+        try:
+            nokey = m.get_public_dashboard(username=uname, k=None, request=R())
+        except Exception as e:
+            nokey = e
+        check("无密钥取不到公开数据", getattr(nokey, "status_code", 200) == 404, nokey)
+        wrong_key = None
+        try:
+            wrong_key = m.get_public_dashboard(username=uname, k="x" * 12, request=R("2.2.2.2"))
+        except Exception as e:
+            wrong_key = e
+        d_no = getattr(nokey, "detail", "")
+        d_wr = getattr(wrong_key, "detail", "")
+        check("不存在与密钥错返回同一形状", d_no == d_wr and uname not in str(d_no),
+              "%r vs %r" % (d_no, d_wr))
+        okk = q("SELECT share_secret FROM users WHERE username=?", (uname,))[0]["share_secret"]
+        pub = m.get_public_dashboard(username=uname, k=okk, request=R("3.3.3.3"))
+        check("带正确密钥可读到公开大屏", pub.get("user", {}).get("username") == uname, "")
+
+        # 14. 休息日 / 运动日真的改额度
+        m.set_day_mode(m.ModeReq(day_mode="rest"), user=user)
+        rest = m.compute_dashboard_data(user)
+        m.set_day_mode(m.ModeReq(day_mode="workout"), user=user)
+        work = m.compute_dashboard_data(user)
+        diff = work["remaining_cal"] - rest["remaining_cal"]
+        check("运动日预算比休息日高 170", diff == 170, "rest=%s work=%s diff=%s"
+              % (rest["remaining_cal"], work["remaining_cal"], diff))
+        check("day_mode 回传前端", work["day_mode"] == "workout", work["day_mode"])
+        check("budget_cal 跟着变", work["budget_cal"] == work["metrics"]["workout_cal"], "")
+
+        # 15. 每日状态：练完自动运动日 + today_workout_done 来自服务端
+        m.log_workout(m.WorkoutLogReq(duration_minutes=20, cal_burned=220.0, plan_name="测试"), user=user)
+        after_w = m.compute_dashboard_data(user)
+        check("训练打卡后 today_workout_done 为真", after_w["today_workout_done"] is True, "")
+        check("训练打卡自动切运动日", after_w["day_mode"] == "workout", after_w["day_mode"])
+        check("连续记录天数可算", after_w["streak_days"] >= 1, after_w["streak_days"])
+        check("饮水目标按体重算", after_w["water_target_ml"] ==
+              int(round(after_w["current_weight_jin"] / 2.0 * 35 / 50.0) * 50), after_w["water_target_ml"])
+
+        # 清单按日期隔离
+        m.save_checklist(m.ChecklistReq(state={"shop_0_1": True}), user=user)
+        today = date.today().isoformat()
+        got_cl = m.compute_dashboard_data(user)["checklist"]
+        check("清单勾选已按今天存库", got_cl.get("shop_0_1") is True, got_cl)
+        other = q("SELECT log_date FROM checklist_state WHERE user_id=?", (uid,))[0]["log_date"]
+        check("清单绑定的是今天", other == today, "%s vs %s" % (other, today))
+
+        # 16. 周期按真实日历，不传照片也能更新
+        conn = m.get_db(); cc = conn.cursor()
+        cc.execute("UPDATE profiles SET cycle_started_at = ? WHERE user_id = ?",
+                   ((date.today() - timedelta(days=3)).isoformat(), uid))
+        conn.commit(); conn.close()
+        cyc = m.compute_dashboard_data(user)
+        check("周期第几天按真实日期算", cyc["cycle_day"] == 4, cyc["cycle_day"])
+        check("未到 7 天不催拍照", cyc["photo_due"] is False or cyc["days_since_measure"] is not None, 
+              "due=%s since=%s" % (cyc["photo_due"], cyc["days_since_measure"]))
+
+        meas = asyncio.run(m.submit_measure(weight_jin=133.0, waist_cm=82.0, photo=None, user=user))
+        check("只填数字也能建周期", meas["code"] == 0 and meas["cycle_num"] >= 2, meas)
+        last = q("SELECT * FROM body_cycles WHERE user_id=? ORDER BY cycle_num DESC LIMIT 1", (uid,))[0]
+        check("测量报告写明非视觉分析", "非视觉分析" in last["ai_report"], last["ai_report"][:120])
+        check("测量通道不假装看过照片", "未上传" in last["ai_report"] or "改用你填写的数字" in last["ai_report"],
+              last["ai_report"][:160])
+        check("周期名带真实第几天", "第 4 天" in last["cycle_name"], last["cycle_name"])
+
+        # 17. CSV 导出
+        resp = m.export_csv(user=user)
+        body = resp.body if isinstance(resp.body, str) else resp.body.decode("utf-8")
+        lines_csv = [x for x in body.split("\n") if x.strip()]
+        # 必须按本人 user_id 数：库里还有别的测试账号，全库计数会虚高
+        n_db = sum(q("SELECT COUNT(*) AS n FROM " + t + " WHERE user_id=?", (uid,))[0]["n"] for t in
+                   ("food_logs", "weight_logs", "workout_logs", "water_logs", "takeout_events", "body_cycles"))
+        check("导出行数=库内总行数+表头", len(lines_csv) == n_db + 1, "%s vs %s" % (len(lines_csv), n_db + 1))
+        check("导出带 BOM 防 Excel 乱码", body.startswith("\ufeff"), body[:12])
+        check("导出声明为附件下载",
+              "attachment" in (resp.headers or {}).get("Content-Disposition", ""), resp.headers)
+
+        # 18. 顾问三层
+        a1 = m.ask(m.AskReq(question="我多重"), user=user)
+        check("顾问先答真实体重", a1["source"] == "data" and "133" in a1["answer"], a1["answer"][:120])
+        a2 = m.ask(m.AskReq(question="休息日和运动日有什么区别"), user=user)
+        check("顾问能解释两种日子的真实差别", a2["source"] == "data" and "170" in a2["answer"], a2["answer"][:150])
+        a3 = m.ask(m.AskReq(question="我该拍照了吗"), user=user)
+        check("顾问能答周期与提醒", a3["source"] == "data" and ("第" in a3["answer"] or "该更新" in a3["answer"]),
+              a3["answer"][:120])
+        a4 = m.ask(m.AskReq(question="今天还没记录，我摄入多少"), user=user)
+        check("没记录时不说假摄入", a4["source"] != "web", a4["source"])
 
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (

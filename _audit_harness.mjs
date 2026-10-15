@@ -44,11 +44,15 @@ function makeCtx() {
         _s: new Set(),
         add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); },
         contains(c) { return this._s.has(c); },
+        toggle(c, on) {
+          if (on === undefined) { this._s.has(c) ? this._s.delete(c) : this._s.add(c); }
+          else { on ? this._s.add(c) : this._s.delete(c); }
+        },
       },
       getContext() { return ctx2d; },
       _children: [],
       appendChild(c) { this._children.push(c); return c; },
-      remove() {}, select() {}, focus() {},
+      remove() {}, select() {}, focus() {}, click() { log.clicks = (log.clicks || 0) + 1 },
       addEventListener() {},
     };
     // innerHTML 必须有真实父子语义：写 innerHTML 会清掉子节点，appendChild 的内容要能读回来。
@@ -96,6 +100,10 @@ function makeCtx() {
           add(c) { this._s.add(c); },
           remove(c) { this._s.delete(c); },
           contains(c) { return this._s.has(c); },
+          toggle(c, on) {
+            if (on === undefined) { this._s.has(c) ? this._s.delete(c) : this._s.add(c); }
+            else { on ? this._s.add(c) : this._s.delete(c); }
+          },
         },
       },
       execCommand() {},
@@ -119,6 +127,8 @@ function makeCtx() {
     FormData: class { constructor() { this.f = {}; } append(k, v) { this.f[k] = v; } },
     FileReader: class { readAsDataURL() {} },
     Math, Number, String, Object, Array, JSON, Date, RegExp, Error, Promise, encodeURIComponent,
+    Blob: class { constructor(parts) { this.parts = parts; } },
+    URL: { createObjectURL: () => 'blob:fake', revokeObjectURL() {} },
     isNaN, parseInt, parseFloat, Set, Map,
   };
   sandbox.globalThis = sandbox;
@@ -424,21 +434,159 @@ function txt2() { return String(run(h.context, `document.getElementById("chat-me
 // ===== 13. 悬浮下载入口：App 内隐藏，网页版留白 =====
 const hApp = makeCtx();
 loadJs(hApp.context);
-(hApp.listeners["DOMContentLoaded"] || []).forEach(fn => { try { fn(); } catch (e) {} });
+const hAppErrs = [];
+(hApp.listeners["DOMContentLoaded"] || []).forEach(fn => { try { fn(); } catch (e) { hAppErrs.push(String(e && e.message)); } });
+check("App 初始化不抛异常", hAppErrs.length === 0, hAppErrs.join(" / "));
 const fl = hApp.sandbox.document.querySelector(".floating-dl-btn");
 check("App 内隐藏悬浮下载", fl.style.display === "none", JSON.stringify(fl.style));
 
 const hWeb = makeCtx();
 delete hWeb.sandbox.window.AndroidBridge;
 loadJs(hWeb.context);
-(hWeb.listeners["DOMContentLoaded"] || []).forEach(fn => { try { fn(); } catch (e) {} });
+const hWebErrs = [];
+(hWeb.listeners["DOMContentLoaded"] || []).forEach(fn => { try { fn(); } catch (e) { hWebErrs.push(String(e && e.message)); } });
+check("网页版初始化不抛异常", hWebErrs.length === 0, hWebErrs.join(" / "));
 check("网页版给主内容留出底部空间",
   hWeb.sandbox.document.body.classList.contains("has-floating-dl"), "");
 check("网页版仍显示悬浮下载", hWeb.sandbox.document.querySelector(".floating-dl-btn").style.display !== "none", "");
 
+
+try {
+// ===== 14. 本轮第三批：日子切换、动作要点、视图切换、导出、每日提醒 =====
+// 静态判据必须与 --mutant 同源：变异模式下要读 HEAD 那份，否则永远绿
+function srcOf(rel) {
+  return MUTANT
+    ? execFileSync("git", ["show", "HEAD:" + rel], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+    : fs.readFileSync(path.join(ROOT, rel), "utf8");
+}
+const jsSrc = srcOf("app/src/main/assets/app.js");
+const htmlSrc = srcOf("app/src/main/assets/index.html");
+const cssSrc = srcOf("app/src/main/assets/style.css");
+
+// 动作要点：32 条，每条 3 步 + 1 条常见错误
+const exBlock = jsSrc.slice(jsSrc.indexOf("const EX_STEPS"), jsSrc.indexOf("function toggleExerciseSteps"));
+const exKeys = [...exBlock.matchAll(/"[a-z_]+:\d":/g)].map(m => m[0]);
+check("动作要点覆盖 32 个动作", exKeys.length === 32, exKeys.length);
+const badSteps = [...exBlock.matchAll(/steps: \[([^\]]*)\]/g)].filter(m => (m[1].match(/", "/g) || []).length + 1 < 3);
+check("每条要点至少 3 步", badSteps.length === 0, badSteps.length);
+check("每条都写了常见错误", (exBlock.match(/wrong: "/g) || []).length === 32,
+      (exBlock.match(/wrong: "/g) || []).length);
+check("要点不含疗效承诺", !/立刻见效|一周瘦|月瘦\d+斤|保证/.test(exBlock), "");
+
+// 渲染出的动作卡带两个按钮
+sandbox.__fetchHandler = () => Promise.resolve(okJson({ code: 0 }));
+run(h.context, `state.profile.gender="male"; state.profile.goalType="male_v_taper"; renderWorkoutExercises();`);
+const exHtml = String(run(h.context, `document.getElementById("workout-exercises-card").innerHTML`));
+check("动作卡有标准分解按钮", exHtml.includes("标准动作分解"), "");
+check("动作卡有视频按钮", exHtml.includes("看演示视频"), "");
+check("动作卡写明倒计时对应这 4 个动作", exHtml.includes("这 4 个动作"), exHtml.slice(0, 120));
+check("要点已渲染进卡片", exHtml.includes("肩胛先下沉"), "");
+run(h.context, `toggleExerciseSteps(0)`);
+check("点开后要点容器加 open 类",
+      run(h.context, `document.getElementById("ex-steps-0").classList.contains("open")`), "");
+
+// 视频跳转：走原生桥，不内置声称
+let opened = null;
+sandbox.window.AndroidBridge.openBrowser = (u) => { opened = u; };
+run(h.context, `openExerciseVideo(1)`);
+check("视频按钮跳必应视频搜索", !!opened && opened.includes("bing.com/videos/search") &&
+      encodeURIComponent("侧平举").slice(0, 6).length > 0, opened);
+check("跳转前声明视频来自第三方",
+      log.toasts.some(t => t.includes("第三方") && t.includes("不内置")), "");
+
+// 日子切换真的打到后端
+log.fetches.length = 0;
+sandbox.__fetchHandler = (u) => Promise.resolve(okJson({ code: 0, day_mode: "workout" }));
+run(h.context, `state.token="tk"; switchDayMode("workout", true)`);
+await drain();
+const modeCall = log.fetches.find(f => String(f[0]).includes("/api/profile/mode"));
+check("切换日子调用 /api/profile/mode", !!modeCall && JSON.parse(modeCall[1].body).day_mode === "workout", "");
+
+// 切换失败要回滚，不能留下"看着切了其实没切"
+sandbox.__fetchHandler = () => { throw new TypeError("net down"); };
+run(h.context, `state.mode="rest"; switchDayMode("workout", true)`);
+await drain();
+check("切换失败后 mode 回滚", run(h.context, "state.mode") === "rest", run(h.context, "state.mode"));
+check("切换失败要说没保存", log.toasts.some(t => t.includes("没保存")), "");
+
+// 每日状态入 state
+feed({ today_workout_done: true, day_mode: "workout", checklist: { shop_0_1: true },
+       water_target_ml: 2450, streak_days: 5, eta_days: 38, photo_due: true, cycle_day: 4,
+       days_since_measure: 9 });
+check("今日已练状态来自服务端", run(h.context, "state.workoutDoneToday") === true, "");
+check("日子来自服务端", run(h.context, "state.dayMode") === "workout", "");
+check("清单来自服务端", run(h.context, "state.checklistState.shop_0_1") === true, "");
+check("饮水目标来自服务端", run(h.context, "state.waterTargetMl") === 2450, "");
+check("连续天数上屏", txt("streak-days").includes("5"), txt("streak-days"));
+check("达标预估上屏", txt("eta-days").includes("38"), txt("eta-days"));
+check("周期进度按真实天数上屏", txt("cycle-day-text").includes("第 4 天"), txt("cycle-day-text"));
+check("到期时提醒横幅显示",
+      run(h.context, `document.getElementById("measure-due-banner").style.display`) === "flex", "");
+check("提醒文案带真实间隔天数", txt("measure-due-text").includes("9 天"), txt("measure-due-text"));
+feed({ photo_due: false, days_since_measure: 2 });
+check("未到期时横幅隐藏",
+      run(h.context, `document.getElementById("measure-due-banner").style.display`) === "none", "");
+check("没数据时预估显示暂无足够数据", txt("eta-days").includes("暂无"), txt("eta-days"));
+
+// 每日只提醒一次
+let noteCount = 0;
+sandbox.window.AndroidBridge.showNotification = (a, b) => { noteCount++; };
+run(h.context, `state.token="tk"; try{localStorage.removeItem("QINGSU_NOTED_"+new Date().toISOString().slice(0,10))}catch(e){}`);
+run(h.context, `notifyOnceToday("测试","内容")`);
+run(h.context, `notifyOnceToday("测试","内容")`);
+check("同一天只提醒一次", noteCount === 1, noteCount);
+
+// 导出走带凭证的请求
+log.fetches.length = 0;
+log.clicks = 0;
+sandbox.__fetchHandler = () => Promise.resolve({ ok: true, status: 200, text: async () => "a,b\n1,2" });
+run(h.context, `exportMyData()`);
+await drain();
+const expCall = log.fetches.find(f => String(f[0]).includes("/api/export.csv"));
+check("导出带 Authorization 头", !!expCall && /Bearer/.test(expCall[1].headers.Authorization || ""), "");
+check("导出真的触发下载点击", (log.clicks || 0) >= 1, log.clicks);
+run(h.context, `state.token=null; exportMyData()`);
+await drain();
+check("未登录导出会提示先登录", log.toasts.some(t => t.includes("请先登录")), "");
+
+// 无照片走测量通道
+log.fetches.length = 0;
+sandbox.__fetchHandler = () => Promise.resolve(okJson({ code: 0, msg: "ok" }));
+run(h.context, `document.getElementById("cycle-input-weight").value="133";
+                document.getElementById("cycle-input-waist").value="82";
+                const fe=document.getElementById("file-cycle-photo-input"); fe.files=null;
+                upgradeCyclePlan();`);
+await drain();
+check("没照片时提交到测量端点",
+      log.fetches.some(f => String(f[0]).includes("/api/cycle/measure")),
+      log.fetches.map(f => String(f[0])).join(","));
+
+// 视图切换与顶部新结构
+run(h.context, `applyViewMode("desktop")`);
+check("桌面模式加上 desktop-view 类",
+      sandbox.document.body.classList.contains("desktop-view"), "");
+check("切换按钮文案随之改变", txt2b("btn-view-toggle").includes("手机版"), txt2b("btn-view-toggle"));
+run(h.context, `applyViewMode("mobile")`);
+check("手机模式撤掉 desktop-view", !sandbox.document.body.classList.contains("desktop-view"), "");
+function txt2b(id) { return String(run(h.context, `document.getElementById("${id}").innerText`)); }
+
+check("首页有 header-row-1 结构", htmlSrc.includes('class="header-row-1"'), "");
+check("档案摘要独立成行", htmlSrc.includes("header-profile-line"), "");
+check("有视图切换按钮", htmlSrc.includes('id="btn-view-toggle"'), "");
+check("有日子差异说明位", htmlSrc.includes('id="mode-diff-hint"'), "");
+check("有每日状态条", htmlSrc.includes('class="daily-strip"'), "");
+check("有拍摄标准指引", htmlSrc.includes("shoot-guide"), "");
+check("CSS 有桌面双栏", cssSrc.includes("desktop-view main .view-panel") && cssSrc.includes("grid-template-columns"), "");
+check("CSS 桌面横幅跨满", cssSrc.includes("grid-column: 1 / -1"), "");
+check("标题不再是被挤的长句", /<h1>轻塑<\/h1>/.test(htmlSrc), "");
+} catch (e) {
+  check("本轮前端改动在该版本无法执行（等价于全红）", false, String(e && e.message));
+}
+
 const bad = R.filter(x => !x[1]);
 console.log(`\n=== ${MUTANT ? "变异样本(HEAD 改动前)" : "当前源码"}：${R.length} 条，绿 ${R.length - bad.length}，红 ${bad.length} ===`);
 for (const [name, ok, detail] of R) console.log(`  ${ok ? "绿" : "红"} ${name}${ok ? "" : "  -> " + detail}`);
-const pass = MUTANT ? bad.length >= 10 : bad.length === 0;
+// 本轮块在缺实现的版本上会塌成一条（端点/函数根本不存在），所以阈值按 5 条算
+const pass = MUTANT ? bad.length >= 5 : bad.length === 0;
 console.log("EXIT=" + (pass ? 0 : 1));
 process.exit(pass ? 0 : 1);

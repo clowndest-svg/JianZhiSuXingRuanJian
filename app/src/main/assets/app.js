@@ -147,6 +147,7 @@ window.addEventListener("DOMContentLoaded", () => {
     renderShoppingList();
     renderRecipePlan(state.selectedPlan || "A");
     switchShapeGender(state.profile.gender || "female", false);
+    initViewMode();
     if (window.location.hash === "#download" || window.location.search.includes("download=1")) {
         setTimeout(openDownloadModal, 400);
     }
@@ -294,6 +295,15 @@ function updateUserUI(username) {
 function applyDashboardData(data) {
     if (!data || !data.metrics) return;
     state.dashboardLoaded = true;
+    // 今天练没练、清单勾了哪些、当前是休息日还是运动日，都以服务端为准
+    state.workoutDoneToday = !!data.today_workout_done;
+    state.dayMode = data.day_mode || "rest";
+    state.checklistState = data.checklist || {};
+    state.waterTargetMl = data.water_target_ml || 2000;
+    state.streakDays = data.streak_days || 0;
+    state.etaDays = data.eta_days || null;
+    state.photoDue = !!data.photo_due;
+    state.cycleDay = data.cycle_day || null;
     state.calculated = {
         bmr: data.metrics.bmr,
         tdee: data.metrics.tdee,
@@ -561,6 +571,24 @@ function renderRealStats(d) {
     setText("kpi-cal-sub", m.deficit
         ? `缺口 ${m.deficit} kcal · 理论约 ${monthly} 斤/月（按 7700 kcal≈1 kg 脂肪折算）`
         : "未绑定档案");
+
+    setText("streak-days", (d.streak_days || 0) + " 天");
+    setText("eta-days", d.eta_days ? `约 ${d.eta_days} 天` : "暂无足够数据");
+    setText("cycle-day-text", d.cycle_day ? `本周期第 ${d.cycle_day} 天` : "周期未开始");
+
+    const due = document.getElementById("measure-due-banner");
+    if (due) {
+        if (d.photo_due) {
+            const gap = d.days_since_measure;
+            due.style.display = "flex";
+            setText("measure-due-text", gap === null || gap === undefined
+                ? "还没有过身材照或围度记录，现在建立基准，7 天后才能算出变化"
+                : `距上次身材记录已 ${gap} 天，该更新了：拍照或只填围度都可以`);
+        } else {
+            due.style.display = "none";
+        }
+    }
+    if (d.photo_due && state.token) notifyOnceToday("该更新身材记录了", "拍照或只填体重与腰围都行，系统按数字更新下一周期安排");
 }
 
 // 连续超标与脱离计划警报检查
@@ -669,6 +697,8 @@ function renderWaterCups() {
 
     const count = state.waterCupsCount || 0;
     if (text) text.innerText = count * 250;
+    const tgt = document.getElementById("water-target-text");
+    if (tgt) tgt.innerText = state.waterTargetMl || 2000;
 
     let html = "";
     for (let i = 1; i <= 8; i++) {
@@ -738,13 +768,15 @@ async function upgradeCyclePlan() {
     formData.append("waist_cm", inputWaist);
 
     const fileInput = document.getElementById("file-cycle-photo-input");
-    if (fileInput && fileInput.files && fileInput.files[0]) {
-        formData.append("photo", fileInput.files[0]);
-    }
+    const hasPhoto = !!(fileInput && fileInput.files && fileInput.files[0]);
+    if (hasPhoto) formData.append("photo", fileInput.files[0]);
+    // 没照片就走测量通道：只填体重与腰围同样能更新下一周期安排
+    const path = hasPhoto ? "/api/cycle/upgrade" : "/api/cycle/measure";
+    state.lastCyclePath = path;
 
     try {
         callNativeToast("正在提交身材照并生成下一阶段进阶规划...");
-        const data = await postApi("/api/cycle/upgrade", formData);
+        const data = await postApi(state.lastCyclePath || "/api/cycle/upgrade", formData);
         callNativeToast(data.msg || "🎉 周期身材照已记录！");
         callNativeVibrate(250);
         callNativeBeep();
@@ -1105,6 +1137,14 @@ function launchTakeoutApp(type) {
     } else {
         const url = type === "meituan" ? "https://i.meituan.com" : "https://h5.ele.me";
         window.open(url, "_blank");
+    }
+}
+
+function notifyOnceToday(title, body) {
+    const key = "QINGSU_NOTED_" + new Date().toISOString().slice(0, 10);
+    try { if (localStorage.getItem(key)) return; localStorage.setItem(key, "1"); } catch (e) { return; }
+    if (window.AndroidBridge && window.AndroidBridge.showNotification) {
+        window.AndroidBridge.showNotification(title, body);
     }
 }
 
@@ -1764,8 +1804,12 @@ function renderWorkoutExercises() {
     if (badge) badge.innerText = planTitle;
     if (callout) callout.innerHTML = calloutHtml;
 
-    let html = `<div style="font-weight: 700; font-size: 13.5px; color: var(--text-main); margin-bottom: 10px;">📋 针对【${planTitle}】的动作循环：</div>`;
-    list.forEach(item => {
+    let html = `<div style="font-weight: 700; font-size: 13.5px; color: var(--text-main); margin-bottom: 4px;">📋 【${planTitle}】的 4 个动作循环：</div>`
+        + `<div style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">下面的倒计时就是给这 4 个动作用的：一轮约 ${timerSeconds / 60} 分钟，做完按【记录今日训练打卡】。</div>`;
+    list.forEach((item, idx) => {
+        const meta = EX_STEPS[key + ":" + idx] || {};
+        const steps = (meta.steps || []).map((x, i) => `<li>${i + 1}. ${x}</li>`).join("");
+        const wrong = meta.wrong ? `<div class="ex-wrong">常见错误：${meta.wrong}</div>` : "";
         html += `
             <div class="exercise-card">
                 <div class="exercise-header">
@@ -1773,10 +1817,74 @@ function renderWorkoutExercises() {
                     <span class="exercise-reps">${item.reps}</span>
                 </div>
                 <div class="exercise-tip">${item.tip}</div>
+                <div class="ex-actions">
+                    <button class="ex-btn" onclick="toggleExerciseSteps(${idx})">标准动作分解</button>
+                    <button class="ex-btn video" onclick="openExerciseVideo(${idx})">看演示视频</button>
+                </div>
+                <ol class="ex-steps" id="ex-steps-${idx}">${steps}</ol>
+                ${wrong}
             </div>
         `;
     });
     container.innerHTML = html;
+    window.__currentExercises = list;
+}
+
+// 每个动作的标准分解与常见错误，按「身形key:组内序号」定位。
+// 只写做得对不对要看的点，不写无法验证的疗效承诺。
+const EX_STEPS = {
+    "female_hourglass:0": { steps: ["仰卧屈膝，脚跟离臀约一脚长", "脚跟下压送髋至肩-髋-膝一条线", "顶端夹紧臀部停 2 秒再落下，不顶腰"], wrong: "用腰往上顶，顶端塌腰，腰先酸就是错了" },
+    "female_hourglass:1": { steps: ["仰卧，双臂伸直指向天花板，双腿抬成 90 度", "对侧手脚同时缓慢伸出，腰椎全程贴地", "回位时呼气，全程下背不离开地面"], wrong: "下背拱起离地，说明核心已失守，改小幅度" },
+    "female_hourglass:2": { steps: ["弹力带套在膝盖上方，微蹲位站稳", "侧向跨步，脚尖朝前不内扣", "蚌式：侧卧屈膝，脚跟并拢向上开膝"], wrong: "膝盖内扣、腰跟着晃，就变成了代偿" },
+    "female_hourglass:3": { steps: ["四点跪位，手腕在肩正下方", "对侧手脚同时伸出，骨盆保持水平", "停 2 秒回收，换边，躯干不左右转"], wrong: "腿抬越高腰越塌，高度以骨盆不动为准" },
+    "female_lean:0": { steps: ["双脚宽于肩，脚尖外展约 45 度", "膝盖对准脚尖下蹲，重心在脚跟", "起身时夹臀，不靠膝盖发力"], wrong: "膝盖往里塌，大腿内侧没吃到力" },
+    "female_lean:1": { steps: ["扶墙站稳，支撑腿微屈", "后腿伸直向后上方抬起，不塌腰", "侧抬腿时脚尖朝前，骨盆不翻"], wrong: "腰跟着抬腿一起摆，就变成甩腿" },
+    "female_lean:2": { steps: ["跪姿，双手略宽于肩撑地", "身体一条直线向下压，肘约 45 度夹", "推起时肩胛向前推满"], wrong: "塌腰或耸肩，颈先酸即错" },
+    "female_lean:3": { steps: ["步频偏快、步幅小，能说话但唱不了歌", "落地用中足，膝盖不内扣", "前后各 3 分钟慢走过渡"], wrong: "一上来就冲快，心率过高坚持不到 30 分钟" },
+    "female_athletic:0": { steps: ["双手托住负重贴胸前，肘不外张", "下蹲至髋低于膝，胸不塌", "脚跟发力站起，顶端夹臀"], wrong: "含胸低头、脚跟离地，重量全压到膝" },
+    "female_athletic:1": { steps: ["双手持铃贴大腿，肩胛下沉后收", "屈髋把臀向后推，膝盖只微屈", "背部平直下探到腿后侧有拉伸感再站回"], wrong: "变成半蹲下坐，练的是腿不是臀和腘绳肌" },
+    "female_athletic:2": { steps: ["仰卧屈膝，下背压实地面", "卷起时肩胛离地即可，不靠手拽头", "悬垂或撑地提膝，呼气向下腹收"], wrong: "脖子先酸说明在用头颈带身体" },
+    "female_athletic:3": { steps: ["弹力带齐脸高，双手向脸两侧拉开", "肘高于腕，肩胛向后夹", "俯身飞鸟：屈髋俯身，向两侧抬肘"], wrong: "重量太大变成耸肩和甩臂" },
+    "female_steady:0": { steps: ["椅背当扶手，双脚与肩同宽", "臀部向后坐到轻触椅面即起", "膝盖不超脚尖、不内扣"], wrong: "为了蹲深而膝盖前顶，压力全在髌骨" },
+    "female_steady:1": { steps: ["面对墙一步远，手掌撑墙与肩同高", "身体一条直线向墙倾，再推回", "肩胛在推程中向前展开"], wrong: "只动手腕和头，肩背完全没参与" },
+    "female_steady:2": { steps: ["双手轻扶耳侧，站直", "抬右膝同时左肘下探靠近", "落地站稳再换边，不借惯性甩"], wrong: "越做越快变成晃身体，腰反而受力" },
+    "female_steady:3": { steps: ["大步幅、摆臂，脚跟先过渡到全掌", "微微出汗能正常说话即有效", "前后各 3 分钟放慢收尾"], wrong: "边走边低头看手机，含胸使呼吸变浅" },
+    "male_v_taper:0": { steps: ["悬挂或高位下拉，肩胛先下沉", "肘向身体两侧拉至锁骨高度", "顶端夹背 1 秒，控制 2 秒放回"], wrong: "靠摆身体和耸肩把重量拽下来" },
+    "male_v_taper:1": { steps: ["肘微屈，向两侧抬至与肩同高", "手腕不高于肘，不向前甩", "缓慢下放，全程不耸肩"], wrong: "重量过大变成斜方肌借力甩" },
+    "male_v_taper:2": { steps: ["仰卧双手垫臀侧，双腿并拢", "用下腹把骨盆向后卷起，膝向胸", "剪刀腿：离地 15 度交替下放，下背贴地"], wrong: "下背拱起，练到的是髂腰肌不是腹" },
+    "male_v_taper:3": { steps: ["钻石：双手拇指食指相对成菱形", "上斜：手撑桌面或椅面，身体越直越易", "胸贴近手再推满，肘不外飞"], wrong: "手位太低导致肩前侧刺痛" },
+    "male_lean:0": { steps: ["宽距练胸外沿，窄距练中缝与肱三头", "身体一条直线，肘约 45 度", "下放至胸离地一拳即推回"], wrong: "塌腰撅臀，把重量转给腰椎" },
+    "male_lean:1": { steps: ["平板位：肩在腕正上方，臀夹紧", "单手离地向外打开，胸腔转向斜上方", "回到平板再换边，骨盆不晃"], wrong: "为转体把腰塌下去，变成腰椎扭转" },
+    "male_lean:2": { steps: ["后脑、上背、臀贴墙站", "双臂成 W 贴墙，向上滑成 Y", "全程肋骨不下压、肩不上耸"], wrong: "腰离墙拱起，等于没纠正驼背" },
+    "male_lean:3": { steps: ["坡度 8-12，速度 4.5-5.5 km/h", "不扶把手，身体微前倾保持直立", "前后各 2 分钟平坡过渡"], wrong: "死死抓住扶手把身体吊起来，消耗大打折扣" },
+    "male_muscular:0": { steps: ["负重深蹲：杠铃或双手持铃于胸前", "吸气下蹲至髋低于膝，呼气站起", "半蹲跳只做 3-5 次即止，落地轻"], wrong: "膝盖内扣、脚跟离地、腰圆背" },
+    "male_muscular:1": { steps: ["下落 3 秒，胸离地一拳", "推起时呼气夹胸，肘不完全锁死", "哑铃卧推：肩胛后收贴凳"], wrong: "靠弹震和半程换次数，胸没吃到力" },
+    "male_muscular:2": { steps: ["一手一膝撑凳，背平直", "肘贴身体向后拉至腰侧", "顶端停 1 秒，控制 2 秒放下"], wrong: "转身甩臂把重量拉起来" },
+    "male_muscular:3": { steps: ["窄距：双手与肩同宽，肘夹身体", "臂屈伸：背对椅面撑，肘向后弯", "全程肩不耸，肘不外飞"], wrong: "下放过低导致肩前侧拉扯痛" },
+    "male_steady:0": { steps: ["阻力档以能维持 25-30 分钟为准", "坐姿挺直，不趴把手", "前后各 2 分钟降档收尾"], wrong: "一档到底越骑越快，膝盖跟着晃" },
+    "male_steady:1": { steps: ["坐稳，双脚可着地降低难度", "躯干左右转，眼随肩走", "慢速有控制，不靠甩臂"], wrong: "幅度全靠惯性，腰椎被反复扭转" },
+    "male_steady:2": { steps: ["椅背当扶手，屈髋后坐", "轻触椅面即站起，重心在脚跟", "膝盖对准脚尖，不内扣"], wrong: "蹲得太深导致膝痛，深度以不痛为准" },
+    "male_steady:3": { steps: ["弹力带固定在身后齐胸高", "双臂向前平举夹胸，肩胛后收下沉", "回位 2 秒，不耸肩"], wrong: "含胸驼背用手臂硬推，胸没感觉" },
+};
+
+function toggleExerciseSteps(idx) {
+    const el = document.getElementById("ex-steps-" + idx);
+    if (!el) return;
+    el.classList.toggle("open");
+}
+
+function openExerciseVideo(idx) {
+    const list = window.__currentExercises || [];
+    const item = list[idx];
+    if (!item) return;
+    const name = String(item.name).replace(/^\d+\.\s*/, "").replace(/\s*[\/（(].*$/, "").trim();
+    const url = "https://cn.bing.com/videos/search?q=" + encodeURIComponent(name + " 标准动作 健身");
+    callNativeToast("视频来自第三方，本软件不内置教程");
+    if (window.AndroidBridge && window.AndroidBridge.openBrowser) {
+        window.AndroidBridge.openBrowser(url);
+    } else {
+        window.open(url, "_blank");
+    }
 }
 
 // ==========================================
@@ -1822,7 +1930,7 @@ function toggleTimer() {
                 clearInterval(timerInterval);
                 isTimerRunning = false;
                 if (btn) btn.innerText = "开始训练";
-                callNativeToast("🎉 训练完成！恭喜达成今日燃脂目标！");
+                callNativeToast("计时结束：这一轮对应上面那 4 个动作。按确定就把今天的训练记一笔。");
                 callNativeVibrate(300);
                 callNativeBeep();
                 completeWorkoutToday();
@@ -1839,7 +1947,13 @@ function resetTimer(mins) {
     const btn = document.getElementById("btn-timer-toggle");
     if (btn) { btn.innerText = "开始训练"; btn.style.background = "#10B981"; }
     const label = document.getElementById("timer-label");
-    if (label) label.innerText = mins === 25 ? "⏱️ 快走/超慢跑有氧倒计时 (25分钟)" : "⏱️ 抗阻塑形训练倒计时 (20分钟)";
+    if (label) {
+        const info = getShapeData(state.profile.gender, state.profile.goalType);
+        const plan = (info.data && info.data.title) || "当前身形";
+        label.innerText = mins === 25
+            ? `⏱️ 有氧倒计时 25 分钟 · 对应【${plan}】的有氧替换`
+            : `⏱️ 抗阻倒计时 ${mins} 分钟 · 对应【${plan}】上面那 4 个动作`;
+    }
     updateTimerDisplay();
 }
 
@@ -1929,22 +2043,46 @@ function switchTab(tabName) {
     }
 }
 
-function switchDayMode(mode) {
-    state.mode = mode;
-    const btnRest = document.getElementById("btn-mode-rest");
-    const btnWorkout = document.getElementById("btn-mode-workout");
-
-    if (mode === "workout") {
-        btnWorkout.classList.add("active");
-        btnRest.classList.remove("active");
-        callNativeToast(`已切为【运动日模式】：热量目标约 ${state.calculated.workoutCal} kcal！`);
-    } else {
-        btnRest.classList.add("active");
-        btnWorkout.classList.remove("active");
-        callNativeToast(`已切为【休息日模式】：热量目标约 ${state.calculated.restCal} kcal！`);
-    }
+async function switchDayMode(mode, silent) {
+    const next = mode === "workout" ? "workout" : "rest";
+    const prev = state.mode;
+    state.mode = next;
+    paintModeButtons();
     renderDashboard();
     renderCharts();
+    if (!state.token) {
+        if (!silent) callNativeToast("未登录：切换只改显示，登录后才会记进档案");
+        return;
+    }
+    try {
+        await postApi("/api/profile/mode", { day_mode: next });
+        await syncRemoteDashboard();
+        if (!silent) {
+            const d = state.calculated;
+            callNativeToast(next === "workout"
+                ? `运动日：今日预算抬到 ${d.workoutCal} kcal（比休息日多 170 kcal）`
+                : `休息日：今日预算 ${d.restCal} kcal`);
+        }
+    } catch (e) {
+        state.mode = prev;
+        paintModeButtons();
+        renderDashboard();
+        reportWriteFailure(e, "日子切换");
+    }
+}
+
+function paintModeButtons() {
+    const btnRest = document.getElementById("btn-mode-rest");
+    const btnWorkout = document.getElementById("btn-mode-workout");
+    if (!btnRest || !btnWorkout) return;
+    btnWorkout.classList.toggle("active", state.mode === "workout");
+    btnRest.classList.toggle("active", state.mode !== "workout");
+    const hint = document.getElementById("mode-diff-hint");
+    if (hint) {
+        hint.innerText = state.mode === "workout"
+            ? `运动日预算 ${state.calculated.workoutCal || "-"} kcal，比休息日多 170 kcal；练完这一餐补蛋白`
+            : `休息日预算 ${state.calculated.restCal || "-"} kcal；训练打卡后会自动换成运动日额度`;
+    }
 }
 
 // 外卖智能审核与拦截弹窗
@@ -2181,6 +2319,28 @@ function callNativeBeep() {
 // ==========================================
 // APK 手机客户端下载与扫码弹窗逻辑
 // ==========================================
+function applyViewMode(mode) {
+    document.body.classList.toggle("desktop-view", mode === "desktop");
+    document.body.classList.toggle("mobile-view", mode !== "desktop");
+    const btn = document.getElementById("btn-view-toggle");
+    if (btn) btn.innerText = mode === "desktop" ? "📱 手机版" : "🖥️ 电脑版";
+    try { localStorage.setItem("QINGSU_VIEW_MODE", mode); } catch (e) {}
+    setTimeout(() => { renderCharts(); }, 60);
+}
+
+function toggleViewMode() {
+    const cur = document.body.classList.contains("desktop-view") ? "desktop" : "mobile";
+    applyViewMode(cur === "desktop" ? "mobile" : "desktop");
+    callNativeToast(cur === "desktop" ? "已切到手机版排版" : "已切到电脑版排版（宽屏双栏）");
+}
+
+function initViewMode() {
+    let saved = null;
+    try { saved = localStorage.getItem("QINGSU_VIEW_MODE"); } catch (e) {}
+    const wide = window.innerWidth >= 900;
+    applyViewMode(saved || (wide ? "desktop" : "mobile"));
+}
+
 function openDownloadModal() {
     const modal = document.getElementById("download-apk-modal");
     if (modal) modal.classList.add("show");
@@ -2190,6 +2350,27 @@ function openDownloadModal() {
 function closeDownloadModal() {
     const modal = document.getElementById("download-apk-modal");
     if (modal) modal.classList.remove("show");
+}
+
+async function exportMyData() {
+    if (!state.token) { callNativeToast("请先登录再导出"); openAuthModal(); return; }
+    try {
+        const res = await fetch(`${API_BASE}/api/export.csv`, {
+            headers: { "Authorization": `Bearer ${state.token}` }
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const text = await res.text();
+        const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "轻塑我的记录.csv";
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+        callNativeToast("已导出全部流水（CSV，Excel 可直接打开）");
+    } catch (e) {
+        callNativeToast("导出失败：" + (e && e.message ? e.message : "网络不通"));
+    }
 }
 
 function copyApkDownloadUrl() {
