@@ -1607,4 +1607,243 @@ body {
     background: #F1F5F9;
 }
 
+/* ================= APK 下载弹窗与入口样式 ================= */
+.header-download-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+    color: #FFFFFF;
+    border: none;
+    padding: 5px 11px;
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(16, 185, 129, 0.28);
+    transition: transform 0.15s, opacity 0.15s;
+    flex-shrink: 0;
+}
+
+.header-download-btn:active {
+    transform: scale(0.95);
+    opacity: 0.9;
+}
+
+/* 主看板中的下载横幅卡片 */
+.web-download-card {
+    background: linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%);
+    border: 1px solid var(--primary-border);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.1);
+}
+
+.web-download-card:hover {
+    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.18);
+}
+
+.web-download-card:active {
+    transform: scale(0.98);
+}
+
+.download-card-icon {
+    font-size: 24px;
+    line-height: 1;
+    background: #FFFFFF;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    flex-shrink: 0;
+}
+
+.btn-download-pill {
+    background: #059669;
+    color: #FFFFFF;
+    border: none;
+    padding: 6px 12px;
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(5, 150, 105, 0.25);
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+}
+
+.btn-download-pill:active {
+    opacity: 0.85;
+}
+
+/* 浮动下载按钮 (在移动端或大屏吸底悬浮展示) */
+.floating-dl-btn {
+    position: fixed;
+    right: 14px;
+    bottom: 84px;
+    z-index: 99;
+    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+    color: #FFFFFF;
+    padding: 8px 14px;
+    border-radius: var(--radius-full);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 16px rgba(16, 185, 129, 0.38);
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    user-select: none;
+}
+
+.floating-dl-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.45);
+}
+
+.floating-dl-btn:active {
+    transform: scale(0.95);
+}
+
+.floating-dl-text {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+}
+
+.floating-dl-pulse {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    border-radius: var(--radius-full);
+    border: 2px solid #34D399;
+    animation: dlPulse 2.4s infinite;
+    pointer-events: none;
+}
+
+@keyframes dlPulse {
+    0% { transform: scale(1); opacity: 0.8; }
+    70% { transform: scale(1.15); opacity: 0; }
+    100% { transform: scale(1.15); opacity: 0; }
+}
+
+/* 下载弹窗特定样式 */
+.download-modal-card {
+    max-width: 420px;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+
+.qr-container-card {
+    background: #F8FAFC;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px 10px;
+}
+
+.qr-img-wrapper {
+    display: inline-block;
+    background: #FFFFFF;
+    padding: 8px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.qr-img {
+    width: 160px;
+    height: 160px;
+    display: block;
+    margin: 0 auto;
+}
+
+.btn-direct-download {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: linear-gradient(135deg, #10B981 0%, #047857 100%);
+    color: #FFFFFF;
+    text-decoration: none;
+    padding: 11px 16px;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    transition: transform 0.15s, opacity 0.15s;
+    cursor: pointer;
+}
+
+.btn-direct-download:hover {
+    opacity: 0.95;
+    transform: translateY(-1px);
+}
+
+.btn-direct-download:active {
+    transform: scale(0.98);
+}
+
+.download-link-box {
+    margin-top: 14px;
+    background: #F1F5F9;
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    text-align: center;
+}
+
+.download-url-code {
+    font-family: monospace;
+    font-size: 11.5px;
+    color: #047857;
+    font-weight: 700;
+    word-break: break-all;
+    user-select: all;
+    background: #FFFFFF;
+    padding: 4px 6px;
+    border-radius: 4px;
+    border: 1px dashed var(--primary-border);
+    margin-bottom: 6px;
+}
+
+.btn-copy-url {
+    background: #FFFFFF;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 11px;
+    padding: 4px 12px;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.15s;
+}
+
+.btn-copy-url:active {
+    background: #E2E8F0;
+}
+
+.download-highlights {
+    margin-top: 14px;
+    text-align: left;
+    background: #FFFBEB;
+    border: 1px solid #FDE68A;
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    font-size: 11px;
+    color: #92400E;
+    line-height: 1.6;
+}
+
+.dl-hl-item {
+    margin-bottom: 2px;
+}
+
+
 

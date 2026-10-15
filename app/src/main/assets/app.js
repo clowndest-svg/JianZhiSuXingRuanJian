@@ -146,6 +146,9 @@ window.addEventListener("DOMContentLoaded", () => {
     renderShoppingList();
     renderRecipePlan(state.selectedPlan || "A");
     switchShapeGender(state.profile.gender || "female", false);
+    if (window.location.hash === "#download" || window.location.search.includes("download=1")) {
+        setTimeout(openDownloadModal, 400);
+    }
 });
 
 async function initAuthAndData() {
@@ -1931,16 +1934,51 @@ function generateAiResponse(query) {
 我是您的纯本地免费顾问，国内使用无需外网。已基于您的真实档案（${c.summaryText}，每日目标 ${c.restCal}-${c.workoutCal} kcal）优化。牢记进餐顺序：先水、再菜、后肉、最后慢碳！若有任何外卖犹豫，先去【外卖拦截】审一下！`;
 }
 
-// 原生 Android 桥接
+// 原生 Android 桥接与 Web 端兼容 Toast
 function callNativeToast(msg) {
     if (window.AndroidBridge && window.AndroidBridge.showToast) {
         window.AndroidBridge.showToast(msg);
+    } else {
+        showWebToast(msg);
     }
+}
+
+function showWebToast(msg) {
+    let t = document.getElementById("web-toast-container");
+    if (!t) {
+        t = document.createElement("div");
+        t.id = "web-toast-container";
+        t.style.position = "fixed";
+        t.style.bottom = "84px";
+        t.style.left = "50%";
+        t.style.transform = "translateX(-50%) translateY(0)";
+        t.style.background = "rgba(15, 23, 42, 0.92)";
+        t.style.color = "#FFFFFF";
+        t.style.padding = "9px 18px";
+        t.style.borderRadius = "99px";
+        t.style.fontSize = "12px";
+        t.style.fontWeight = "600";
+        t.style.zIndex = "99999";
+        t.style.boxShadow = "0 4px 18px rgba(0,0,0,0.22)";
+        t.style.transition = "opacity 0.25s, transform 0.25s";
+        t.style.pointerEvents = "none";
+        document.body.appendChild(t);
+    }
+    t.innerText = msg;
+    t.style.opacity = "1";
+    t.style.transform = "translateX(-50%) translateY(0)";
+    clearTimeout(window.__toastTimer);
+    window.__toastTimer = setTimeout(() => {
+        t.style.opacity = "0";
+        t.style.transform = "translateX(-50%) translateY(10px)";
+    }, 2200);
 }
 
 function callNativeVibrate(ms) {
     if (window.AndroidBridge && window.AndroidBridge.vibrate) {
         window.AndroidBridge.vibrate(ms);
+    } else if (navigator.vibrate) {
+        try { navigator.vibrate(ms); } catch(e) {}
     }
 }
 
@@ -1949,3 +1987,35 @@ function callNativeBeep() {
         window.AndroidBridge.playBeep();
     }
 }
+
+// ==========================================
+// APK 手机客户端下载与扫码弹窗逻辑
+// ==========================================
+function openDownloadModal() {
+    const modal = document.getElementById("download-apk-modal");
+    if (modal) modal.classList.add("show");
+    callNativeVibrate(40);
+}
+
+function closeDownloadModal() {
+    const modal = document.getElementById("download-apk-modal");
+    if (modal) modal.classList.remove("show");
+}
+
+function copyApkDownloadUrl() {
+    const url = "http://124.220.54.64/qingsu.apk";
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => {
+            callNativeToast("📋 公网直链已复制！可直接发送给手机/微信打开！");
+            callNativeVibrate(50);
+        }).catch(() => fallbackCopy(url));
+    } else {
+        fallbackCopy(url);
+    }
+}
+
+function onDirectDownloadClick() {
+    callNativeToast("⬇️ 正在启动下载轻塑 APK 安装包，下载完成后即可直接安装！");
+    callNativeVibrate(50);
+}
+

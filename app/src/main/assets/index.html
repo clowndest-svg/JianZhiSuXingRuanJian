@@ -20,6 +20,10 @@
             </div>
             <!-- 用户登录/注册状态与档案定制胶囊 -->
             <div style="display: flex; gap: 6px; align-items: center;">
+                <button class="header-download-btn" onclick="openDownloadModal()" title="下载轻塑安卓手机客户端">
+                    <span>📱</span>
+                    <span>下载App</span>
+                </button>
                 <button class="user-account-badge" onclick="openAuthModal()">
                     <span id="header-user-icon">👤</span>
                     <span id="header-username-display">登录/注册</span>
@@ -60,6 +64,18 @@
                     <button class="btn-web-action" onclick="copyUserPublicUrl()">📋 复制</button>
                     <button class="btn-web-action" style="background: #10B981;" onclick="openUserPublicUrl()">🌐 打开</button>
                 </div>
+            </div>
+
+            <!-- 📱 手机客户端快速下载 & 扫码弹窗卡片 -->
+            <div class="web-download-card" id="main-download-prompt-card" onclick="openDownloadModal()">
+                <div class="download-card-icon">📱</div>
+                <div style="flex: 1;">
+                    <div style="font-size: 12.5px; font-weight: 800; color: #065F46;">轻塑 Android 手机客户端 v5.0 正式版</div>
+                    <div style="font-size: 10.5px; color: #047857; margin-top: 1px;">支持扫码秒装 & 点击直链下载 · 饭点门禁与真数据云同步</div>
+                </div>
+                <button class="btn-download-pill" onclick="event.stopPropagation(); openDownloadModal();">
+                    📥 扫码 / 下载
+                </button>
             </div>
 
             <!-- 🚨 连续超标强力警报横幅 (满足用户需求：连续几天超标自动警报) -->
@@ -980,6 +996,69 @@
     </div>
 
 
+    <!-- ================= 核心弹窗 4: APK 手机客户端下载 & 扫码安装弹窗 ================= -->
+    <div class="modal-overlay" id="download-apk-modal">
+        <div class="modal-card download-modal-card">
+            <div class="modal-header" style="background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: #FFFFFF;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 20px;">📱</span>
+                    <div>
+                        <h2 style="color: #FFFFFF; font-size: 15px; margin: 0;">下载【轻塑】安卓手机客户端</h2>
+                        <div style="font-size: 10.5px; opacity: 0.9; margin-top: 1px;">v5.0 严管正式版 · 100% 腾讯云真数据同步</div>
+                    </div>
+                </div>
+                <button class="modal-close-btn" style="background: rgba(255,255,255,0.2); color: #FFF;" onclick="closeDownloadModal()">✕</button>
+            </div>
+            <div class="modal-body" style="text-align: center; padding: 18px 16px;">
+                
+                <!-- 扫码区域 -->
+                <div class="qr-container-card">
+                    <div style="font-size: 13px; font-weight: 800; color: var(--text-main); margin-bottom: 3px;">
+                        📷 方式一：手机扫一扫立即安装
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">
+                        使用手机自带相机、微信或任意浏览器“扫一扫”
+                    </div>
+                    <div class="qr-img-wrapper">
+                        <img src="qr.svg" alt="轻塑App下载二维码" id="download-qr-img" class="qr-img" />
+                    </div>
+                    <div style="font-size: 10.5px; color: #047857; margin-top: 8px; font-weight: 600;">
+                        ⚡ 腾讯云公网高速直链 · 无需挂梯/无需外网 · 点击即下
+                    </div>
+                </div>
+
+                <!-- 直接点击下载按钮 -->
+                <div style="margin-top: 14px;">
+                    <div style="font-size: 13px; font-weight: 800; color: var(--text-main); margin-bottom: 8px;">
+                        📥 方式二：直接点击下载软件安装包
+                    </div>
+                    <a href="/qingsu.apk" download="轻塑减脂塑形_v5.0.apk" class="btn-direct-download" onclick="onDirectDownloadClick()">
+                        <span style="font-size: 20px;">⬇️</span>
+                        <div style="text-align: left;">
+                            <div style="font-size: 14px; font-weight: 800;">直接下载 APK 安装包 (5.5MB)</div>
+                            <div style="font-size: 10px; opacity: 0.85;">安装后点击即用 · 纯净无广告 · 饭点门禁</div>
+                        </div>
+                    </a>
+                </div>
+
+                <!-- 复制链接与公网地址 -->
+                <div class="download-link-box">
+                    <div style="font-size: 10.5px; color: var(--text-muted); margin-bottom: 4px;">公网直接下载网址 (可直接复制发到手机或微信)：</div>
+                    <div class="download-url-code" id="modal-download-url">http://124.220.54.64/qingsu.apk</div>
+                    <button class="btn-copy-url" onclick="copyApkDownloadUrl()">📋 复制下载网址</button>
+                </div>
+
+                <!-- 功能亮点提示 -->
+                <div class="download-highlights">
+                    <div class="dl-hl-item">✨ <strong>男女身材定制</strong>：8 套身形形态针对性动作库</div>
+                    <div class="dl-hl-item">🚨 <strong>外卖严管门禁</strong>：超标自动弹窗拦截与低卡平替</div>
+                    <div class="dl-hl-item">📈 <strong>100% 真数据</strong>：公网大屏多端同步，拒绝虚假</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
     <!-- ================= 底部固定导航栏 ================= -->
     <nav class="bottom-nav">
         <div class="nav-item active" id="nav-dashboard" onclick="switchTab('dashboard')">
@@ -1011,6 +1090,13 @@
             <span>AI顾问</span>
         </div>
     </nav>
+
+    <!-- 悬浮下载客户端胶囊按钮 (醒目快捷) -->
+    <div class="floating-dl-btn" id="floating-dl-btn" onclick="openDownloadModal()" title="下载轻塑手机APP">
+        <span class="floating-dl-pulse"></span>
+        <span style="font-size: 17px;">📲</span>
+        <span class="floating-dl-text">下载App</span>
+    </div>
 
     <script src="app.js"></script>
 </body>
