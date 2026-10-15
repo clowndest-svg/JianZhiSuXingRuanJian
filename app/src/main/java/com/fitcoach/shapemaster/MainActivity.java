@@ -81,6 +81,77 @@ public class MainActivity extends Activity {
 
         // Load the main web dashboard
         webView.loadUrl("file:///android_asset/index.html");
+
+        // 开 App 先查通知权限：没授权就弹说明并送到系统设置
+        checkNotificationPermissionOnLaunch();
+    }
+
+    // ================= 第五批：开 App 先查通知权限 =================
+    private static final int NOTIF_PERM_REQUEST = 2025;
+    private boolean notifPromptShown = false;
+
+    private void checkNotificationPermissionOnLaunch() {
+        if (notifPromptShown) {
+            return;
+        }
+        boolean ok;
+        try {
+            ok = androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled();
+        } catch (Exception e) {
+            return;
+        }
+        if (ok) {
+            return;
+        }
+        notifPromptShown = true;
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("通知权限还没开")
+                .setMessage("这款应用要用通知提醒你：该称重了、该更新身材照了、外卖额度已经超了、水喝得不够。\n\n"
+                        + "不开也行，但那些提醒只会在你正好打开应用时才出现——"
+                        + "而对减脂来说，最没用的提醒就是恰好已经在看屏幕时才响的那一种。")
+                .setPositiveButton("去开启", new android.content.DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(android.content.DialogInterface d, int w) {
+                        askNotificationPermission();
+                    }
+                })
+                .setNegativeButton("这次先不开", null)
+                .show();
+    }
+
+    private void askNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            try {
+                requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},
+                        NOTIF_PERM_REQUEST);
+                return;
+            } catch (Exception ignored) {
+            }
+        }
+        // Android 12 及以下没有这个运行时弹窗，直接送到位
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startActivity(new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getPackageName()));
+            } else {
+                startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + getPackageName())));
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "打不开系统设置，请在设置里手动找到轻塑", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != NOTIF_PERM_REQUEST) {
+            return;
+        }
+        boolean granted = grantResults.length > 0 && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        Toast.makeText(this, granted
+                ? "通知已开启，到点的提醒会真的弹出来"
+                : "通知还是关着的，提醒只会在应用内出现", Toast.LENGTH_LONG).show();
     }
 
     @Override

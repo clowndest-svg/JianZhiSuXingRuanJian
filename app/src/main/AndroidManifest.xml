@@ -8,6 +8,12 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- 外卖自律：读今天美团/饿了么被打开了几次、前台待了多久。
+         这是特殊权限，用户要在设置里主动给；没给就只能显示“未授权”，
+         绝不能把未授权画成 0 次。 -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
     <!-- Android 11 (API 30) 起，未声明包可见性时 getLaunchIntentForPackage() 对外卖包恒返回 null，
          表现为"跳转外卖"静默退化成打开网页版。这两个包名是 launchApp() 唯一依赖的查询目标。 -->
     <queries>

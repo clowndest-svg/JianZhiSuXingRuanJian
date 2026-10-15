@@ -4,7 +4,7 @@ import os
 import sqlite3
 import hashlib
 import json
-from html import escape as html_escape
+from html import escape as html_escape, unescape as html_unescape
 import secrets
 import time
 import re
@@ -64,10 +64,10 @@ def init_db():
     CREATE TABLE IF NOT EXISTS profiles (
         user_id INTEGER PRIMARY KEY,
         gender TEXT DEFAULT 'female',
-        age INTEGER DEFAULT 26,
-        height REAL DEFAULT 165.0,
-        weight_jin REAL DEFAULT 140.0,
-        target_weight_jin REAL DEFAULT 120.0,
+        age INTEGER,
+        height REAL,
+        weight_jin REAL,
+        target_weight_jin REAL,
         goal_type TEXT DEFAULT 'tone',
         dining_mode TEXT DEFAULT 'takeout',
         scene TEXT DEFAULT 'home',
@@ -244,6 +244,25 @@ def migrate_db():
         FOREIGN KEY(user_id) REFERENCES users(id)
     )
     """)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS ai_memory (
+        user_id INTEGER NOT NULL,
+        mem_key TEXT NOT NULL,
+        mem_value TEXT NOT NULL,
+        updated_at TEXT,
+        PRIMARY KEY(user_id, mem_key),
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+    """)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS kb_entries (
+        qkey TEXT PRIMARY KEY,
+        answer TEXT,
+        sources TEXT,
+        fetched_at TEXT,
+        hits INTEGER DEFAULT 0
+    )
+    """)
     conn.commit()
     conn.close()
 
@@ -366,10 +385,10 @@ class RegisterReq(BaseModel):
     password: str
     nickname: Optional[str] = None
     gender: Optional[str] = "female"
-    age: Optional[int] = 26
-    height: Optional[float] = 165.0
-    weight_jin: Optional[float] = 140.0
-    target_weight_jin: Optional[float] = 120.0
+    age: Optional[int] = None
+    height: Optional[float] = None
+    weight_jin: Optional[float] = None
+    target_weight_jin: Optional[float] = None
     goal_type: Optional[str] = "tone"
     dining_mode: Optional[str] = "takeout"
 
@@ -471,8 +490,36 @@ def compute_metrics(p):
 
 # ==================== Auth Endpoints ====================
 
+# 身高体重年龄是每日热量额度的输入。缺了或离谱了就明确报错，
+# 绝不替用户编一个身体出来算 TDEE——这是这一轮假数据链的总根。
+def _body_or_400(age, height, weight_jin, target_weight_jin):
+    missing = [n for n, v in ((u'\u5e74\u9f84', age), (u'\u8eab\u9ad8', height),
+                              (u'\u5f53\u524d\u4f53\u91cd', weight_jin),
+                              (u'\u76ee\u6807\u4f53\u91cd', target_weight_jin)) if v is None]
+    if missing:
+        raise HTTPException(status_code=400,
+                            detail=u'\u8bf7\u586b\u5199\uff1a' + u'\u3001'.join(missing)
+                                   + u'\uff08\u8fd9\u4e9b\u76f4\u63a5\u51b3\u5b9a\u6bcf\u65e5\u70ed\u91cf\u989d\u5ea6\uff0c\u7cfb\u7edf\u4e0d\u66ff\u4f60\u731c\uff09')
+    try:
+        age = int(age); height = float(height)
+        weight_jin = float(weight_jin); target_weight_jin = float(target_weight_jin)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=u'\u5e74\u9f84/\u8eab\u9ad8/\u4f53\u91cd\u8981\u586b\u6570\u5b57')
+    if not (10 <= age <= 100):
+        raise HTTPException(status_code=400, detail=u'\u5e74\u9f84\u8981\u5728 10~100 \u5c81\u4e4b\u95f4')
+    if not (80 <= height <= 250):
+        raise HTTPException(status_code=400, detail=u'\u8eab\u9ad8\u8981\u5728 80~250 \u5398\u7c73\u4e4b\u95f4')
+    if not (40 <= weight_jin <= 600):
+        raise HTTPException(status_code=400, detail=u'\u5f53\u524d\u4f53\u91cd\u8981\u5728 40~600 \u65a4\u4e4b\u95f4')
+    if not (40 <= target_weight_jin <= 600):
+        raise HTTPException(status_code=400, detail=u'\u76ee\u6807\u4f53\u91cd\u8981\u5728 40~600 \u65a4\u4e4b\u95f4')
+    return {'age': age, 'height': height,
+            'weight_jin': weight_jin, 'target_weight_jin': target_weight_jin}
+
+
 @app.post("/api/register")
 def register(req: RegisterReq):
+    body = _body_or_400(req.age, req.height, req.weight_jin, req.target_weight_jin)
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT id FROM users WHERE username = ?", (req.username.strip(),))
@@ -497,7 +544,8 @@ def register(req: RegisterReq):
     c.execute("""
     INSERT INTO profiles (user_id, gender, age, height, weight_jin, target_weight_jin, goal_type, dining_mode, scene, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'home', ?)
-    """, (user_id, req.gender, req.age, req.height, req.weight_jin, req.target_weight_jin, req.goal_type, req.dining_mode, now))
+    """, (user_id, req.gender, body["age"], body["height"], body["weight_jin"],
+           body["target_weight_jin"], req.goal_type, req.dining_mode, now))
 
     # Log initial baseline weight
     today = date.today().isoformat()
@@ -585,10 +633,12 @@ def update_profile(req: ProfileUpdateReq, user: dict = Depends(get_current_user)
     cur = dict(c.fetchone() or {})
 
     gender = req.gender if req.gender is not None else cur.get("gender", "female")
-    age = req.age if req.age is not None else cur.get("age", 26)
-    height = req.height if req.height is not None else cur.get("height", 165.0)
-    weight_jin = req.weight_jin if req.weight_jin is not None else cur.get("weight_jin", 140.0)
-    target_weight_jin = req.target_weight_jin if req.target_weight_jin is not None else cur.get("target_weight_jin", 120.0)
+    age = req.age if req.age is not None else cur.get("age")
+    height = req.height if req.height is not None else cur.get("height")
+    weight_jin = req.weight_jin if req.weight_jin is not None else cur.get("weight_jin")
+    target_weight_jin = req.target_weight_jin if req.target_weight_jin is not None else cur.get("target_weight_jin")
+    # 合并完再验一次：库里那行缺什么也要报错，不许拿 26/165/140/120 顶
+    _body_or_400(age, height, weight_jin, target_weight_jin)
     goal_type = req.goal_type if req.goal_type is not None else cur.get("goal_type", "tone")
     dining_mode = req.dining_mode if req.dining_mode is not None else cur.get("dining_mode", "takeout")
     scene = req.scene if req.scene is not None else cur.get("scene", "home")
@@ -1215,6 +1265,27 @@ def answer_from_user_data(q, d):
                 f"运动日 {m['workout_cal']} kcal（多 170 kcal）。训练打卡成功后会自动切成运动日，"
                 f"不需要你手动改。")
 
+    if any(k in q for k in ("吃多", "吃撑", "补救", "补偿", "怎么补", "会不会胖", "长肉")):
+        budget = d.get("budget_cal") or 0
+        left = d.get("remaining_cal")
+        mode_name = "运动日" if d.get("day_mode") == "workout" else "休息日"
+        if not consumed:
+            return ("今天还没有饮食记录，所以我不知道你到底吃进去多少。"
+                    "先把这一餐记进【食谱/外卖】，我再按你的真实额度说晚上怎么安排——"
+                    "没记录就开口给建议，那只能是编的。")
+        line = (f"今天记录到摄入 <strong>{consumed}</strong> kcal，{mode_name}预算 {budget} kcal，"
+                f"已消耗 {burned} kcal。")
+        if left is not None and left < 0:
+            line += (f" 超出 <strong>{abs(left)}</strong> kcal。按 7700 kcal 折 1 kg 脂肪粗算约 "
+                     f"{round(abs(left) / 7700 * 2, 2)} 斤，这是折算不是实测。")
+            line += (" 晚上只做一件事：把剩下的额度按正常餐次吃掉。不用断食、不用催吐、"
+                     "也不要临时加练双倍来'抵债'——那套做法在这款应用里没有任何记账支持。")
+        else:
+            line += (f" 其实没有超，还剩 {left} kcal。你担心的'吃多'在数字上并没有发生，"
+                     f"按原计划走完今天就行。")
+        return line
+
+
     if any(k in q for k in ("吃了", "摄入", "吃什么了", "吃啥")):
         meals = d.get("today_meals") or []
         if not meals:
@@ -1281,12 +1352,222 @@ def answer_from_user_data(q, d):
     return None
 
 
+# ==================== AI 顾问 v2 ====================
+# 顺序固定：本人真实数据 → 长期记忆 → 本机知识库 → 联网检索 → 本机小模型合成。
+# 数字类问题永远在前两层解决；模型只负责"照着查到的资料把话说通顺"，
+# 它不通气时退化成原文摘录并写明是摘录——绝不让它凭空编。
+_LLM_URL = "http://127.0.0.1:8081/v1/chat/completions"
+_LLM_TIMEOUT = 25
+_LLM_RETRY_AFTER = 60
+_llm_block_until = [0.0]
+_llm_last_error = [""]      # 最近一次调用失败的原因，界面要能说得出
+
+
+def llm_ready():
+    return time.time() >= _llm_block_until[0]
+
+
+def llm_chat(prompt, max_tokens=200, temperature=0.2):
+    """问本机 llama-server。不通就冷却 60 秒并返回 None（不静默当成没内容）。"""
+    if not llm_ready():
+        return None
+    payload = {"messages": [{"role": "user", "content": prompt}],
+               "max_tokens": max_tokens, "temperature": temperature}
+    body = json.dumps(payload, ensure_ascii=False).replace("<", chr(92) + "u003c")
+    req = urllib.request.Request(_LLM_URL, data=body.encode("utf-8"),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=_LLM_TIMEOUT) as resp:
+            got = json.loads(resp.read().decode("utf-8", "replace"))
+        txt = ((got.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+        txt = txt.strip()
+    except Exception as e:
+        txt = ""
+        _llm_last_error[0] = "%s: %s" % (type(e).__name__, str(e)[:80])
+    if not txt:
+        if _llm_block_until[0] <= time.time():
+            _llm_block_until[0] = time.time() + _LLM_RETRY_AFTER
+        return None
+    _llm_last_error[0] = ""
+    return txt
+
+
+_FILLERS = ("请问", "帮我", "告诉我", "麻烦", "我想知道", "是不是真的", "有没有说法")
+_TAIL_CUTS = ("怎么办", "怎么补救", "怎么调整", "怎么安排", "如何是好", "怎么吃")
+_TIME_WORDS = ("中午", "晚上", "早上", "今晚", "今天", "昨天", "最近", "平时")
+
+
+def _rewrite_query(q):
+    """把口语问句压成能搜到东西的词。
+    上一版整句去搜"中午吃多了晚上怎么自适应补救"，必应返回的是百度百科条目
+    《中午（汉语词语）》。实测原因是必应咬住查询串的第一个词：首位是单字动词
+    （喝/黑）就给字典页，所以领域词"减脂"一律打头，而不是问句里有就不加。"""
+    s = " " + q + " "
+    for f in _FILLERS:
+        s = s.replace(f, " ")
+    for t in _TAIL_CUTS:
+        s = s.replace(t, " ")
+    s = s.replace("?", " ").replace("？", " ").replace("。", " ").replace("，", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    # 句末语气词留着会让必应更容易咬住句子开头的单字动词
+    s = re.sub(r"[吗呢吧啊呀]+$", "", s).strip()
+    if len(s) < 4:
+        s = q.strip()
+    # 实测（这台服务器上直接对比四种写法）：必应的分词会咬住查询串的第一个词，
+    # 首位是"喝""黑"这类单字就返回《喝（汉语文字）》《黑（汉语文字）》这类字典页；
+    # 把领域词放到最前面，三条结果立刻全部对题。所以领域词一律加，不看问句里有没有。
+    if not s.startswith("减脂"):
+        s = "减脂 " + s
+    return s[:70]
+
+
+def _qkey(q):
+    return hashlib.sha1(_rewrite_query(q).encode("utf-8")).hexdigest()[:16]
+
+
+def kb_lookup(q):
+    """知识库只收联网查证过的内容，7 天内复用；过期就重查，不拿旧答案冒充实时。"""
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute("SELECT * FROM kb_entries WHERE qkey = ?", (_qkey(q),)).fetchone()
+    if not row:
+        conn.close()
+        return None
+    row = dict(row)
+    try:
+        fetched = datetime.strptime(row["fetched_at"][:19], "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        fetched = datetime.min
+    if datetime.now() - fetched > timedelta(days=7):
+        conn.close()
+        return None
+    c.execute("UPDATE kb_entries SET hits = hits + 1 WHERE qkey = ?", (_qkey(q),))
+    conn.commit()
+    conn.close()
+    return row
+
+
+def kb_store(q, answer, items, how):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("""
+    INSERT OR REPLACE INTO kb_entries (qkey, answer, sources, fetched_at, hits)
+    VALUES (?, ?, ?, ?, 0)
+    """, (_qkey(q), answer,
+          json.dumps([{"title": it["title"], "url": it["url"], "host": it["host"]}
+                      for it in items], ensure_ascii=False),
+          datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    conn.close()
+    return {"how": how}
+
+
+def memory_put(user_id, q):
+    """长期记忆只在用户明说「记住…」时写入，不做暗中推断——
+    猜错一次的代价会被后面每次回答反复引用。"""
+    m = re.search(r"记住(.+)", q)
+    if not m:
+        return None
+    val = m.group(1).strip(" ，。,：:").strip()[:120]
+    if not val:
+        return None
+    key = val[:16]
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("""
+    INSERT OR REPLACE INTO ai_memory (user_id, mem_key, mem_value, updated_at)
+    VALUES (?, ?, ?, ?)
+    """, (user_id, key, val, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    conn.close()
+    return val
+
+
+def memory_forget(user_id, q):
+    conn = get_db()
+    c = conn.cursor()
+    n = c.execute("DELETE FROM ai_memory WHERE user_id = ?", (user_id,)).rowcount
+    conn.commit()
+    conn.close()
+    return n
+
+
+def memory_list(user_id):
+    conn = get_db()
+    c = conn.cursor()
+    rows = c.execute("SELECT mem_value FROM ai_memory WHERE user_id = ? "
+                     "ORDER BY updated_at DESC LIMIT 20", (user_id,)).fetchall()
+    conn.close()
+    return [dict(r)["mem_value"] for r in rows]
+
+
+def _plain(s):
+    """必应摘要里混着 &ensp;/&#0183; 这类实体，而 web_search 出口又转义过一次，
+    再转就成 &amp;amp;ensp;。内部一律还原成纯文本、把空白折叠掉，出口只转义一次。"""
+    t = s or ""
+    for _ in range(3):                       # 收敛式还原：几层转义都能回到原文
+        n = html_unescape(t)
+        if n == t:
+            break
+        t = n
+    t = _strip_tags(t)
+    for ch in (chr(160), chr(8199), chr(8239)):   # nbsp / figure space / narrow nbsp
+        t = t.replace(ch, " ")
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _fmt_snippet(it):
+    return "%s：%s" % (_plain(it["title"]), _plain(it["snippet"]))
+
+
+def synthesize(q, items, mem):
+    """有模型：照资料组织，禁止补资料里没有的数字。
+    没模型：直接把最相关一条的原文摘出来，并标注是摘录。两条路都不给它自由发挥。"""
+    if not items:
+        return None, "none"
+    ctx = "\n".join("- " + _fmt_snippet(it) for it in items[:3])
+    if mem:
+        ctx += "\n（此人此前明确记下的：" + "；".join(mem[:5]) + "）"
+    prompt = ("你在帮一个减脂用户查资料。只准用【资料】里的内容回答，"
+              "资料里没有的数字、剂量、结论一律不许出现；用中文两三句话说完，"
+              "不要复述问题。若资料不足以回答，就只回两个字：不够。\n"
+              "【资料】\n%s\n【问题】%s\n【回答】" % (ctx, q))
+    txt = llm_chat(prompt)
+    if txt and "不够" not in txt[:6]:
+        clean = html_escape(_plain(txt)[:600])
+        return clean, "model"
+    best = _plain(items[0]["snippet"])[:220]
+    # 模型说"不够"和模型根本没跑是两回事，兜底文案必须分开——
+    # 把前者写成后者就是把原因赖到一个没发生的事实上
+    if txt:
+        return html_escape(best), "insufficient"
+    return html_escape(best), "extract"
+
+
 @app.post("/api/ask")
 def ask(req: AskReq, user: dict = Depends(get_current_user)):
-    """三层：先答本人真实数据 → 再联网 → 都不行就明说没查到。"""
+    """AI 顾问总入口。返回 source 说明这条答案是从哪一层来的。"""
     q = (req.question or "").strip()[:120]
     if not q:
         raise HTTPException(status_code=400, detail="问题为空")
+
+    if any(k in q for k in ("忘记所有", "清空记忆", "把记住的删掉")):
+        n = memory_forget(user["id"], q)
+        return {"code": 0, "source": "memory",
+                "answer": html_escape("已清空你记下的 %d 条。" % n), "items": []}
+    saved = memory_put(user["id"], q)
+    if saved:
+        return {"code": 0, "source": "memory",
+                "answer": html_escape("记下了：%s。以后回答会带上这条；说「忘记所有」可清空。" % saved),
+                "items": []}
+    if any(k in q for k in ("你记得我", "我的忌口", "我说过", "记住了什么")):
+        mem = memory_list(user["id"])
+        if not mem:
+            return {"code": 0, "source": "memory",
+                    "answer": html_escape("还没有你明确记下的条目。说「记住某件事」我就存下来。"),
+                    "items": []}
+        return {"code": 0, "source": "memory",
+                "answer": html_escape("你记下的：" + "；".join(mem)), "items": []}
 
     d = compute_dashboard_data(user)
     local = answer_from_user_data(q, d)
@@ -1297,8 +1578,23 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
         return {"code": 0, "source": "limited",
                 "answer": f"联网查询太快了（每分钟最多 {_ASK_LIMIT_PER_MIN} 次），先等一会儿再问。",
                 "items": []}
+
+    mem = memory_list(user["id"])
+
+    hit = kb_lookup(q)
+    if hit:
+        try:
+            items = json.loads(hit["sources"] or "[]")
+        except Exception:
+            items = []
+        note = html_escape("（这条来自本机知识库，%s 查证过，不是实时结果）" % hit["fetched_at"][:10])
+        return {"code": 0, "source": "kb", "answer": hit["answer"] + note,
+                "items": [{"title": it.get("title", ""), "url": html_escape(it.get("url", ""), quote=True),
+                           "host": html_escape(it.get("host", ""), quote=True)} for it in items]}
+
+    search_q = _rewrite_query(q)
     try:
-        items = web_search(q)
+        items = web_search(search_q)
     except Exception as e:
         return {"code": 0, "source": "none",
                 "answer": f"联网查询没成功（{type(e).__name__}）。我不编答案——"
@@ -1310,19 +1606,29 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
                           "或先看【食谱/外卖】里的内置建议。",
                 "items": []}
 
-    rows = "".join(
-        "<div style='margin:6px 0;padding:6px 8px;background:#F8FAFC;border-radius:8px;'>"
+    answer, how = synthesize(q, items, mem)
+    if not answer:
+        return {"code": 0, "source": "none", "answer": "查到的资料里没有可用内容。", "items": []}
+    kb_store(q, answer, items, how)
+
+    if how == "extract":
+        tail = "（本机模型未运行，以下是原文摘录。原因：%s）" % (_llm_last_error[0] or "未知")
+    elif how == "insufficient":
+        tail = "（本机模型认为这些资料不足以回答，以下是原文摘录）"
+    else:
+        tail = ""
+    tail += ("以上内容由第三方网站提供，不是本系统的减脂建议；"             "涉及用药与疾病请咨询医生。")
+    src_rows = "".join(
+        "<div style='margin:4px 0;padding:5px 8px;background:#F8FAFC;border-radius:8px;'>"
         "<div style='font-weight:700;'>{}</div>"
-        "<div style='color:#475569;font-size:11px;margin-top:2px;'>{}</div>"
-        "<div style='font-size:10px;color:#94A3B8;margin-top:2px;'>来源 {} · 原链接已随本次返回</div></div>".format(
-            it["title"], it["snippet"], it["host"])
-        for it in items)
-    return {"code": 0, "source": "web",
-            "answer": f"以下是联网查到的资料（由第三方网站提供，不是本系统的减脂建议，"
-                      f"涉及用药与疾病请咨询医生）：<br>{rows}",
+        "<div style='font-size:10px;color:#94A3B8;margin-top:2px;'>{} · 搜索词已改写</div></div>".format(
+            it["title"], it["host"])
+        for it in items[:3])
+    # source 必须与答案的来历一致：只有模型真合成过才叫 web_model，
+    # 摘录兜底（不管是模型没跑还是模型说资料不够）一律叫 web
+    return {"code": 0, "source": "web_model" if how == "model" else "web",
+            "answer": answer + html_escape(tail) + "<br>" + src_rows,
             "items": [{"title": it["title"], "url": it["url"], "host": it["host"]} for it in items]}
-
-
 # ==================== 100% REAL Chart Data API ====================
 
 def compute_charts_data(user: dict) -> dict:

@@ -7,6 +7,8 @@
     python _audit_harness.py --mutant   # 跑 git HEAD 那版（改动前），同一批判据应变红
 """
 import asyncio
+import html as html_lib
+import gc
 from datetime import date, timedelta
 import io
 import json
@@ -425,10 +427,14 @@ def main():
     ok_none = a6["source"] == "none" and ("没查到" in a6["answer"] or "没成功" in a6["answer"])
     check("联网问答不编造（有来源或明说失败）", ok_src and (ok_web or ok_none),
           "source=%s items=%d" % (a6["source"], len(a6.get("items") or [])))
-    if a6["source"] == "web":
-        sample = a6["answer"]
-        check("联网结果标注非本系统建议", "不是本系统的减脂建议" in sample, sample[:120])
-        check("联网标题里的标签已转义", "<script" not in sample.lower(), sample[:120])
+    # 原来这条包在 if source == "web" 里：一旦出口换了 source 词，它就静默跳过，
+    # 免责声明丢了也不会红。改成"凡是联网来的答案都必须带声明"。
+    webish = a6["source"] in ("web", "web_model", "kb")
+    sample = a6["answer"]
+    check("联网结果标注非本系统建议", (not webish) or "不是本系统的减脂建议" in sample,
+          "source=%s %s" % (a6["source"], sample[:120]))
+    check("联网答案没有双重转义", (not webish) or "&amp;amp;" not in sample, sample[:160])
+    check("联网标题里的标签已转义", "<script" not in sample.lower(), sample[:120])
 
     # 限频：别让这个接口变成免费代理
     ok_limit = True
@@ -438,12 +444,21 @@ def main():
           len(m._ask_hits[424242]))
 
     # --- 11. 静态审计：界面上不许存在没接数据的数字（本轮 bug 的根因）---
-    html_txt = io.open(os.path.join(ROOT, "app", "src", "main", "assets", "index.html"),
-                       encoding="utf-8").read()
-    js_txt = io.open(os.path.join(ROOT, "app", "src", "main", "assets", "app.js"),
-                     encoding="utf-8").read()
-    css_txt = io.open(os.path.join(ROOT, "app", "src", "main", "assets", "style.css"),
-                      encoding="utf-8").read()
+    # 静态件也必须跟着 --mutant 取 HEAD 那版。之前这里是磁盘直读，
+    # 于是"界面预填假数""内联函数断链"这类判据在变异样本上永远绿——看着像
+    # 判据无效，实际是它压根没在看旧版本。
+    def read_asset(name):
+        if not mutant:
+            return io.open(os.path.join(ROOT, "app", "src", "main", "assets", name),
+                           encoding="utf-8").read()
+        import subprocess
+        r = subprocess.run(["git", "show", "HEAD:app/src/main/assets/" + name],
+                           cwd=ROOT, capture_output=True)
+        return r.stdout.decode("utf-8")
+
+    html_txt = read_asset("index.html")
+    js_txt = read_asset("app.js")
+    css_txt = read_asset("style.css")
     all_ids = set(re.findall(r'id="([^"]+)"', html_txt))
     # 绑定方式有两种：直接 getElementById，以及经 setText(id, ...) 间接写
     bound = set(re.findall(r'getElementById\(\s*"([^"]+)"', js_txt)) \
@@ -629,6 +644,290 @@ def main():
               a3["answer"][:120])
         a4 = m.ask(m.AskReq(question="今天还没记录，我摄入多少"), user=user)
         check("没记录时不说假摄入", a4["source"] != "web", a4["source"])
+
+
+    # ============ 第五批：假数据入库通道（六处链条逐条钉住） ============
+    srv_txt = get_source(mutant)
+
+    # A. 界面输入框不许把身体数据写死在 value 里（用户不改就直接提交进库）
+    BODY_FIELDS = ["cycle-input-weight", "cycle-input-waist", "prof-age", "prof-height",
+                   "prof-weight-jin", "prof-target-jin", "reg-age"]
+    numeric_prefill = []
+    for tag in re.findall(r"<input[^>]*>", html_txt):
+        vm = re.search(r'value="([^"]*)"', tag)
+        if vm and re.search(r"\d", vm.group(1)):
+            numeric_prefill.append((re.search(r'id="([^"]+)"', tag).group(1), vm.group(1)))
+    check("输入框不得预填身体数字", not numeric_prefill, numeric_prefill)
+    # 正向：七个框必须都还在、且都带 placeholder——防止"删掉输入框"也能通过上一条
+    still_there = [i for i in BODY_FIELDS if ('id="%s"' % i) in html_txt]
+    hinted = [i for i in still_there
+              if re.search(r'id="%s"[^>]*placeholder=' % re.escape(i), html_txt)]
+    check("身体数据输入框七个都在", len(still_there) == 7, still_there)
+    check("空值输入框都带说明文案", len(hinted) == 7, hinted)
+
+    # B. 内联 on* 引用的函数必须在 app.js 里定义（syncTargetWeightPlaceholder 曾只在 HTML 里）
+    KW = {"if", "for", "while", "switch", "catch", "return", "typeof", "new", "function"}
+    called, defs = set(), set(re.findall(r"\bfunction\s+([A-Za-z_$][\w$]*)", js_txt))
+    for body in re.findall(r"\bon\w+\s*=\s*\"([^\"]*)\"", html_txt):
+        for nm in re.findall(r"(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(", body):
+            if nm not in KW:
+                called.add(nm)
+    dangling = sorted(called - defs)
+    check("内联处理器引用的函数都已定义", not dangling, dangling)
+    check("此前断链的函数已补上定义",
+          "syncTargetWeightPlaceholder" in defs and "syncTargetWeightPlaceholder" in called,
+          "defined=%s referenced=%s" % ("syncTargetWeightPlaceholder" in defs,
+                                        "syncTargetWeightPlaceholder" in called))
+
+    # C. 前端读身体数据不许再用编造值兜底
+    invented = re.findall(r'(?:getElementById\("(?:reg|prof|cycle)-[^"]*"\)\.value\)\s*\|\|\s*[\d.]+)', js_txt)
+    check("前端身体数据无编造兜底", not invented, invented)
+    check("注册与保存都做了数值有效性把关",
+          js_txt.count("every(Number.isFinite)") >= 2, js_txt.count("every(Number.isFinite)"))
+
+    # D. 服务端：身体字段缺/离谱一律 400，合法值原样入库
+    _seq = [0]
+
+    def reg_try(**kw):
+        # 每次换用户名：否则第一次成功之后，其余调用会被"用户名已存在"的 400
+        # 顶上，那几条"超范围应报 400"就会因为错误的原因通过
+        _seq[0] += 1
+        d = dict(username="r5_body_%d" % _seq[0], password="pw123", gender="female",
+                 goal_type="tone", dining_mode="takeout")
+        d.update(kw)
+        try:
+            m.register(m.RegisterReq(**d))
+            return ("ok", None, "")
+        except Exception as e:
+            # 只认状态码不够：必须认文案说的是哪一项，"该用户名已存在"也是 400
+            return ("err", getattr(e, "status_code", 0), str(getattr(e, "detail", e)))
+
+    # 详情参数不能再调一次 reg_try：它有副作用，多跑一次就把后面的用户名序号整体推走
+    no_body = reg_try(age=None, height=None, weight_jin=None, target_weight_jin=None)
+    check("注册缺身体字段返回 400",
+          no_body[0] == "err" and no_body[1] == 400 and "请填写" in no_body[2], no_body)
+    e_age = reg_try(age=5, height=170.0, weight_jin=150.0, target_weight_jin=130.0)
+    check("年龄超范围返回 400", e_age[0] == "err" and e_age[1] == 400 and "年龄" in e_age[2], e_age)
+    e_ht = reg_try(age=30, height=3.5, weight_jin=150.0, target_weight_jin=130.0)
+    check("身高超范围返回 400", e_ht[0] == "err" and e_ht[1] == 400 and "身高" in e_ht[2], e_ht)
+    e_wt = reg_try(age=30, height=170.0, weight_jin=99999.0, target_weight_jin=130.0)
+    check("体重离谱返回 400", e_wt[0] == "err" and e_wt[1] == 400 and "体重" in e_wt[2], e_wt)
+    okres = reg_try(age=31, height=172.0, weight_jin=155.0, target_weight_jin=133.0)
+    check("合法注册成功", okres[0] == "ok", okres)
+    stored = q("SELECT age, height, weight_jin, target_weight_jin FROM profiles WHERE user_id="
+               "(SELECT id FROM users WHERE username='r5_body_5')")
+    check("入库的是本人填的那组数",
+          bool(stored) and stored[0]["age"] == 31 and abs(stored[0]["height"] - 172.0) < 0.01
+          and abs(stored[0]["weight_jin"] - 155.0) < 0.01
+          and abs(stored[0]["target_weight_jin"] - 133.0) < 0.01, stored)
+    # 关键反向断言：绝不允许悄悄落成 26/165/140/120
+    fake_landed = bool(stored) and (stored[0]["age"] == 26 or stored[0]["height"] == 165.0
+                                   or stored[0]["weight_jin"] == 140.0
+                                   or stored[0]["target_weight_jin"] == 120.0)
+    check("没有落成那组编造的默认身体", not fake_landed, stored)
+
+    # E. 档案更新：库里缺值时报错，不拿默认值补齐
+    # G. 失败不许把库锁住：register 报错前若没关连接，连接会带着未提交事务留在进程里，
+    #    后续每一次写都 database is locked（旧版实测就是这样：NOT NULL 报错时连接漏在事务里）。
+    gc.collect()
+    def _in_txn(o):
+        try:                    # 已关闭的连接读 in_transaction 会抛 ProgrammingError，
+            return bool(o.in_transaction)   # getattr 的默认值挡不住属性本身抛异常
+        except Exception:
+            return False
+    leaked = [o for o in gc.get_objects()
+              if type(o).__name__ == "Connection" and _in_txn(o)]
+    check("报错路径没把连接漏在事务里", not leaked, "%d 个连接仍在事务中" % len(leaked))
+    for o in leaked:            # 收割掉，否则下面几条会被这把锁憋死（旧版跑不到终点）
+        try:
+            o.rollback(); o.close()
+        except Exception:
+            pass
+    can_write = True
+    try:
+        wc = sqlite3.connect(dbp, timeout=5)
+        wc.execute("INSERT INTO users (username, password_hash, nickname, created_at)"
+                   " VALUES (?,?,?,?)", ("r5_writable", "x", "锁检查", "2026-10-01 00:00:00"))
+        wc.commit(); wc.close()
+    except Exception as e:
+        can_write = False
+        write_err = str(e)[:60]
+    check("失败一次之后库仍可写", can_write, "" if can_write else write_err)
+
+    # 用独立短连接建这行缺值档案
+    nid = None
+    wc = sqlite3.connect(dbp, timeout=20)
+    try:
+        cu = wc.cursor()
+        cu.execute("INSERT OR IGNORE INTO users (username, password_hash, nickname, created_at)"
+                   " VALUES (?,?,?,?)", ("r5_null", "x", u"缺档案", "2026-10-01 00:00:00"))
+        cu.execute("SELECT id FROM users WHERE username='r5_null'")
+        nid = cu.fetchone()[0]
+        cu.execute("DELETE FROM profiles WHERE user_id=?", (nid,))
+        cu.execute("INSERT INTO profiles (user_id, gender, age, height, weight_jin,"
+                   " target_weight_jin, goal_type, dining_mode, scene) VALUES (?,?,?,?,?,?,?,?,?)",
+                   (nid, "female", None, None, None, None, "tone", "takeout", "home"))
+        wc.commit()
+    finally:
+        wc.close()
+    null_user = {"id": nid, "username": "r5_null"}
+    null_code = 0
+    try:
+        m.update_profile(m.ProfileUpdateReq(scene="home"), null_user)
+    except Exception as e:
+        null_code = getattr(e, "status_code", 0)
+    check("档案缺值时保存报错而非编造", null_code == 400, null_code)
+
+    # F. 源码层面：默认值与列默认值都不许回来
+    check("RegisterReq 不再带身体数据默认值",
+          not re.search(r"(age|height|weight_jin|target_weight_jin): Optional\[[a-z]+\] = (?!None)", srv_txt),
+          re.findall(r"(?:age|height|weight_jin|target_weight_jin): Optional\[[a-z]+\] = \S+", srv_txt)[:4])
+    check("profiles 建表去掉身体数据列默认值",
+          "age INTEGER DEFAULT 26" not in srv_txt and "weight_jin REAL DEFAULT 140.0" not in srv_txt,
+          "")
+    check("校验器在写库之前就被调用",
+          "body = _body_or_400" in srv_txt and srv_txt.index("body = _body_or_400")
+          < srv_txt.index("INSERT INTO profiles"), "")
+
+
+    # ============ 第五批 B：AI 顾问 v2（记忆隔离 / 知识库 / 模型不可用要承认） ============
+    # 旧版根本没有这些函数。缺实现要逐条记红——直接抛 AttributeError 会让整个变异台崩掉，
+    # 连"红了几个"这个有效性证据都拿不到（本轮就踩过一次）。
+    R5AI_NAMES = [
+        "吃多了走本人数据层", "吃多了的回答带真实额度数字",
+        "联网问题确实发过一次搜索", "搜索词与原始口语问句不同", "搜索词带上了领域词",
+        "模型不通时明确说未运行", "模型不通时仍给第三方免责", "摘录里的实体没有双重转义",
+        "记住某事写入成功", "能列出记住的内容", "别的用户查不到这条记忆", "记忆确实是空的那一位",
+        "第二次命中本机知识库", "命中知识库时不再联网", "知识库答案标注查证日期非实时",
+        "知识库条目落了库", "ai_memory 表存在", "kb_entries 表存在",
+    ]
+    if not hasattr(m, "llm_chat") or not hasattr(m, "_rewrite_query"):
+        for nm in R5AI_NAMES:
+            check(nm, False, "该版本没有对应实现")
+    else:
+        # web_search 与 llm_chat 在这里被换成固定返回：判据要的是管线行为确定，
+        # 不是碰运气看必应今天给什么。替换的形状与真函数一致（title/snippet/url/host 且已转义）。
+        real_web = m.web_search
+        real_llm = m.llm_chat
+        seen_queries = []
+
+        def fake_web(query, limit=4):
+            seen_queries.append(query)
+            return [{"title": html_lib.escape("高蛋白饮食与肌肉量"),
+                     "snippet": html_lib.escape("减脂期每日热量缺口建议 300 到 500 kcal。"),
+                     "url": "https://example.com/a", "host": "example.com"},
+                    {"title": html_lib.escape("晚餐安排"),
+                     "snippet": html_lib.escape("过度节食会让夜间饥饿感增强&nbsp;&ensp;这点要注意"),
+                     "url": "https://example.com/b", "host": "example.com"}]
+        m.web_search = fake_web
+        m._ask_hits.clear()
+
+        u2 = mkuser("r5_ai")
+        d2 = m.compute_dashboard_data(u2)
+        m.log_food(m.FoodLogReq(slot="午餐", food_name="鸡胸肉", cal=300), u2)
+
+        # 1) 用户报的那个垃圾回答：必须落在自己的数据层，不许掉进联网层
+        a_bad = m.ask(m.AskReq(question="中午吃多了晚上怎么自适应补救？"), u2)
+        check("吃多了走本人数据层", a_bad["source"] == "data", a_bad["source"])
+        check("吃多了的回答带真实额度数字", "kcal" in a_bad["answer"] and
+              ("300" in a_bad["answer"] or "还剩" in a_bad["answer"] or "超出" in a_bad["answer"]),
+              a_bad["answer"][:130])
+
+        # 2) 搜索词必须被改写，不能把整句口语直接扔进去
+        m._ask_hits.clear()
+        a_web = m.ask(m.AskReq(question="请问不吃晚饭真的能瘦得更快吗？"), u2)
+        check("联网问题确实发过一次搜索", len(seen_queries) >= 1, seen_queries)
+        rewrote = seen_queries[-1] if seen_queries else ""
+        check("搜索词与原始口语问句不同", rewrote != "请问不吃晚饭真的能瘦得更快吗？", rewrote)
+        check("搜索词带上了领域词", "减脂" in rewrote or "减肥" in rewrote, rewrote)
+        # 实测坑：必应咬住查询串第一个词，首位是单字动词就返回《喝（汉语文字）》这类字典页。
+        # 所以领域词必须打头，不是"有就不加"。
+        check("领域词打在查询串最前", rewrote.startswith("减脂") or rewrote.startswith("减肥"), rewrote)
+        check("问句里的句末语气词不进查询串",
+          not rewrote.rstrip().endswith(("吗", "呢", "吧")), rewrote)
+        check("单字动词不做查询串开头",
+          not re.match(r"^[喝吃练睡跑抽喝]\S", rewrote), rewrote)
+
+        # 3) 模型没跑时：说人话承认是摘录，不假装有 AI
+        m.llm_chat = lambda *a, **k: None
+        m._ask_hits.clear()
+        del seen_queries[:]
+        a_no = m.ask(m.AskReq(question="喝可乐会影响减脂吗？"), u2)
+        check("模型不通时明确说未运行", "本机模型未运行" in a_no["answer"], a_no["answer"][:160])
+        check("未运行文案带得出真实原因", "原因：" in a_no["answer"], a_no["answer"][:200])
+        # 模型回了"不够"≠模型没跑：这两种兜底话术必须不同，否则把原因赖到没发生的事实上
+        m._ask_hits.clear()
+        del seen_queries[:]
+        m.llm_chat = lambda *a, **k: "不够"
+        q_ins = "午睡多久合适？"
+        a_ins = m.ask(m.AskReq(question=q_ins), u2)
+        check("资料不足与模型未运行文案分开",
+          "资料不足以回答" in a_ins["answer"] and "本机模型未运行" not in a_ins["answer"],
+          a_ins["answer"][:170])
+        check("模型不通时仍给第三方免责", "不是本系统的减脂建议" in a_no["answer"], a_no["answer"][:160])
+        check("摘录里的实体没有双重转义", "&amp;amp;" not in a_no["answer"], a_no["answer"][:200])
+
+        # 4) 模型给的文本必须转义后才能出网（反射型 XSS 的新入口）
+        m.llm_chat = lambda *a, **k: "好的<img src=x onerror=alert(1)>按资料是 300 到 500 kcal"
+        m._ask_hits.clear()
+        del seen_queries[:]
+        a_xss = m.ask(m.AskReq(question="咖啡会不会影响减脂？"), u2)
+        # 实现走的是剥标签（比转义更强：标签整个不存在），所以不能断言 "&lt;img 出现"，
+        # 那会把正确行为读成失败。两条互证：危险形态一律不见 + 正常内容确实穿过来。
+        low = a_xss["answer"].lower()
+        check("模型输出不含可执行标签形态",
+              "<img" not in low and "<script" not in low and "onerror=" not in low, low[:200])
+        check("模型给的正经内容确实进入答案", "300 到 500" in a_xss["answer"], a_xss["answer"][:200])
+        m.llm_chat = real_llm
+
+        # 5) 长期记忆：显式写入 / 列出 / 清空
+        m._ask_hits.clear()
+        a_mem = m.ask(m.AskReq(question="记住我不吃香菜和动物内脏"), u2)
+        check("记住某事写入成功", a_mem["source"] == "memory" and "不吃香菜" in a_mem["answer"],
+              a_mem["answer"][:120])
+        a_ls = m.ask(m.AskReq(question="你记得我什么"), u2)
+        check("能列出记住的内容", "香菜" in a_ls["answer"], a_ls["answer"][:120])
+
+        # 6) 记忆必须按用户隔离——"每个用户各自的长期记忆"这条需求的实质
+        u3 = mkuser("r5_ai2")
+        b_ls = m.ask(m.AskReq(question="你记得我什么"), u3)
+        check("别的用户查不到这条记忆", "香菜" not in b_ls["answer"], b_ls["answer"][:120])
+        check("记忆确实是空的那一位", "还没有" in b_ls["answer"], b_ls["answer"][:120])
+        m._ask_hits.clear()
+        a_forget = m.ask(m.AskReq(question="把记住的删掉，忘记所有"), u2)
+        check("可一键清空记忆",
+              a_forget["source"] == "memory" and "清空" in a_forget["answer"], a_forget["answer"][:120])
+        check("清空后确实查不到", "香菜" not in m.memory_list(u2["id"]), m.memory_list(u2["id"]))
+
+        # 7) 知识库：同问题第二次不该再抓一次必应，且要说明这不是实时结果
+        m._ask_hits.clear()
+        del seen_queries[:]
+        q_kb = "嚼口香糖会不会影响减脂？"
+        a1 = m.ask(m.AskReq(question=q_kb), u2)
+        n1 = len(seen_queries)
+        m._ask_hits.clear()
+        a2 = m.ask(m.AskReq(question=q_kb), u2)
+        # source 与答案来历必须一致：模型说"不够"时是摘录，不许标成 web_model
+        check("摘录兜底不冒充模型合成", a_no["source"] == "web", a_no["source"])
+        m._ask_hits.clear()
+        del seen_queries[:]
+        m.llm_chat = lambda *a, **k: "黑咖啡对减脂没有直接作用，关键是总热量。"
+        q_ok = "喝牛奶会影响减脂吗？"
+        a_ok = m.ask(m.AskReq(question=q_ok), u2)
+        check("模型真合成时标 web_model", a_ok["source"] == "web_model", a_ok["source"])
+        m.llm_chat = lambda *a, **k: None
+        check("第二次命中本机知识库", a2["source"] == "kb", a2["source"])
+        check("命中知识库时不再联网", len(seen_queries) == n1, seen_queries[n1:])
+        check("知识库答案标注查证日期非实时", "不是实时结果" in a2["answer"], a2["answer"][:170])
+        kb_row = q("SELECT hits FROM kb_entries WHERE qkey=?", (m._qkey(q_kb),))[0]
+        check("知识库条目落了库", kb_row["hits"] >= 1, kb_row)
+
+        # 8) 两张新表必须真被 migrate_db 建出来
+        tables = [r["name"] for r in q("SELECT name FROM sqlite_master WHERE type='table'")]
+        check("ai_memory 表存在", "ai_memory" in tables, tables)
+        check("kb_entries 表存在", "kb_entries" in tables, tables)
+
+        m.web_search = real_web
 
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (

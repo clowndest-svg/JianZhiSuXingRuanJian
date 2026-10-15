@@ -148,6 +148,9 @@ window.addEventListener("DOMContentLoaded", () => {
     renderRecipePlan(state.selectedPlan || "A");
     switchShapeGender(state.profile.gender || "female", false);
     initViewMode();
+    // 开 App 先查通知权限；外卖真实使用情况读一次
+    initNotifPermissionHint();
+    refreshTakeoutUsage();
     if (window.location.hash === "#download" || window.location.search.includes("download=1")) {
         setTimeout(openDownloadModal, 400);
     }
@@ -588,6 +591,7 @@ function renderRealStats(d) {
             due.style.display = "none";
         }
     }
+    refreshTakeoutUsage();
     if (d.photo_due && state.token) notifyOnceToday("该更新身材记录了", "拍照或只填体重与腰围都行，系统按数字更新下一周期安排");
 }
 
@@ -754,7 +758,17 @@ async function completeWorkoutToday() {
 }
 
 // 周期身材照上传与规划进阶
+// 周期表单不再预填编造的 138.4 / 76。体重取本人档案里那个真实值；
+// 腰围一律留空让用户自己量——填进去的数会被当成围度基准参与后续增减计算。
+function prefillCycleInputsFromRealData() {
+    const wEl = document.getElementById("cycle-input-weight");
+    if (!wEl || wEl.value) return;
+    const p = state.profile || {};
+    if (Number.isFinite(Number(p.weightJin)) && p.weightJin > 0) { wEl.value = p.weightJin; }
+}
+
 async function upgradeCyclePlan() {
+    prefillCycleInputsFromRealData();
     const inputW = parseFloat(document.getElementById("cycle-input-weight").value);
     const inputWaist = parseFloat(document.getElementById("cycle-input-waist").value);
 
@@ -1140,11 +1154,129 @@ function launchTakeoutApp(type) {
     }
 }
 
+
+// ================= 第五批：通知通道与外卖真实使用情况 =================
+
+/**
+ * 返回 "system"（真发出去了）或 "page"（发不了，得靠页面内提醒）。
+ * 网页版没有 AndroidBridge，一律返回 page——Web Push 要 HTTPS+域名，这站两样都没有。
+ */
+function notifyChannel(title, body) {
+    const b = window.AndroidBridge;
+    if (b && b.tryNotify) {
+        try {
+            if (b.tryNotify(String(title), String(body)) === true) return "system";
+            return "page";
+        } catch (e) {
+            return "page";
+        }
+    }
+    return "page";
+}
+
+/** 页面内提醒条：通知发不出去时的兜底，内容只说真实数字与真实原因。 */
+function showInPageReminder(title, body) {
+    let bar = document.getElementById("inpage-remind");
+    if (!bar) {
+        bar = document.createElement("div");
+        bar.id = "inpage-remind";
+        bar.className = "inpage-remind";
+        document.body.appendChild(bar);
+    }
+    bar.innerHTML = "<strong>" + escapeHtml(String(title)) + "</strong>"
+        + "<span>" + escapeHtml(String(body)) + "</span>"
+        + "<button type=\"button\" onclick=\"document.getElementById('inpage-remind').style.display='none'\">知道了</button>";
+    bar.style.display = "flex";
+}
+
+/** 开 App 就检查通知权限；缺了就提示并送到系统设置页。 */
+function initNotifPermissionHint() {
+    const b = window.AndroidBridge;
+    if (!b || !b.notificationsEnabled) return;
+    let on = true;
+    try { on = b.notificationsEnabled() === true; } catch (e) { return; }
+    if (on) return;
+    const box = document.createElement("div");
+    box.className = "notif-hint";
+    box.innerHTML = "<span>通知权限没开，该称重、该拍照、额度超了这些提醒只会在你正好看着屏幕时出现。</span>"
+        + "<button type=\"button\" onclick=\"openSystemNotifSettings()\">去开启</button>";
+    const host = document.querySelector("main") || document.body;
+    host.insertBefore(box, host.firstChild);
+}
+
+function openSystemNotifSettings() {
+    const b = window.AndroidBridge;
+    if (b && b.openNotificationSettings) {
+        try { b.openNotificationSettings(); return; } catch (e) {}
+    }
+    callNativeToast("这不是 App 版，浏览器里开不了系统通知设置");
+}
+
+function requestUsageAccess() {
+    const b = window.AndroidBridge;
+    if (b && b.openUsageAccessSettings) {
+        try { b.openUsageAccessSettings(); return; } catch (e) {}
+    }
+    callNativeToast("网页版读不到手机的使用情况，这条只有 App 里有");
+}
+
+const TAKEOUT_PKGS = "com.sankuai.meituan,me.ele";
+
+/**
+ * 读今天外卖 App 的真实打开次数与前台时长。
+ * 未授权＝null，界面必须写「未授权」；把 null 画成 0 次就是撒谎（0 次意味着确实没打开过）。
+ */
+function refreshTakeoutUsage() {
+    const st = document.getElementById("usage-state");
+    const dt = document.getElementById("usage-detail");
+    const btn = document.getElementById("usage-grant-btn");
+    if (!st || !dt) return;
+    const b = window.AndroidBridge;
+    if (!b || !b.takeoutUsageToday) {
+        st.textContent = "网页版读不到";
+        st.className = "usage-state warn";
+        dt.textContent = "手机使用情况只有装了的 App 能读；浏览器没有这个权限通道，这里不编数字。";
+        if (btn) btn.style.display = "none";
+        return;
+    }
+    let raw = null;
+    try { raw = b.takeoutUsageToday(TAKEOUT_PKGS); } catch (e) { raw = null; }
+    if (!raw) {
+        st.textContent = "未授权";
+        st.className = "usage-state warn";
+        dt.textContent = "没给「使用情况访问权限」，所以今天打开过几次我不知道。我不会拿 0 次冒充\"今天没点\"。";
+        if (btn) btn.style.display = "inline-block";
+        return;
+    }
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
+    if (!parsed || !parsed.apps) {
+        st.textContent = "读不到";
+        st.className = "usage-state warn";
+        dt.textContent = "系统返回的内容解析失败，这条按读不到处理，不猜。";
+        return;
+    }
+    if (btn) btn.style.display = "none";
+    let launches = 0, ms = 0, lines = [];
+    for (let i = 0; i < parsed.apps.length; i++) {
+        const a = parsed.apps[i];
+        launches += Number(a.launches) || 0;
+        ms += Number(a.foregroundMs) || 0;
+        const nm = String(a.pkg).indexOf("meituan") >= 0 ? "美团" : (String(a.pkg).indexOf("ele") >= 0 ? "饿了么" : a.pkg);
+        lines.push(nm + " 打开 " + (Number(a.launches) || 0) + " 次 / 前台 " +
+            Math.round((Number(a.foregroundMs) || 0) / 60000) + " 分钟");
+    }
+    st.textContent = launches > 0 ? "今天已打开 " + launches + " 次" : "今天一次没打开";
+    st.className = "usage-state " + (launches > 0 ? "bad" : "good");
+    dt.textContent = lines.join("；") || "系统今天没有这两个包的使用记录";
+    state.takeoutUsageToday = { launches: launches, minutes: Math.round(ms / 60000) };
+}
 function notifyOnceToday(title, body) {
     const key = "QINGSU_NOTED_" + new Date().toISOString().slice(0, 10);
     try { if (localStorage.getItem(key)) return; localStorage.setItem(key, "1"); } catch (e) { return; }
-    if (window.AndroidBridge && window.AndroidBridge.showNotification) {
-        window.AndroidBridge.showNotification(title, body);
+    // App 里：有通知权限就发系统通知；没权限就在页面里提醒，绝不静默丢掉这条提醒
+    if (notifyChannel(title, body) === "page" && state.token) {
+        showInPageReminder(title, body);
     }
 }
 
@@ -1257,11 +1389,20 @@ async function submitRegister() {
     const u = document.getElementById("reg-username").value.trim();
     const p = document.getElementById("reg-password").value.trim();
     const g = document.getElementById("reg-gender").value;
-    const a = parseInt(document.getElementById("reg-age").value) || 26;
-    const h = parseFloat(document.getElementById("reg-height").value) || 165;
-    const w = parseFloat(document.getElementById("reg-weight").value) || 140;
+    const a = parseInt(document.getElementById("reg-age").value, 10);
+    const h = parseFloat(document.getElementById("reg-height").value);
+    const w = parseFloat(document.getElementById("reg-weight").value);
 
     if (!u || !p) { callNativeToast("请填写注册用户名和密码"); return; }
+    // 这三项决定每日热量额度：空着或离谱就不许注册，不再悄悄用 26/165/140 顶上
+    if (![a, h, w].every(Number.isFinite)) {
+        callNativeToast("年龄、身高、当前体重都要填真实数字（只填账号密码注册不了）");
+        return;
+    }
+    if (a < 10 || a > 100 || h < 80 || h > 250 || w < 40 || w > 600) {
+        callNativeToast("年龄 10~100、身高 80~250cm、体重 40~600 斤，请按真实值填");
+        return;
+    }
 
     try {
         const res = await fetch(`${API_BASE}/api/register`, {
@@ -1540,15 +1681,30 @@ function selectGoalType(type) {
     selectVisualGoalShape(type, false);
 }
 
+// 目标体重只把估算值放进 placeholder：提示文字不会被提交，写得再离谱也不入库
+function syncTargetWeightPlaceholder() {
+    const wEl = document.getElementById("prof-weight-jin");
+    const tEl = document.getElementById("prof-target-jin");
+    if (!wEl || !tEl) return;
+    const w = parseFloat(wEl.value);
+    if (!Number.isFinite(w) || w < 40 || w > 600) {
+        tEl.placeholder = "目标体重（斤）· 必填";
+        return;
+    }
+    const suggest = Math.round(w * 0.88 * 10) / 10;
+    tEl.placeholder = "目标体重（斤）· 按当前体重约 -12% 估的参考值 " + suggest + "，仅供参考，要自己填";
+}
+
 function openProfileModal() {
     const p = state.profile;
     const g = p.gender || "female";
     const profGenderSelect = document.getElementById("prof-gender");
     if (profGenderSelect) profGenderSelect.value = g;
-    document.getElementById("prof-age").value = p.age || 26;
-    document.getElementById("prof-height").value = p.height || 165;
-    document.getElementById("prof-weight-jin").value = p.weightJin || 140;
-    document.getElementById("prof-target-jin").value = p.targetWeightJin || 120;
+    document.getElementById("prof-age").value = (p.age == null ? "" : p.age);
+    document.getElementById("prof-height").value = (p.height == null ? "" : p.height);
+    document.getElementById("prof-weight-jin").value = (p.weightJin == null ? "" : p.weightJin);
+    document.getElementById("prof-target-jin").value = (p.targetWeightJin == null ? "" : p.targetWeightJin);
+    syncTargetWeightPlaceholder();
     document.getElementById("prof-scene").value = p.scene || "home";
     
     const diningEl = document.getElementById("prof-dining-mode");
@@ -1564,10 +1720,19 @@ function closeProfileModal() {
 
 async function saveCustomProfile() {
     const gender = document.getElementById("prof-gender").value;
-    const age = parseInt(document.getElementById("prof-age").value) || 26;
-    const height = parseFloat(document.getElementById("prof-height").value) || 165;
-    const weightJin = parseFloat(document.getElementById("prof-weight-jin").value) || 140;
-    const targetWeightJin = parseFloat(document.getElementById("prof-target-jin").value) || (weightJin - 15);
+    const age = parseInt(document.getElementById("prof-age").value, 10);
+    const height = parseFloat(document.getElementById("prof-height").value);
+    const weightJin = parseFloat(document.getElementById("prof-weight-jin").value);
+    const targetWeightJin = parseFloat(document.getElementById("prof-target-jin").value);
+    if (![age, height, weightJin, targetWeightJin].every(Number.isFinite)) {
+        callNativeToast("年龄、身高、当前体重、目标体重四项都要填真实数字，留空保存不了");
+        return;
+    }
+    if (age < 10 || age > 100 || height < 80 || height > 250
+        || weightJin < 40 || weightJin > 600 || targetWeightJin < 40 || targetWeightJin > 600) {
+        callNativeToast("数值超出合理范围（年龄 10~100 / 身高 80~250cm / 体重 40~600 斤）");
+        return;
+    }
     const scene = document.getElementById("prof-scene").value;
     const diningMode = document.getElementById("prof-dining-mode") ? document.getElementById("prof-dining-mode").value : "takeout";
 

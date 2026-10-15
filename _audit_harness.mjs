@@ -37,7 +37,7 @@ function makeCtx() {
   function newEl(id) {
     let _html = "";
     const el = {
-      id, innerText: "", value: "", textContent: "",
+      id, value:"",
       style: {}, checked: false, files: null,
       width: 0, height: 0,
       classList: {
@@ -61,6 +61,29 @@ function makeCtx() {
       enumerable: true,
       get() { return _html + this._children.map(c => c.innerHTML).join(""); },
       set(v) { _html = String(v); this._children = []; },
+    });
+
+    // innerText 与 textContent 在真实 DOM 里都会反映元素文本；桩里分成两个独立字段，
+    // 于是代码写 textContent、判据读 innerText，读到空串——上一批"未授权显示未授权"
+    // 就是这么红了 5 条却根本不是产品的错。两个名字共用一份后备，并回退到 innerHTML。
+    let _text = null;
+    function _readText() {
+      if (_text !== null) return _text;
+      return _html + this._children.map(c => _readOf(c)).join("");
+    }
+    function _readOf(node) {
+      if (!node) return "";
+      if (typeof node._peekText === "function") return node._peekText();
+      return node.innerHTML || "";
+    }
+    el._peekText = () => (_text !== null ? _text : _html);
+    Object.defineProperty(el, "textContent", {
+      get() { return _readText.call(el); },
+      set(v) { _text = String(v); },
+    });
+    Object.defineProperty(el, "innerText", {
+      get() { return _readText.call(el); },
+      set(v) { _text = String(v); },
     });
     Object.defineProperty(el, "parentElement", { value: { clientWidth: 340 } });
     return el;
@@ -528,13 +551,37 @@ check("未到期时横幅隐藏",
       run(h.context, `document.getElementById("measure-due-banner").style.display`) === "none", "");
 check("没数据时预估显示暂无足够数据", txt("eta-days").includes("暂无"), txt("eta-days"));
 
-// 每日只提醒一次
+// 每日只提醒一次（注意：判据 stub 的必须是代码真正调用的那个方法。
+// 原来 stub 的是 showNotification，代码换成 tryNotify 后这条读到 0，测的是旧接口）
 let noteCount = 0;
-sandbox.window.AndroidBridge.showNotification = (a, b) => { noteCount++; };
+sandbox.window.AndroidBridge.tryNotify = (a, b) => { noteCount++; return true; };
 run(h.context, `state.token="tk"; try{localStorage.removeItem("QINGSU_NOTED_"+new Date().toISOString().slice(0,10))}catch(e){}`);
 run(h.context, `notifyOnceToday("测试","内容")`);
 run(h.context, `notifyOnceToday("测试","内容")`);
 check("同一天只提醒一次", noteCount === 1, noteCount);
+
+// 通知发不出去（没权限）时必须改成页面内提醒，不能静默丢掉
+sandbox.window.AndroidBridge.tryNotify = (a, b) => { return false; };
+run(h.context, `try{localStorage.removeItem("QINGSU_NOTED_"+new Date().toISOString().slice(0,10))}catch(e){}`);
+run(h.context, `notifyOnceToday("该称重了","今天还没记录体重")`);
+const inpage = txt("inpage-remind");
+check("通知发不出时转为页面内提醒", inpage.includes("该称重了"), inpage.slice(0, 60));
+
+// 外卖真实使用情况：未授权要说未授权，绝不能画成 0 次
+sandbox.window.AndroidBridge.takeoutUsageToday = (pkgs) => null;
+run(h.context, `refreshTakeoutUsage()`);
+check("未授权显示未授权", txt("usage-state").includes("未授权"), txt("usage-state"));
+check("未授权时不谎称 0 次", !txt("usage-detail").includes("0 次") || txt("usage-detail").includes("不会拿 0 次"), txt("usage-detail").slice(0,70));
+check("未授权时给出授权入口", run(h.context, `document.getElementById("usage-grant-btn").style.display`) === "inline-block", "");
+
+sandbox.window.AndroidBridge.takeoutUsageToday = (pkgs) => JSON.stringify({
+    granted: true, since: 0,
+    apps: [{pkg: "com.sankuai.meituan", launches: 3, foregroundMs: 245000},
+           {pkg: "me.ele", launches: 1, foregroundMs: 60000}]});
+run(h.context, `refreshTakeoutUsage()`);
+check("授权后显示真实次数", txt("usage-state").includes("4 次"), txt("usage-state"));
+check("真实次数按包拆开写", txt("usage-detail").includes("美团 打开 3 次") && txt("usage-detail").includes("饿了么 打开 1 次"), txt("usage-detail").slice(0,90));
+check("前台时长折算成分钟", txt("usage-detail").includes("4 分钟"), txt("usage-detail").slice(0,90));
 
 // 导出走带凭证的请求
 log.fetches.length = 0;
