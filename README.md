@@ -113,28 +113,52 @@ node _audit_harness.mjs --mutant    # 同上，改动前那版实测红 21 条
 
 ## 线上部署（本轮未执行）
 
-代码修完不等于线上修完。要三样都换过去，缺一不可：
+代码修完不等于线上修完。按下面顺序做，缺一步就是假上线。**只动 qingsu 服务与 `/opt/qingsu/web` 下两个文件，不碰 nginx 配置，`latest.json` 与 `latest-extensions.json` 那两份既有清单不受影响。**
+
+先量影响面（只读，不改任何东西）：
 
 ```bash
-python remote_exec.py --scp server.py                  /opt/qingsu/server.py
-python remote_exec.py --scp app/src/main/assets/app.js  /opt/qingsu/web/app.js
-python remote_exec.py --scp qingsu.apk                 /opt/qingsu/web/qingsu.apk
-python remote_exec.py "systemctl restart qingsu && sleep 2 && systemctl is-active qingsu"
+cd /d/RuanJian/JiaZhiSuXianApk
+python remote_exec.py "sqlite3 /opt/qingsu/data/qingsu.db \"SELECT 'users='||count(*) FROM users; SELECT '假腰围weight='||count(*) FROM weight_logs WHERE waist_cm=78.0; SELECT '假腰围cycles='||count(*) FROM body_cycles WHERE waist_cm=78.0;\""
+```
+
+后端预检——先传到 `.new`，用服务器自己的 python3 编译，通过才允许覆盖现役文件：
+
+```bash
+python remote_exec.py --scp server.py /opt/qingsu/server.py.new
+python remote_exec.py "cd /opt/qingsu && python3 -m py_compile server.py.new && echo COMPILE_OK"
+```
+
+备份现役，再落位、重启：
+
+```bash
+python remote_exec.py "cd /opt/qingsu && cp server.py server.py.bak-raudit && cp web/app.js web/app.js.bak-raudit && cp web/qingsu.apk web/qingsu.apk.bak-raudit"
+python remote_exec.py "cd /opt/qingsu && mv -f server.py.new server.py"
+python remote_exec.py --scp app/src/main/assets/app.js /opt/qingsu/web/app.js
+python remote_exec.py --scp qingsu.apk /opt/qingsu/web/qingsu.apk
+python remote_exec.py "systemctl restart qingsu; sleep 2; systemctl is-active qingsu"
 ```
 
 （依赖 `%TEMP%\test_key.pem`，密钥不入库。`index.html` 与 `style.css` 本轮没改，不用传。）
 
-部署后的验收，三条 curl 就够：
-
-1. `curl 'http://124.220.54.64/u/<img%20onerror=alert(1)>'` 里不应再出现 `<img`，应是 `&lt;img`；
-2. 下载线上包算 md5，应等于 `da0f54c0fc38da7e9e3209904fbc7494`；
-3. 取一个真实用户的 `/api/public/charts`，近 7 天里没有任何记录的那天，`deficit` 必须是 0。
-
-**遗留脏数据**：改代码不会让历史库里那条伪造的 `waist_cm=78.0` 消失。本轮之前注册的用户，`weight_logs` 首条与 `body_cycles` 第 1 周期的腰围仍是 78，他们第一次提交周期照时依然会算出一个假的围度增减。部署时顺手查一下涉及多少人，要不要清这两处旧值是个数据决定，得单独定：
+**验收要重新从公网拉一遍，别复用上面任何输出**：
 
 ```bash
-python remote_exec.py "sqlite3 /opt/qingsu/data/qingsu.db 'SELECT count(*) FROM users; SELECT count(*) FROM weight_logs WHERE waist_cm=78.0; SELECT count(*) FROM body_cycles WHERE waist_cm=78.0;'"
+curl -s 'http://124.220.54.64/u/<img%20src=x%20onerror=alert(1)>' | grep -c '<img src=x'   # 必须是 0
+curl -s 'http://124.220.54.64/u/<img%20src=x%20onerror=alert(1)>' | grep -c '&lt;img'        # 必须 ≥1
+curl -s http://124.220.54.64/app.js | grep -c 'reportWriteFailure'                          # 必须是 1（线上前端已是新版）
+curl -s --max-time 180 -o /tmp/chk.apk http://124.220.54.64/qingsu.apk && md5sum /tmp/chk.apk  # 须等于 da0f54c0fc38da7e9e3209904fbc7494
 ```
+
+第 4 条要等十几秒——这台机只有 0.33 MB/s。
+
+任一条不达标就回滚：
+
+```bash
+python remote_exec.py "cd /opt/qingsu && cp server.py.bak-raudit server.py && cp web/app.js.bak-raudit web/app.js && cp web/qingsu.apk.bak-raudit web/qingsu.apk && systemctl restart qingsu"
+```
+
+**遗留脏数据**：改代码不会让历史库里那条伪造的 `waist_cm=78.0` 消失。本轮之前注册的用户，`weight_logs` 首条与 `body_cycles` 第 1 周期的腰围仍是 78，他们第一次提交周期照时依然会算出一个假的围度增减。上面第一条命令量到的就是涉及多少人；要不要清是数据决定，得单独定，别顺手 `UPDATE`。
 
 ---
 
