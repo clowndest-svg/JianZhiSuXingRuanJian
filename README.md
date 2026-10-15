@@ -14,8 +14,9 @@ Android WebView 壳 + 单页 H5 + 腾讯云 FastAPI 后端的减脂记录工具�
 | 二维码 | http://124.220.54.64/qr.svg |
 | 用户监督大屏 | http://124.220.54.64/u/&lt;用户名&gt; |
 | 安装包（2026-10-16 第三批） | 5,576,907 字节，md5 `380e32afddd4cbf42d8b84ea0ec02b8b` |
-| 线上当前那份 | 同上，已部署并核对一致 |
+| 线上当前那份 | 同上，已部署并核对一致（2026-10-16 02:40 复验，见下） |
 | 下载实测 | 0.33 MB/s，约 16 秒下完（这台服务器带宽就这个水平，别指望"高速"） |
+| GitHub `origin/main` | **仍是 `26a8479`，落后本地 9 个提交**——这台机没有可用的 GitHub 凭据，`git push` 会挂在 GCM 的交互窗口上。待推的 9 个提交已打成 `qingsu_raudit_4commits.bundle`（`git bundle verify` 通过，tip `801a2b0`） |
 
 服务器：腾讯云 OpenCloudOS 4C4G，Docker 里的 nginx 容器 `xiaoye-release` 反代到宿主机 `172.17.0.1:8000` 的 uvicorn（`qingsu.service` 守护）。**只有 HTTP 80 端口，没有域名、没有证书。**
 
@@ -194,14 +195,23 @@ SDK 路径来自 `local.properties`（已 gitignore）：`D:\RuanJian\AndroidToo
 不装 FastAPI 也能验后端：`_audit_harness.py` 往 `sys.modules` 注入框架 stub，然后 exec 真实的 `server.py`，直接调用路由函数体和 SQLite 查询，沙箱目录落在项目内不碰系统盘。
 
 ```bash
-python _audit_harness.py            # 当前源码，23 条判据应全绿
+python _audit_harness.py            # 当前源码，96 条判据应全绿
 python _audit_harness.py --mutant   # 跑 git HEAD 那版，判据应大面积红（红了才说明判据不是恒真）
 
-node _audit_harness.mjs             # 当前 app.js，28 条判据应全绿
-node _audit_harness.mjs --mutant    # 同上，改动前那版实测红 21 条
+node _audit_harness.mjs             # 当前 app.js，103 条判据应全绿
+node _audit_harness.mjs --mutant    # 同上
 ```
 
-2026-10-15 这轮标定结果：当前源码 23+28 全绿，改动前版本红 14+21 条，红的每一条都对应下面列出的一个真实缺陷。
+标定结果（正反都做过）：
+
+| 时点 | 当前源码 | 变异样本红几条 |
+| --- | --- | --- |
+| 2026-10-15 那轮 | 23 + 28 全绿 | 14 + 21 |
+| 2026-10-16 第三批 | 96 + 103 全绿 | 33 + 7 |
+
+红的每一条都对应下面列出的一个真实缺陷。
+
+**`--mutant` 有个必须知道的失效条件**：它取的是 `git show HEAD:<文件>`。改动一旦提交，HEAD 就等于工作区，变异样本和当前源码变成同一份东西，`--mutant` 会返回"红 0 条"——**这不代表判据恒真，只代表反向标定在这一版上做不了了**（2026-10-16 第四批复验时就是这个情形，红 0 条，有效性证据是上一轮提交前量到的 33+7）。要在提交后仍保留反向标定能力，得把变异基线钉在某个具体轮次的 ref 上，而不是钉 `HEAD`。
 
 ---
 
@@ -243,18 +253,24 @@ python remote_exec.py --scp qingsu.apk /opt/qingsu/web/qingsu.apk
 python remote_exec.py "systemctl restart qingsu; sleep 2; systemctl is-active qingsu"
 ```
 
-（依赖 `%TEMP%\test_key.pem`，密钥不入库。`index.html` 与 `style.css` 本轮没改，不用传。）
+（依赖 `%TEMP%\test_key.pem`，密钥不入库。上面这份是**第一批**的命令，那一轮 `index.html` 与 `style.css` 未改所以没传；第三批五样全传，见本节末尾的部署记录。**下次复现请照五样全传，别照这段省略版。**）
 
 **验收要重新从公网拉一遍，别复用上面任何输出**：
 
 ```bash
-curl -s 'http://124.220.54.64/u/<img%20src=x%20onerror=alert(1)>' | grep -c '<img src=x'   # 必须是 0
-curl -s 'http://124.220.54.64/u/<img%20src=x%20onerror=alert(1)>' | grep -c '&lt;img'        # 必须 ≥1
-curl -s http://124.220.54.64/app.js | grep -c 'reportWriteFailure'                          # 必须是 1（线上前端已是新版）
-curl -s --max-time 180 -o /tmp/chk.apk http://124.220.54.64/qingsu.apk && md5sum /tmp/chk.apk  # 须等于 da0f54c0fc38da7e9e3209904fbc7494
+# 不变量：带攻击载荷的 404 页必须与"用户不存在"的 404 页逐字节相同，且任何形态都不回显载荷
+curl -s 'http://124.220.54.64/u/<img%20src=x%20onerror=alert(1)>' -o /tmp/p1.html
+curl -s 'http://124.220.54.64/u/zz_no_such_user_zz'              -o /tmp/p2.html
+cmp /tmp/p1.html /tmp/p2.html && echo 形状一致
+for s in '<img src=x' '&lt;img' 'onerror' 'alert(1)'; do echo "$s => $(grep -o -F "$s" /tmp/p1.html | wc -l)"; done   # 四个必须全是 0
+
+curl -s http://124.220.54.64/app.js | grep -c 'reportWriteFailure'   # 必须 ≥1（2026-10-16 实测 9 行）
+curl -s --max-time 300 -o /tmp/chk.apk http://124.220.54.64/qingsu.apk && md5sum /tmp/chk.apk
 ```
 
-第 4 条要等十几秒——这台机只有 0.33 MB/s。
+第 1 条原来的判据是"转义串 `&lt;img` 必须 ≥1"，**已经作废**：第三批把 404 页改成根本不回显用户名，比转义更强的形态。照老判据跑会读到 0 而误判成"验收失败"。
+
+`/qingsu.apk` 的期望 md5 每换一包就要跟着改，现役是 `380e32afddd4cbf42d8b84ea0ec02b8b`（5,576,907 字节）。第 4 条要等十几秒——这台机只有 0.33 MB/s。
 
 任一条不达标就回滚：
 
@@ -316,6 +332,17 @@ SELECT 'food='||count(*) FROM food_logs; -- 与清理前一致（本清理不该
 ```
 
 真实测过 78cm 的用户（第 1 条查询里的 `wl_真实78`）不该被动过，复核时他们的值仍应是 78.0。回滚只需要一句：`sqlite3 /opt/qingsu/data/qingsu.db '.restore /opt/qingsu/data/qingsu.db.bak-raudit'`（服务需先 `systemctl stop qingsu`）。
+
+### 第四批复验（2026-10-16 02:40，未改代码，只核对线上与推送状态）
+
+这一批没有新的代码改动，做四件事，结论都带实测值：
+
+1. **门禁**：`python _audit_harness.py` → 96 条全绿（exit 0）；`node _audit_harness.mjs` → 103 条全绿（exit 0）。`--mutant` 两边都返回"红 0 条"，原因是 HEAD 已包含全部改动、变异样本与工作区同一份——见「回归台」那节的失效条件，不是判据退化。
+2. **线上现役 = 仓库版本**：服务器侧 `md5sum` 读回 `server.py 3a8f5d1c…`、`app.js bf2e16f7…`、`index.html 2db24c29…`、`style.css ec4326c8…`、`qingsu.apk 380e32af…`，与本地工作区逐字节相同；`systemctl is-active qingsu` = active。
+3. **公网回拉**：`/` 返回的 HTML 去掉 `?v=` 三个版本号后与盘上 `index.html` **完全相同**（60982 vs 60943 字节，差的就是那 39 个字符），新版 10 项结构标记全在。**踩到的坑**：`/index.html` 这个路径本身返回 `{"detail":"Not Found"}` 404——页面只由 `@app.get("/")` 出，静态挂载不接它。验收要拉 `/`，拉 `/index.html` 会得到一条假"线上是旧版"。
+4. **推送**：`git push origin main` 挂起超时，改 `ls-remote` 空凭据探测能通（公开仓库可读），`cmdkey /list` 里没有任何 GitHub/git 条目，也没有 `gh`。所以这是**缺凭据**，不是内容问题。
+
+顺带订正本文档三处与现状不符：判据条数从 23/28 更新为 96/103 并补正反标定表；404 验收判据从"`&lt;img` ≥1"改成"与不存在用户页逐字节相同且四种形态全 0"（老判据在新设计下会误报失败）；apk 期望 md5 从 `da0f54c0…` 更新为现役 `380e32af…`。
 
 ### 第三批部署记录（2026-10-16 01:40）
 
