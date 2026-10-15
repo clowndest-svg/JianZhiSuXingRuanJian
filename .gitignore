@@ -13,3 +13,7 @@ __pycache__/
 *.pyo
 *.pem
 *.key
+
+# 审计沙箱与临时产物
+_audit_sandbox/
+_build.log

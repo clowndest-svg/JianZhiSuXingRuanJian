@@ -2,6 +2,7 @@ import os
 import sqlite3
 import hashlib
 import json
+from html import escape as html_escape
 import time
 from datetime import datetime, date, timedelta
 from typing import Optional, List
@@ -283,14 +284,17 @@ def register(req: RegisterReq):
 
     # Log initial baseline weight
     today = date.today().isoformat()
-    c.execute("INSERT INTO weight_logs (user_id, log_date, weight_jin, waist_cm, created_at) VALUES (?, ?, ?, 78.0, ?)",
+    # 注册不采集围度，这里必须留 0：填任何数字都会被当成"基准腰围"参与后续增减计算
+    c.execute("INSERT INTO weight_logs (user_id, log_date, weight_jin, waist_cm, created_at) VALUES (?, ?, ?, 0, ?)",
               (user_id, today, req.weight_jin, now))
 
     # Initial cycle 1 baseline
     c.execute("""
     INSERT INTO body_cycles (user_id, cycle_num, cycle_name, photo_url, weight_jin, waist_cm, tone_score, ai_report, created_at)
-    VALUES (?, 1, '第 1 周期 · 减脂启动期 (第1-7天)', '', ?, 78.0, '良好 (85分)', '初始基准档案已建立！已根据您的真实代谢配置专属食谱与训练计划。', ?)
-    """, (user_id, req.weight_jin, now))
+    VALUES (?, 1, '第 1 周期 · 减脂启动期 (第1-7天)', '', ?, 0, '待首次打卡', ?, ?)
+    """, (user_id, req.weight_jin,
+          "初始基准档案已建立。今日目标热量按您填写的身高体重年龄算出；食谱与动作库按所选身形从内置方案中取一套，尚未做过任何照片分析。",
+          now))
 
     conn.commit()
     conn.close()
@@ -616,22 +620,35 @@ async def upgrade_cycle(
     elif last_cycle and last_cycle["photo_url"]:
         photo_url = last_cycle["photo_url"]
 
-    # Compute deltas
+    # Compute deltas —— 基准缺失就不能算差值
     base_w = last_cycle["weight_jin"] if last_cycle else weight_jin
-    base_waist = last_cycle["waist_cm"] if last_cycle else waist_cm
+    raw_base_waist = last_cycle["waist_cm"] if last_cycle else waist_cm
     w_diff = round(weight_jin - base_w, 1)
-    waist_diff = round(waist_cm - base_waist, 1)
+    # 上一周期腰围为 0（注册时留空）或本次未填，就没有可比基准，不得输出"缩减/增加 X cm"
+    has_waist_base = bool(raw_base_waist) and bool(waist_cm)
+    waist_diff = round(waist_cm - raw_base_waist, 1) if has_waist_base else None
 
     cycle_name = f"第 {new_cycle_num} 周期 · 进阶塑形期 (第{(new_cycle_num-1)*7+1}-{new_cycle_num*7}天)"
-    tone_score = "极佳 (94分)" if waist_diff <= 0 else "稳健 (88分)"
+    if waist_diff is None:
+        tone_score = "待补围度 (无基准)"
+        waist_line = "• 肚脐腰围：本次或与上次缺一个测量值，<strong>围度变化暂不计算</strong>。<br>"
+    else:
+        tone_score = "极佳 (94分)" if waist_diff <= 0 else "稳健 (88分)"
+        waist_color = "#047857" if waist_diff <= 0 else "#B91C1C"
+        waist_line = f"• 肚脐腰围变化：<strong style='color: {waist_color};'>{waist_diff:+.1f} cm</strong>。<br>"
+
+    # 照片只是原样存档，服务端从未读过它的像素，报告里不能声称做过"视觉诊断"
+    photo_line = ("• 身材照已存档，可在本页与上一周期照片自行对照（系统未对照片做任何自动分析）。<br>"
+                  if photo_url else "• 本次未上传照片。<br>")
     ai_report = f"""
-    <strong>🎉 第 {new_cycle_num-1} 周期蜕变检视：</strong><br>
-    • 体重变化：<strong>{'+' if w_diff > 0 else ''}{w_diff} 斤</strong>，肚脐腰围缩减：<strong style="color: #047857;">{'+' if waist_diff > 0 else ''}{waist_diff} cm</strong>！<br>
-    • AI 视觉与围度诊断：内脏与皮下脂肪明显变薄，核心腹横肌收紧，体态挺拔度提升！<br><br>
-    🚀 <strong>系统已自动为你升级【第 {new_cycle_num} 周期新规划】：</strong><br>
-    1. <strong>训练动作升级：</strong>抗阻训练进入进阶阶段，每组动作增加 3-5 次力竭收缩，燃脂效率提升 25%！<br>
-    2. <strong>饮食动态调配：</strong>碳水结构维持低GI慢碳，下午加餐增加 10g 优质蛋白质以强化肌肉修复；<br>
-    3. <strong>外卖点单更新：</strong>若点外卖，系统将自动优先推送高纤减脂套餐平替！
+    <strong>🎉 第 {new_cycle_num-1} 周期数据检视：</strong><br>
+    • 体重变化：<strong>{w_diff:+.1f} 斤</strong>（空腹体重，来自两次打卡记录）。<br>
+    {waist_line}
+    {photo_line}<br>
+    🚀 <strong>第 {new_cycle_num} 周期安排（提交后自动生效）：</strong><br>
+    1. <strong>训练动作：</strong>当前身形对应的 4 个动作保持不变，建议每组再增 3-5 次力竭收缩；<br>
+    2. <strong>饮食调配：</strong>每日热量目标仍按身高体重年龄实时计算，下午加餐可增加约 10g 蛋白质；<br>
+    3. <strong>说明：</strong>动作库与食谱方案不会因提交本表而自动改写，需要换身形请在【档案】里选。
     """
 
     c.execute("""
@@ -703,12 +720,13 @@ def compute_charts_data(user: dict) -> dict:
         c.execute("SELECT SUM(cal_burned) as b_sum FROM workout_logs WHERE user_id = ? AND log_date = ?", (user["id"], ds))
         b_res = c.fetchone()["b_sum"] or 0
 
-        # Real net deficit = Target + Burned - Consumed
-        # If user didn't log any food on that past day, deficit is 0
-        if c_res == 0 and b_res == 0 and i > 0:
+        # 真实净缺口 = 维持代谢(TDEE) + 当日真实训练消耗 - 当日真实摄入
+        # 用 target_cal 当基准会少算一个 deficit：吃满预算时缺口显示 0，而实际仍有 420 的缺口
+        if c_res == 0 and b_res == 0:
+            # 这一天一笔未记，缺口为 0，不拿目标值冒充"已创造赤字"（旧写法漏了今天）
             day_def = 0
         else:
-            day_def = round(metrics["target_cal"] + b_res - c_res)
+            day_def = round(metrics["tdee"] + b_res - c_res)
 
         deficit_data.append({"day": day_label, "date": ds, "deficit": day_def, "consumed": c_res, "burned": b_res})
 
@@ -798,10 +816,12 @@ def public_user_dashboard(username: str):
     user = c.fetchone()
     conn.close()
     if not user:
+        # username 直接来自 URL，未转义时 /u/<img src=x onerror=...> 会在浏览器里执行（已在线上实测）
+        safe_name = html_escape(username, quote=True)
         return HTMLResponse(
             f"<div style='font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:400px;margin:80px auto;padding:30px;background:#FFF;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.08);text-align:center;'>"
             f"<div style='font-size:48px;margin-bottom:12px;'>🔍</div>"
-            f"<h2 style='color:#1E293B;font-size:18px;'>用户 @{username} 暂未注册</h2>"
+            f"<h2 style='color:#1E293B;font-size:18px;'>用户 @{safe_name} 暂未注册</h2>"
             f"<p style='color:#64748B;font-size:13px;line-height:1.6;'>该用户暂未在轻塑·减脂塑形伴侣中创建数据档案。<br>您可以下载轻塑 APP 注册属于您的真数据大屏！</p>"
             f"<a href='/' style='display:inline-block;margin-top:16px;padding:10px 24px;background:#059669;color:#FFF;border-radius:20px;text-decoration:none;font-weight:600;'>返回轻塑主页</a>"
             f"</div>",
@@ -813,7 +833,9 @@ def public_user_dashboard(username: str):
     if os.path.exists(index_file):
         with open(index_file, "r", encoding="utf-8") as f:
             content = f.read()
-        injected = f"<base href=\"/\">\n<script>window.__PUBLIC_USER__ = '{username}';</script>\n"
+        # json.dumps 出合法 JS 字符串，再把 < 转义掉，防用户名里的 </script> 提前闭合标签
+        safe_js_name = json.dumps(username).replace("<", "\\u003c")
+        injected = f"<base href=\"/\">\n<script>window.__PUBLIC_USER__ = {safe_js_name};</script>\n"
         content = content.replace("<head>", "<head>\n" + injected)
         return HTMLResponse(content)
     return HTMLResponse("<h3>轻塑系统正在启动中...</h3>")

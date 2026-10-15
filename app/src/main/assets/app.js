@@ -49,6 +49,7 @@ let state = {
     mealDiary: [],
     weightHistory: [],
     deficitHistory: [],
+    dashboardLoaded: false,
     consecutiveOverDays: 0,
     consecutiveSlackingDays: 0,
     takeoutLocked: false,
@@ -175,12 +176,13 @@ async function initAuthAndData() {
 async function loadPublicUserData(username) {
     updateUserUI(username);
     const banner = document.getElementById("user-web-link-card");
+    const safeName = escapeHtml(username);
     if (banner) {
-        banner.innerHTML = `<div style="flex:1;"><div style="font-size: 11px; color: #047857; font-weight: 700;">🌐 正在公开查阅 <strong>@${username}</strong> 的减脂塑形真数据大屏 (云端同步)</div><div style="font-size: 10px; color: #64748B; margin-top:2px;">数据均由用户本人每日真实打卡上报，无任何虚假敷衍模拟！</div></div>`;
+        banner.innerHTML = `<div style="flex:1;"><div style="font-size: 11px; color: #047857; font-weight: 700;">🌐 正在公开查阅 <strong>@${safeName}</strong> 的减脂塑形真数据大屏 (云端同步)</div><div style="font-size: 10px; color: #64748B; margin-top:2px;">数据均由用户本人每日真实打卡上报；本页无需登录即可访问，请勿在此填写任何隐私。</div></div>`;
     }
     const authBtn = document.querySelector(".user-account-badge");
     if (authBtn) {
-        authBtn.innerHTML = `<span>👤</span><span>@${username}</span>`;
+        authBtn.innerHTML = `<span>👤</span><span>@${safeName}</span>`;
     }
     try {
         const res = await fetch(`${API_BASE}/api/public/dashboard?username=${encodeURIComponent(username)}`);
@@ -205,6 +207,46 @@ async function loadPublicUserData(username) {
     } catch (e) {
         console.error("Failed to load public charts", e);
     }
+}
+
+function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, ch => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[ch]));
+}
+
+// 统一的写请求出口：非 2xx 一律抛错。调用方不得把"没落库"播报成成功。
+async function postApi(path, body, opts) {
+    const init = Object.assign({ method: "POST", headers: {} }, opts || {});
+    init.headers["Authorization"] = `Bearer ${state.token}`;
+    if (body instanceof FormData) {
+        init.body = body;
+    } else {
+        init.headers["Content-Type"] = "application/json";
+        init.body = JSON.stringify(body);
+    }
+    const res = await fetch(`${API_BASE}${path}`, init);
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!res.ok) {
+        const err = new Error((data && data.detail) ? data.detail : `HTTP ${res.status}`);
+        err.status = res.status;
+        throw err;
+    }
+    return data || {};
+}
+
+// 打卡类操作的共用收尾：说清这条没存，登录失效时把人拉回登录
+function reportWriteFailure(err, what) {
+    if (err && err.status === 401) {
+        localStorage.removeItem(TOKEN_KEY);
+        callNativeToast(`⚠️ ${what}没保存：登录已失效，请重新登录`);
+        openAuthModal();
+        return;
+    }
+    const why = (err && err.message) ? err.message : "网络不通";
+    callNativeToast(`⚠️ ${what}没保存：${why}（云端没有这条记录）`);
+    callNativeVibrate(200);
 }
 
 function saveAuthSession(token, user) {
@@ -242,6 +284,7 @@ function updateUserUI(username) {
 // ==========================================
 function applyDashboardData(data) {
     if (!data || !data.metrics) return;
+    state.dashboardLoaded = true;
     state.calculated = {
         bmr: data.metrics.bmr,
         tdee: data.metrics.tdee,
@@ -386,10 +429,16 @@ function renderDashboard() {
     if (burnedEl) burnedEl.innerText = `-${state.todayBurned} kcal`;
 
     const netDeficitEl = document.getElementById("net-deficit-val");
-    const netDeficit = Math.round(c.targetCal - state.todayConsumed + state.todayBurned);
     if (netDeficitEl) {
-        netDeficitEl.innerText = (netDeficit >= 0 ? "+" : "") + `${netDeficit} kcal`;
-        netDeficitEl.style.color = netDeficit >= 0 ? "var(--primary-dark)" : "var(--danger)";
+        // 没记任何一笔时不假称有缺口：净缺口 = 维持代谢 + 训练消耗 - 真实摄入
+        if (!state.dashboardLoaded || (state.todayConsumed === 0 && state.todayBurned === 0)) {
+            netDeficitEl.innerText = "— kcal (今日暂无真实记录)";
+            netDeficitEl.style.color = "var(--text-light)";
+        } else {
+            const netDeficit = Math.round(c.tdee - state.todayConsumed + state.todayBurned);
+            netDeficitEl.innerText = (netDeficit >= 0 ? "+" : "") + `${netDeficit} kcal`;
+            netDeficitEl.style.color = netDeficit >= 0 ? "var(--primary-dark)" : "var(--danger)";
+        }
     }
 
     // 表盘进度环
@@ -471,22 +520,14 @@ async function logNaturalMeal() {
     const slotName = slotNames[state.selectedMealSlot] || "餐食";
 
     try {
-        const res = await fetch(`${API_BASE}/api/food/log`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${state.token}`
-            },
-            body: JSON.stringify({ slot: slotName, food_name: text })
-        });
-        const data = await res.json();
+        const data = await postApi("/api/food/log", { slot: slotName, food_name: text });
         callNativeToast(data.msg || "记录成功！");
         callNativeVibrate(80);
         input.value = "";
         await syncRemoteDashboard();
         await syncRemoteCharts();
     } catch (e) {
-        callNativeToast("网络繁忙，正在重试...");
+        reportWriteFailure(e, "这餐饮食");
     }
 }
 
@@ -521,22 +562,14 @@ function renderMealDiary() {
 async function toggleWaterCup(index) {
     let nextCount = state.waterCupsCount === index ? index - 1 : index;
     try {
-        const res = await fetch(`${API_BASE}/api/water/update`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${state.token}`
-            },
-            body: JSON.stringify({ cups_count: nextCount })
-        });
-        const data = await res.json();
+        const data = await postApi("/api/water/update", { cups_count: nextCount });
         state.waterCupsCount = nextCount;
         renderWaterCups();
         callNativeToast(data.msg || "打卡成功！");
         callNativeVibrate(50);
     } catch (e) {
-        state.waterCupsCount = nextCount;
         renderWaterCups();
+        reportWriteFailure(e, "饮水打卡");
     }
 }
 
@@ -574,37 +607,22 @@ async function saveWeight() {
 
     const wtJin = unit === "kg" ? val * 2 : val;
     try {
-        const res = await fetch(`${API_BASE}/api/weight/log`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${state.token}`
-            },
-            body: JSON.stringify({ weight_jin: wtJin })
-        });
-        const data = await res.json();
+        const data = await postApi("/api/weight/log", { weight_jin: wtJin });
         callNativeToast(data.msg || "体重打卡成功！");
         callNativeVibrate(100);
         input.value = "";
         await syncRemoteDashboard();
         await syncRemoteCharts();
     } catch (e) {
-        callNativeToast("打卡成功！");
+        reportWriteFailure(e, "体重打卡");
     }
 }
 
 // 真实训练打卡
 async function completeWorkoutToday() {
     try {
-        const res = await fetch(`${API_BASE}/api/workout/complete`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${state.token}`
-            },
-            body: JSON.stringify({ duration_minutes: 20, cal_burned: 220.0, plan_name: "专属塑形训练" })
-        });
-        const data = await res.json();
+        const data = await postApi("/api/workout/complete",
+            { duration_minutes: 20, cal_burned: 220.0, plan_name: "专属塑形训练" });
         state.workoutDoneToday = true;
         callNativeToast(data.msg || "🏆 今日训练打卡成功！");
         callNativeVibrate(200);
@@ -612,7 +630,7 @@ async function completeWorkoutToday() {
         await syncRemoteDashboard();
         await syncRemoteCharts();
     } catch (e) {
-        callNativeToast("训练打卡成功！消耗已计入！");
+        reportWriteFailure(e, "训练打卡");
     }
 }
 
@@ -637,19 +655,14 @@ async function upgradeCyclePlan() {
 
     try {
         callNativeToast("正在提交身材照并生成下一阶段进阶规划...");
-        const res = await fetch(`${API_BASE}/api/cycle/upgrade`, {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${state.token}` },
-            body: formData
-        });
-        const data = await res.json();
-        callNativeToast(data.msg || "🎉 周期规划已成功升级！");
+        const data = await postApi("/api/cycle/upgrade", formData);
+        callNativeToast(data.msg || "🎉 周期身材照已记录！");
         callNativeVibrate(250);
         callNativeBeep();
         await syncRemoteDashboard();
         await syncRemoteCharts();
     } catch (e) {
-        callNativeToast("周期规划已成功更新！");
+        reportWriteFailure(e, "周期身材照");
     }
 }
 
@@ -925,23 +938,35 @@ function drawMacrosChart() {
     const r = 50;
     const lineWidth = 16;
 
-    // 真实宏量摄入
     const rm = state.realMacros || {};
-    const total = (rm.protein_g * 4 + rm.carbs_g * 4 + rm.fat_g * 9) || 1;
-    const pRatio = Math.max(0.1, (rm.protein_g * 4) / total);
-    const cRatio = Math.max(0.1, (rm.carbs_g * 4) / total);
-    const fRatio = Math.max(0.1, (rm.fat_g * 9) / total);
-    const sumRatio = pRatio + cRatio + fRatio;
+    const pG = Number(rm.protein_g) || 0;
+    const cG = Number(rm.carbs_g) || 0;
+    const fG = Number(rm.fat_g) || 0;
 
+    // 今日一笔未记时画灰环说明"没数据"，不再用 10% 垫底凑出一个看似真实的三等分
+    if (pG <= 0 && cG <= 0 && fG <= 0) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.strokeStyle = "#E2E8F0";
+        ctx.lineWidth = lineWidth;
+        ctx.stroke();
+        ctx.fillStyle = "#94A3B8";
+        ctx.font = "bold 12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("今日无记录", cx, cy + 4);
+        return;
+    }
+
+    const total = pG * 4 + cG * 4 + fG * 9;
     const macros = [
-        { name: "蛋白质", ratio: pRatio / sumRatio, color: "#3B82F6" },
-        { name: "复合碳水", ratio: cRatio / sumRatio, color: "#F59E0B" },
-        { name: "优质脂肪", ratio: fRatio / sumRatio, color: "#EF4444" }
-    ];
+        { name: "蛋白质", kcal: pG * 4, color: "#3B82F6" },
+        { name: "复合碳水", kcal: cG * 4, color: "#F59E0B" },
+        { name: "优质脂肪", kcal: fG * 9, color: "#EF4444" }
+    ].filter(m => m.kcal > 0);
 
     let startAngle = -Math.PI / 2;
     macros.forEach(m => {
-        const angle = m.ratio * Math.PI * 2;
+        const angle = (m.kcal / total) * Math.PI * 2;
         ctx.beginPath();
         ctx.arc(cx, cy, r, startAngle, startAngle + angle);
         ctx.strokeStyle = m.color;
@@ -950,21 +975,31 @@ function drawMacrosChart() {
         startAngle += angle;
     });
 
-    ctx.fillStyle = "var(--text-main)";
+    ctx.fillStyle = "#0F172A";
     ctx.font = "bold 13px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(rm.total_cal ? `${rm.total_cal}k` : "真实配比", cx, cy + 5);
+    ctx.fillText(`${Math.round(rm.total_cal || total)}k`, cx, cy + 5);
 }
 
 // ==========================================
 // 饭点外卖软件安全门禁 (超出热量严格限制点单)
 // ==========================================
 function launchTakeoutApp(type) {
+    if (!state.token) {
+        callNativeToast("还没有您的今日热量额度：请先登录或注册，门禁才知道该不该放行");
+        openAuthModal();
+        return;
+    }
+    if (!state.dashboardLoaded) {
+        callNativeToast("⚠️ 今日额度还没从云端取到（网络不通），门禁不放行也不判超标，请联网后重试");
+        callNativeVibrate(200);
+        return;
+    }
     if (state.remainingCal <= 0) {
         // 触发强力拦截锁
         callNativeVibrate(300);
         callNativeBeep();
-        alert(`🚨 【外卖严管拦截网启动】\n\n您今日热量已超标，剩余额度仅剩 ${state.remainingCal} kcal！\n根据减脂塑形计划，外卖点单已被系统严格限制！\n\n💡 建议方案：多饮用 500ml 温水排钠，晚餐改用清爽蔬菜豆腐汤！`);
+        alert(`🚨 【外卖严管拦截网启动】\n\n您今日热量已超标，今日额度已用超 ${state.remainingCal} kcal！\n根据减脂塑形计划，外卖点单已被系统严格限制！\n\n💡 建议方案：多饮用 500ml 温水排钠，晚餐改用清爽蔬菜豆腐汤！`);
         return;
     }
 
@@ -1394,17 +1429,10 @@ async function saveCustomProfile() {
     const diningMode = document.getElementById("prof-dining-mode") ? document.getElementById("prof-dining-mode").value : "takeout";
 
     try {
-        await fetch(`${API_BASE}/api/profile/update`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${state.token}`
-            },
-            body: JSON.stringify({
-                gender, age, height, weight_jin: weightJin,
-                target_weight_jin: targetWeightJin, goal_type: state.profile.goalType,
-                dining_mode: diningMode, scene
-            })
+        await postApi("/api/profile/update", {
+            gender, age, height, weight_jin: weightJin,
+            target_weight_jin: targetWeightJin, goal_type: state.profile.goalType,
+            dining_mode: diningMode, scene
         });
         closeProfileModal();
         callNativeToast("🎉 专属身材方案已定制保存！");
@@ -1412,8 +1440,7 @@ async function saveCustomProfile() {
         await syncRemoteDashboard();
         await syncRemoteCharts();
     } catch (e) {
-        closeProfileModal();
-        callNativeToast("方案已更新！");
+        reportWriteFailure(e, "档案方案");
     }
 }
 
@@ -1922,6 +1949,19 @@ function generateAiResponse(query) {
 1. <strong>多图挑选心仪身材：</strong>在【形体照】或顶部【👤档案】中，点击图示即可在【S型沙漏马甲线 / 修长轻盈 / 健美微肌 / 大基数脱脂】间自由切换，规划会自动联动！<br>
 2. <strong>周期拍照对比：</strong>每 7 天在【形体照】上传或拍摄空腹身材照，记录腰围变化；<br>
 3. <strong>更新下一周期规划：</strong>提交后点击【更新规划】，系统会根据你的蜕变数据，自动把下一周期的训练动作与饮食方案进阶升级！`;
+    }
+    if (q.includes("平台期") || q.includes("不掉了") || q.includes("不掉") || q.includes("卡住")) {
+        return `🛑 <strong>体重平台期先别加练饿肚子，按这三步查因：</strong><br>
+1. <strong>先分清真假平台期：</strong>连续 3 天晨起空腹同条件称重，波动在 ±0.6 斤内且围度仍在降，是水分波动不是平台；<br>
+2. <strong>查记录而不是查代谢：</strong>翻看【图表】的赤字柱，连续 2 天以上缺口归零多半是漏记的酱料、油、饮品，身体不会骗人，记录会；<br>
+3. <strong>真到平台期再动两件事：</strong>把主食按现有量减 1/4（不砍蛋白质），并把运动日改成 2 次短时快走替代长时间同强度有氧；连着两周不动且腰围也不降，再来找我调整身形目标。`;
+    }
+    if (q.includes("很饿") || q.includes("饿") || q.includes("能吃什么") || q.includes("练完") || q.includes("运动完")) {
+        return `🍽️ <strong>练后饿的正确吃法（不是忍着）：</strong><br>
+1. <strong>练后 1 小时内补：</strong>蛋白质 20-30g + 少量慢碳，例：无糖希腊酸奶 100g + 半根玉米，约 180-220 kcal；<br>
+2. <strong>怕睡前长肉就选高 Volume 低热量：</strong>冬瓜虾滑汤、菌菇豆腐汤、焯拌黄瓜鸡蛋，胃填满而热量不到 200 kcal；<br>
+3. <strong>别用"练过了"当加餐理由：</strong>今日打卡的训练消耗只按 220 kcal 记账，喝一杯奶茶就抵光了；<br>
+4. 真饿得难受，先喝 300ml 温水等 10 分钟，仍饿就按上面第 2 条吃，不要跳过头餐。`;
     }
     if (q.includes("火锅") || q.includes("聚餐")) {
         return `🍲 <strong>在外吃火锅必胜避坑守则（国内适用）：</strong><br>
