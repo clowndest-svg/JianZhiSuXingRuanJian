@@ -93,14 +93,21 @@ def install_stub_fastapi():
     class HTMLResponse:
         def __init__(self, content="", status_code=200, media_type=None, **kw):
             self.body, self.status_code = content, status_code
+            self.headers = kw.get("headers") or {}
 
     class JSONResponse(HTMLResponse):
         pass
 
     class FileResponse(HTMLResponse):
         def __init__(self, path="", *a, **kw):
-            self.path = path
-            HTMLResponse.__init__(self, "")
+            # 必须真的把文件读进 body：留空会让"页面里不含某串"这类判据
+            # 在旧版（走 FileResponse）上恒真，测不出任何东西。
+            self.path, self.status_code = path, 200
+            self.headers = kw.get("headers") or {}
+            try:
+                self.body = io.open(path, encoding="utf-8", errors="replace").read()
+            except OSError:
+                self.body = ""
 
     rs.HTMLResponse = HTMLResponse
     rs.JSONResponse = JSONResponse
@@ -214,8 +221,11 @@ def main():
     check("404 已 HTML 转义", "&lt;img" in b404, b404[:100])
 
     os.makedirs(os.path.join(SANDBOX, "web"), exist_ok=True)
-    io.open(os.path.join(SANDBOX, "web", "index.html"), "w", encoding="utf-8").write(
-        "<html><head><title>t</title></head><body>b</body></html>")
+    # 用仓库里那份真首页当沙箱内容：占位 HTML 里没有 app.js 引用，
+    # 会让"引用带版本号/不留裸引用"这类判据变成恒真。
+    real_index = os.path.join(ROOT, "app", "src", "main", "assets", "index.html")
+    io.open(os.path.join(SANDBOX, "web", "index.html"), "w", encoding="utf-8", newline="").write(
+        io.open(real_index, encoding="utf-8", newline="").read())
 
     evil = "a';alert(1);//"
     mkuser(evil, gender="male", goal_type="male_steady")
@@ -271,6 +281,53 @@ def main():
     mm = ch3["macros_today"]
     check("宏量按比例倒推而非真实营养表",
           abs(mm["protein_g"] - round(eat * 0.25 / 4, 1)) < 0.11, mm)
+
+    # --- 8. 首页出口的版本号与 Cache-Control（"网页与下载包是否实时"的判据）---
+    import time as _t
+    web = m.WEB_DIR
+
+    def mk_static(name, text, shift=0):
+        p = os.path.join(web, name)
+        io.open(p, "w", encoding="utf-8").write(text)
+        t = _t.time() + shift
+        os.utime(p, (t, t))
+        return p
+
+    mk_static("app.js", "// v1")
+    mk_static("style.css", "body{}")
+    mk_static("qingsu.apk", "APKOLD")
+    mk_static("qr.svg", "<svg/>")
+
+    rp = m.root_dashboard()
+    html = rp.body
+    cc = (rp.headers or {}).get("Cache-Control", "")
+    check("首页带 Cache-Control no-cache", "no-cache" in cc, cc)
+    check("首页 app.js 引用带版本号", 'src="app.js?v=' in html, "")
+    check("首页 style.css 引用带版本号", 'href="style.css?v=' in html, "")
+    check("首页 APK 下载链接带版本号", 'href="/qingsu.apk?v=' in html, "")
+    check("首页不留裸引用",
+          ('src="app.js"' not in html) and ('href="/qingsu.apk"' not in html), "")
+
+    def apk_ver(txt):
+        mm = re.search(r'/qingsu\.apk\?v=(\d+)', txt)
+        return mm.group(1) if mm else None
+
+    v1 = apk_ver(html)
+    check("APK 版本号取自真实 mtime", v1 not in (None, "0"), v1)
+
+    # 关键一条：换了新包上线，首页给出的下载 URL 必须立刻不同，
+    # 否则老浏览器会把它一直缓存住的旧包当最新的下发。
+    mk_static("qingsu.apk", "APKNEW", shift=7)
+    v2 = apk_ver(m.root_dashboard().body)
+    check("换包后下载 URL 立即改变", v2 is not None and v2 != v1, "%s -> %s" % (v1, v2))
+
+    rpub = m.public_user_dashboard(username=uname)
+    check("大屏页同样带版本号", 'src="app.js?v=' in rpub.body, "")
+    check("大屏页同样 no-cache", "no-cache" in (rpub.headers or {}).get("Cache-Control", ""), "")
+
+    for fn in ("get_style", "get_app_js", "download_apk", "get_qr_svg"):
+        h = (getattr(m, fn)().headers or {}).get("Cache-Control", "")
+        check("静态件 %s 带 no-cache" % fn, "no-cache" in h, h)
 
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (

@@ -143,6 +143,43 @@ init_db()
 # Mount uploaded photos
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
+
+
+def _asset_ver(path):
+    """拿文件修改时间当版本号：重新部署一次就换一个串，
+    让已经被缓存住的浏览器不得不去取新 URL。"""
+    try:
+        return str(int(os.path.getmtime(path)))
+    except OSError:
+        return "0"
+
+
+def _no_cache():
+    """这些响应以前完全没有 Cache-Control，浏览器按启发式长期缓存，
+    于是部署新版后老访问者可能仍拿到旧 app.js，甚至旧 APK。"""
+    return {"Cache-Control": "no-cache, must-revalidate"}
+
+
+def render_index_html():
+    """服务端这份首页在出口前改写三处引用，挂上版本号。
+
+    只改服务端这一份：APK 里的 assets 通过 file:// 加载，不存在 HTTP 缓存问题，
+    所以不需要为此重新打包。"""
+    index_file = os.path.join(WEB_DIR, "index.html")
+    if not os.path.exists(index_file):
+        return None
+    with open(index_file, "r", encoding="utf-8") as f:
+        content = f.read()
+    pairs = [
+        ('href="style.css"', 'href="style.css?v=%s"', "style.css"),
+        ('src="app.js"', 'src="app.js?v=%s"', "app.js"),
+        ('href="/qingsu.apk"', 'href="/qingsu.apk?v=%s"', "qingsu.apk"),
+    ]
+    for old, fmt, name in pairs:
+        content = content.replace(old, fmt % _asset_ver(os.path.join(WEB_DIR, name)))
+    return content
+
+
 def hash_pw(pw: str) -> str:
     return hashlib.sha256(pw.encode()).hexdigest()
 
@@ -777,35 +814,36 @@ def get_public_charts(username: str):
 def get_style():
     path = os.path.join(WEB_DIR, "style.css")
     if os.path.exists(path):
-        return FileResponse(path, media_type="text/css")
+        return FileResponse(path, media_type="text/css", headers=_no_cache())
     raise HTTPException(status_code=404, detail="style.css not found")
 
 @app.get("/app.js")
 def get_app_js():
     path = os.path.join(WEB_DIR, "app.js")
     if os.path.exists(path):
-        return FileResponse(path, media_type="application/javascript")
+        return FileResponse(path, media_type="application/javascript", headers=_no_cache())
     raise HTTPException(status_code=404, detail="app.js not found")
 
 @app.get("/qingsu.apk")
 def download_apk():
     apk_path = os.path.join(WEB_DIR, "qingsu.apk")
     if os.path.exists(apk_path):
-        return FileResponse(apk_path, media_type="application/vnd.android.package-archive", filename="轻塑减脂塑形_v5.0.apk")
+        return FileResponse(apk_path, media_type="application/vnd.android.package-archive",
+                             filename="轻塑减脂塑形_v5.0.apk", headers=_no_cache())
     raise HTTPException(status_code=404, detail="APK not found")
 
 @app.get("/qr.svg")
 def get_qr_svg():
     path = os.path.join(WEB_DIR, "qr.svg")
     if os.path.exists(path):
-        return FileResponse(path, media_type="image/svg+xml")
+        return FileResponse(path, media_type="image/svg+xml", headers=_no_cache())
     raise HTTPException(status_code=404, detail="qr.svg not found")
 
 @app.get("/", response_class=HTMLResponse)
 def root_dashboard():
-    index_file = os.path.join(WEB_DIR, "index.html")
-    if os.path.exists(index_file):
-        return FileResponse(index_file, media_type="text/html")
+    content = render_index_html()
+    if content is not None:
+        return HTMLResponse(content, media_type="text/html", headers=_no_cache())
     return HTMLResponse("<h3>轻塑系统正在启动中...</h3>")
 
 @app.get("/u/{username}", response_class=HTMLResponse)
@@ -829,13 +867,11 @@ def public_user_dashboard(username: str):
         )
 
     # Return the unified real web app with automatic target user binding & base path
-    index_file = os.path.join(WEB_DIR, "index.html")
-    if os.path.exists(index_file):
-        with open(index_file, "r", encoding="utf-8") as f:
-            content = f.read()
+    content = render_index_html()
+    if content is not None:
         # json.dumps 出合法 JS 字符串，再把 < 转义掉，防用户名里的 </script> 提前闭合标签
         safe_js_name = json.dumps(username).replace("<", "\\u003c")
         injected = f"<base href=\"/\">\n<script>window.__PUBLIC_USER__ = {safe_js_name};</script>\n"
         content = content.replace("<head>", "<head>\n" + injected)
-        return HTMLResponse(content)
+        return HTMLResponse(content, headers=_no_cache())
     return HTMLResponse("<h3>轻塑系统正在启动中...</h3>")

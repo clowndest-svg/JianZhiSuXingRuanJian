@@ -76,6 +76,20 @@ Android WebView 壳 + 单页 H5 + 腾讯云 FastAPI 后端的减脂记录工具�
 
 本轮上线后再次逐字节比对：线上 `/app.js` md5 `618b697b6331e08fa50a7b34279feae8`、线上 `qingsu.apk` 内 `assets/app.js` 也是同一个 md5，与仓库源码一致。审计当时（改动前）线上三份前端与仓库也逐字节相同，说明"多端同步"这条一直是真的。
 
+### 缓存：你打开的到底是不是刚部署的那版
+
+后端在 `/`、`/u/{username}`、`/app.js`、`/style.css`、`/qr.svg`、`/qingsu.apk` 的响应上都加了 `Cache-Control: no-cache, must-revalidate`。在这之前这些响应**一个 `Cache-Control` 都没有**，浏览器按启发式长期缓存，于是出现过这种局面：服务器已经换成新版，老访问者的浏览器还在用缓存里的旧 `app.js`，甚至旧 APK。
+
+首页还在出口前给三处引用挂上版本号（取自盘上文件的 mtime）：`src="app.js?v=…"`、`href="style.css?v=…"`、`href="/qingsu.apk?v=…"`。这样即使某个旧条目已经被缓存在浏览器里，URL 一变它就必须重新取。实测：`touch` 服务器上的 `qingsu.apk`（只动时间戳、内容 md5 仍是 `da0f54c0…`）之后，首页给出的下载链接立刻从 `?v=1792077189` 变成 `?v=1792079653`——**页面上那个下载按钮永远对应盘上当前那份包**。
+
+版本号只在服务端改写，仓库里的 `index.html` 保持裸引用不动。原因是 APK 内的 assets 走 `file://` 加载，没有 HTTP 缓存这回事，所以**这次改动不需要重新打包**。
+
+两个代价写在这，别当成免费的：
+
+1. **全站不返回 304。** Starlette 的 `FileResponse` 只发 `ETag`/`Last-Modified`，并不处理 `If-None-Match`；nginx 那层是纯 `proxy_pass`，没开 `proxy_cache`。实测带 `If-None-Match` 请求 `/app.js` 与 `/qingsu.apk` 都照旧返回 200 全量。所以 `no-cache` 的落地成本是每次访问重传首页 69.5 KB + `app.js` 97.4 KB + `style.css` 38 KB ≈ 205 KB。要省掉它得自己实现条件请求（约二十行），本轮没做。
+2. **改了 `app.js` 必须重新打 APK 才影响 App 用户。** 手机 App 的前端打包在安装包里，服务器再怎么更新都到不了已装的 App。这条是这轮审计里"多端同步"最容易踩的暗坑：网页版和 APK 版是两个独立分发渠道，只有当 `qingsu.apk` 内 `assets/app.js` 的 md5 与仓库一致时，两边才算同一版。
+
+
 ---
 
 ## 本地构建
