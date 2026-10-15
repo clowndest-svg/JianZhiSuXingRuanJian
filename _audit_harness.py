@@ -329,6 +329,117 @@ def main():
         h = (getattr(m, fn)().headers or {}).get("Cache-Control", "")
         check("静态件 %s 带 no-cache" % fn, "no-cache" in h, h)
 
+    # --- 9. 外卖自律统计：没有记录就必须是 0，不替用户预先记功 ---
+    st0 = m.compute_dashboard_data(user)["takeout_stats"]
+    check("新用户拦截统计全 0", st0["intercepted"] == 0 and st0["cal_saved"] == 0 and st0["fat_jin"] == 0, st0)
+
+    m.log_takeout_event(m.TakeoutEventReq(event_type="substitute", cal_avoided=690, dish_name="猪脚饭"), user=user)
+    m.log_takeout_event(m.TakeoutEventReq(event_type="blocked", cal_avoided=900, dish_name="奶茶"), user=user)
+    m.log_takeout_event(m.TakeoutEventReq(event_type="cancelled", cal_avoided=980, dish_name="汉堡套餐"), user=user)
+    st1 = m.compute_dashboard_data(user)["takeout_stats"]
+    check("平替+退单计入少摄入", st1["cal_saved"] == 690 + 980, st1)
+    check("门禁拦下不折算热量", st1["blocked"] == 1, st1)
+    check("拦截次数=拦下+退单", st1["intercepted"] == 2, st1)
+    check("脂肪折算口径正确", st1["fat_jin"] == round((690 + 980) / 7700.0 * 2, 1), st1)
+    check("blocked 上报的热量被强制归零",
+          q("SELECT cal_avoided FROM takeout_events WHERE event_type='blocked'")[0]["cal_avoided"] == 0,
+          q("SELECT cal_avoided FROM takeout_events WHERE event_type='blocked'"))
+    try:
+        m.log_takeout_event(m.TakeoutEventReq(event_type="刷单"), user=user)
+        check("未知事件类型被拒", False, "没抛异常")
+    except Exception as e:
+        check("未知事件类型被拒", getattr(e, "status_code", None) == 400, type(e).__name__)
+
+    # 起点体重与累计富余必须是真数
+    d_now = m.compute_dashboard_data(user)
+    check("起点体重取真实首条记录", d_now["start_weight_jin"] == 140.0, d_now["start_weight_jin"])
+    check("累计富余是真实差额", d_now["over_cal_total"] >= 0, d_now["over_cal_total"])
+
+    # --- 10. 顾问：先答本人真数据，绝不编 ---
+    a1 = m.ask(m.AskReq(question="我多重"), user=user)
+    check("问体重要答真实数字", a1["source"] == "data" and "140" in a1["answer"] or "138" in a1["answer"], a1["answer"][:120])
+    check("问体重不提联网", "联网" not in a1["answer"], a1["answer"][:80])
+
+    a2 = m.ask(m.AskReq(question="我还剩多少额度"), user=user)
+    check("问额度答真实剩余", a2["source"] == "data" and str(d_now["remaining_cal"]) in a2["answer"], a2["answer"][:140])
+
+    a3 = m.ask(m.AskReq(question="今天净缺口多少"), user=user)
+    check("问缺口答真实净缺口", a3["source"] == "data" and "维持代谢" in a3["answer"], a3["answer"][:140])
+
+    a4 = m.ask(m.AskReq(question="我拦截了几次外卖"), user=user)
+    check("问拦截答统计且带折算口径", a4["source"] == "data" and "7700" in a4["answer"], a4["answer"][:160])
+
+    # 恶意菜名不得原样进 HTML 答案
+    m.log_food(m.FoodLogReq(slot="午餐", food_name="<script>alert(1)</script>", cal=100), user=user)
+    a5 = m.ask(m.AskReq(question="我今天吃了什么"), user=user)
+    check("菜名里的标签被转义", "<script>" not in a5["answer"] and "&lt;script&gt;" in a5["answer"], a5["answer"][:160])
+
+    # 联网兜底：要么给真来源，要么明说没查到，两种都不许编答案
+    a6 = m.ask(m.AskReq(question="量子计算是什么"), user=user)
+    ok_src = a6["source"] in ("web", "none")
+    ok_web = a6["source"] == "web" and a6["items"] and all("url" in it for it in a6["items"])
+    ok_none = a6["source"] == "none" and ("没查到" in a6["answer"] or "没成功" in a6["answer"])
+    check("联网问答不编造（有来源或明说失败）", ok_src and (ok_web or ok_none),
+          "source=%s items=%d" % (a6["source"], len(a6.get("items") or [])))
+    if a6["source"] == "web":
+        sample = a6["answer"]
+        check("联网结果标注非本系统建议", "不是本系统的减脂建议" in sample, sample[:120])
+        check("联网标题里的标签已转义", "<script" not in sample.lower(), sample[:120])
+
+    # 限频：别让这个接口变成免费代理
+    ok_limit = True
+    for _ in range(20):
+        ok_limit = ok_limit and m._ask_allowed(424242)
+    check("限频放行前 12 次后拒绝", ok_limit is False and len(m._ask_hits[424242]) <= m._ASK_LIMIT_PER_MIN,
+          len(m._ask_hits[424242]))
+
+    # --- 11. 静态审计：界面上不许存在没接数据的数字（本轮 bug 的根因）---
+    html_txt = io.open(os.path.join(ROOT, "app", "src", "main", "assets", "index.html"),
+                       encoding="utf-8").read()
+    js_txt = io.open(os.path.join(ROOT, "app", "src", "main", "assets", "app.js"),
+                     encoding="utf-8").read()
+    css_txt = io.open(os.path.join(ROOT, "app", "src", "main", "assets", "style.css"),
+                      encoding="utf-8").read()
+    all_ids = set(re.findall(r'id="([^"]+)"', html_txt))
+    # 绑定方式有两种：直接 getElementById，以及经 setText(id, ...) 间接写
+    bound = set(re.findall(r'getElementById\(\s*"([^"]+)"', js_txt)) \
+        | set(re.findall(r'setText\(\s*"([^"]+)"', js_txt))
+
+    # 白名单：内置知识与结构说明里的数字，不是统计量，允许写死
+    STATIC_OK = {"kpi-protein-sub", "kpi-carbs-sub", "kpi-fat-sub",
+                 "modal-tab-female", "modal-tab-male", "timer-display", "timer-label",
+                 "takeout-quota-rule", "display-user-public-url", "modal-download-url"}
+
+    def all_zero(t):
+        """数字全为 0 —— 那是"没有记录"的诚实占位，不算假数据。"""
+        nums = re.findall(r"\d+", t)
+        return bool(nums) and all(int(n) == 0 for n in nums)
+
+    unbound = []
+    for i in sorted(all_ids - bound):
+        mm = re.search(r'id="%s"[^>]*>([^<]*)<' % re.escape(i), html_txt)
+        txt = (mm.group(1) if mm else "").strip()
+        if re.search(r"[0-9]", txt) and i not in STATIC_OK and not all_zero(txt):
+            unbound.append((i, txt))
+    check("没有未接数据却显示数字的元素", not unbound, unbound)
+
+    # 本轮清掉的假数，一个都不许回来
+    BLACKLIST = ["5 次", "3,850", "1.1 斤", "剩余 1 次", "每周至多 1 次", "自制控油率",
+                 "+580 kcal", "70.0 kg", "60.0 kg", "目标 450 kcal", "稳减4-6斤",
+                 "110g (30%)", "145g (40%)", "45g (30%)", "优+ (89分)", "-1.6 斤", "-2.0 cm",
+                 "69.2 kg", "680 kcal", "-220 kcal", "1400 - 1500", "165cm · 70kg", "下行稳健",
+                 "已累计记录 7 次", "当前 140 斤", "今日训练已完成"]
+    back = [b for b in BLACKLIST if b in html_txt]
+    check("已清除的假数据没回来", not back, back)
+
+    check("遮挡覆盖规则已追加", "遮挡与溢出修复" in css_txt and "has-floating-dl" in css_txt, "")
+    check("顶栏允许换行不挤标题", "flex-wrap: wrap" in css_txt, "")
+    check("长文本走省略号不竖排", "text-overflow: ellipsis" in css_txt, "")
+    check("App 内隐藏悬浮下载入口",
+          "floating.style.display" in js_txt and "has-floating-dl" in js_txt, "")
+    check("顾问改走后端问答接口", 'postApi("/api/ask"' in js_txt, "")
+    check("聊天气泡默认转义", "asHtml ? String(text) : escapeHtml(String(text))" in js_txt, "")
+
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (
         "变异样本(HEAD 改动前)" if mutant else "当前源码",

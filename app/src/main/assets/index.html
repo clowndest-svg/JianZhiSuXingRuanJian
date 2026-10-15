@@ -29,7 +29,7 @@
                     <span id="header-username-display">登录/注册</span>
                 </button>
                 <button class="profile-pill-btn" onclick="openProfileModal()">
-                    <span id="header-profile-summary">165cm · 70kg · 塑形</span>
+                    <span id="header-profile-summary">未绑定档案 · 请先登录</span>
                     <span class="gear-icon">⚙️</span>
                 </button>
             </div>
@@ -39,11 +39,11 @@
         <div class="header-mode-bar">
             <button class="mode-btn active" id="btn-mode-rest" onclick="switchDayMode('rest')">
                 <span>🧘</span>
-                <span>休息日 · 控卡 <strong id="mode-rest-cal">1400</strong> kcal</span>
+                <span>休息日 · 控卡 <strong id="mode-rest-cal">0</strong> kcal</span>
             </button>
             <button class="mode-btn" id="btn-mode-workout" onclick="switchDayMode('workout')">
                 <span>🏋️</span>
-                <span>运动日 · 充能 <strong id="mode-workout-cal">1550</strong> kcal</span>
+                <span>运动日 · 充能 <strong id="mode-workout-cal">0</strong> kcal</span>
             </button>
         </div>
     </header>
@@ -82,8 +82,8 @@
             <div id="consecutive-over-banner" class="alert-banner-danger" style="display: none;">
                 <div class="alert-banner-icon">🚨</div>
                 <div class="alert-banner-content">
-                    <h4>严管警报：你已连续 <span id="banner-over-days">2</span> 天热量超标！</h4>
-                    <p>总富余达 <strong id="banner-over-cal">+580 kcal</strong>，必须立刻拦截零食与夜宵，已启动紧急消脂加练预案！</p>
+                    <h4>严管警报：你已连续 <span id="banner-over-days">0</span> 天热量超标！</h4>
+                    <p>总富余达 <strong id="banner-over-cal">0 kcal</strong>，必须立刻拦截零食与夜宵，已启动紧急消脂加练预案！</p>
                 </div>
             </div>
 
@@ -91,7 +91,7 @@
             <div id="consecutive-slacking-banner" class="alert-banner-warning" style="display: none;">
                 <div class="alert-banner-icon">⚠️</div>
                 <div class="alert-banner-content">
-                    <h4>脱离计划警告：已连续 <span id="banner-slacking-days">2</span> 天未完成训练！</h4>
+                    <h4>脱离计划警告：已连续 <span id="banner-slacking-days">0</span> 天未完成训练！</h4>
                     <p>骨骼肌静息代谢率正面临滑落，体态紧致度降低，请今天务必抽空 20 分钟唤醒训练！</p>
                 </div>
             </div>
@@ -100,22 +100,22 @@
             <div class="kpi-grid">
                 <div class="kpi-card calorie" onclick="openProfileModal()">
                     <div class="kpi-card-header">🔥 每日目标摄入</div>
-                    <div class="kpi-value" id="kpi-target-cal">1400 - 1500</div>
-                    <div class="kpi-sub" id="kpi-cal-sub">缺口约 450 kcal · 稳减4-6斤/月</div>
+                    <div class="kpi-value" id="kpi-target-cal">—</div>
+                    <div class="kpi-sub" id="kpi-cal-sub">未绑定档案</div>
                 </div>
                 <div class="kpi-card protein" onclick="openProfileModal()">
                     <div class="kpi-card-header">🥩 优质蛋白质 (30%)</div>
-                    <div class="kpi-value" id="kpi-target-protein">110 g</div>
-                    <div class="kpi-sub" id="kpi-protein-sub">约 1.6g/kg · 锁肌防松弛</div>
+                    <div class="kpi-value" id="kpi-target-protein">—</div>
+                    <div class="kpi-sub" id="kpi-protein-sub">克数按你的身高体重与所选身形实时算出</div>
                 </div>
                 <div class="kpi-card carbs" onclick="openProfileModal()">
                     <div class="kpi-card-header">🌾 复合慢碳水 (40%)</div>
-                    <div class="kpi-value" id="kpi-target-carbs">145 g</div>
-                    <div class="kpi-sub" id="kpi-carbs-sub">低GI粗粮 · 防脱发防暴食</div>
+                    <div class="kpi-value" id="kpi-target-carbs">—</div>
+                    <div class="kpi-sub" id="kpi-carbs-sub">低GI粗粮为主，稳定血糖</div>
                 </div>
                 <div class="kpi-card fat" onclick="openProfileModal()">
                     <div class="kpi-card-header">🥑 优质脂肪 (30%)</div>
-                    <div class="kpi-value" id="kpi-target-fat">45 g</div>
+                    <div class="kpi-value" id="kpi-target-fat">—</div>
                     <div class="kpi-sub" id="kpi-fat-sub">烹调油≤15g · 维持代谢激素</div>
                 </div>
             </div>
@@ -133,7 +133,7 @@
                         <circle class="gauge-progress" id="gauge-circle" cx="80" cy="80" r="66" stroke-dasharray="415" stroke-dashoffset="170"></circle>
                     </svg>
                     <div class="gauge-center-text">
-                        <div class="gauge-num" id="remain-cal-display">820</div>
+                        <div class="gauge-num" id="remain-cal-display">—</div>
                         <div class="gauge-unit">今日剩余预算 (kcal)</div>
                     </div>
                 </div>
@@ -141,15 +141,15 @@
                 <div class="macros-progress-box">
                     <div class="macro-item">
                         <div class="macro-name">已摄入</div>
-                        <div class="macro-val" id="consumed-cal-val" style="color: var(--text-main);">680 kcal</div>
+                        <div class="macro-val" id="consumed-cal-val" style="color: var(--text-main);">0 kcal</div>
                     </div>
                     <div class="macro-item">
                         <div class="macro-name">运动消耗</div>
-                        <div class="macro-val" id="burned-cal-val" style="color: var(--primary-dark);">-220 kcal</div>
+                        <div class="macro-val" id="burned-cal-val" style="color: var(--primary-dark);">-0 kcal</div>
                     </div>
                     <div class="macro-item">
                         <div class="macro-name">当前净缺口</div>
-                        <div class="macro-val" id="net-deficit-val" style="color: var(--accent);">+490 kcal</div>
+                        <div class="macro-val" id="net-deficit-val" style="color: var(--accent);">—</div>
                     </div>
                 </div>
             </div>
@@ -190,7 +190,7 @@
             <div class="card">
                 <div class="card-title">
                     <span class="title-left">💧 每日饮水打卡 (促进代谢/排钠消肿)</span>
-                    <span style="font-size: 11px; color: #2563EB; font-weight: 700;"><span id="water-consumed-text">1000</span> / 2000 ml</span>
+                    <span style="font-size: 11px; color: #2563EB; font-weight: 700;"><span id="water-consumed-text">0</span> / 2000 ml</span>
                 </div>
                 <div class="water-cups-grid" id="water-cups-box">
                     <!-- 8杯水动态渲染 -->
@@ -219,7 +219,7 @@
             <div class="card">
                 <div class="card-title">
                     <span class="title-left">⚖️ 今日空腹体重记录</span>
-                    <span style="font-size: 11px; color: var(--text-muted);" id="current-weight-summary">当前 140 斤</span>
+                    <span style="font-size: 11px; color: var(--text-muted);" id="current-weight-summary">当前 — 斤 / 目标 — 斤</span>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center;">
                     <input type="number" step="0.1" id="input-weight" placeholder="输入晨起体重，如 69.2" class="input-control" style="flex: 1;">
@@ -229,9 +229,7 @@
                     </select>
                     <button class="btn-primary" style="width: auto; padding: 9px 18px; flex-shrink: 0;" onclick="saveWeight()">打卡</button>
                 </div>
-                <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px;" id="weight-status-text">
-                    已累计记录 7 次，离目标体重还有 9.2 斤！
-                </p>
+                <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px;" id="weight-status-text">登录后按你自己的打卡记录计算差值</p>
             </div>
 
         </section>
@@ -300,11 +298,11 @@
             <!-- 本周外卖配额计数器 -->
             <div class="card">
                 <div class="card-title">
-                    <span class="title-left">🛡️ 本周外卖配额限制</span>
-                    <span id="takeout-quota-badge" style="font-size: 11.5px; color: var(--primary-dark); font-weight: 700;">剩余 1 次</span>
+                    <span class="title-left">🛡️ 本周外卖真实记录</span>
+                    <span id="takeout-quota-badge" style="font-size: 11.5px; color: var(--primary-dark); font-weight: 700;">本周点单 0 次</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12.5px;">
-                    <div>外卖频次指标：<strong>每周至多 1 次</strong></div>
+                    <div id="takeout-quota-rule">系统不设次数配额，只如实记录你点了几次、拦了几次</div>
                     <div style="color: var(--text-muted); font-size: 11px;">自制控油餐更有保障</div>
                 </div>
                 <div style="margin-top: 10px; background: #F1F5F9; border-radius: var(--radius-full); height: 8px; overflow: hidden;">
@@ -527,7 +525,7 @@
             <!-- 完成训练打卡 -->
             <div class="card">
                 <button class="btn-primary" onclick="completeWorkoutToday()">
-                    🏆 今日训练已完成！打卡并计入消耗 (-220 kcal)
+                    🏆 记录今日训练打卡（按 220 kcal 计入）
                 </button>
             </div>
 
@@ -545,8 +543,8 @@
             <!-- 周期状态横幅 -->
             <div class="cycle-badge-header">
                 <div>
-                    <div class="cycle-step-indicator" id="cycle-title-display">📅 第 1 周期 · 减脂启动期 (第1-7天)</div>
-                    <div class="cycle-step-sub" id="cycle-goal-display">核心目标：排钠消水肿，腰围缩减 1.5-2 cm，建立代谢节奏</div>
+                    <div class="cycle-step-indicator" id="cycle-title-display">📅 尚未建立周期</div>
+                    <div class="cycle-step-sub" id="cycle-goal-display">阶段目标：先把每日记录做满，围度与体重变化由你自己的打卡算出来</div>
                 </div>
                 <span class="tag-offline-free" id="cycle-badge-tag">进行中</span>
             </div>
@@ -584,7 +582,7 @@
                             <img id="img-base-photo" class="photo-preview-img" style="display: none;">
                             <div id="ph-base-icon" class="photo-placeholder-icon">👤</div>
                             <div id="ph-base-txt" style="font-size: 10px; color: var(--text-light); text-align: center; padding: 0 4px;">点下方上传基准照</div>
-                            <div class="photo-meta-tag" id="meta-base-photo">基准: 70.0kg / 78cm</div>
+                            <div class="photo-meta-tag" id="meta-base-photo">基准: —</div>
                         </div>
                         <label class="btn-upload-photo">
                             <span>📤 上传基准照</span>
@@ -594,12 +592,12 @@
 
                     <!-- 右侧：当前周期最新身材照 -->
                     <div class="photo-box">
-                        <div class="photo-box-title" id="title-cur-cycle-photo">🔥 第 1 周期身材照</div>
+                        <div class="photo-box-title" id="title-cur-cycle-photo">🔥 周期身材照</div>
                         <div class="photo-preview-wrap" id="wrap-cur-photo">
                             <img id="img-cur-photo" class="photo-preview-img" style="display: none;">
                             <div id="ph-cur-icon" class="photo-placeholder-icon">📸</div>
                             <div id="ph-cur-txt" style="font-size: 10px; color: var(--text-light); text-align: center; padding: 0 4px;">拍照记录本周变化</div>
-                            <div class="photo-meta-tag" id="meta-cur-photo">本周: 69.2kg / 76cm</div>
+                            <div class="photo-meta-tag" id="meta-cur-photo">本周: —</div>
                         </div>
                         <label class="btn-upload-photo" style="background: var(--primary-soft); color: var(--primary-dark); border-color: var(--primary-border);">
                             <span>📸 上传最新身材照</span>
@@ -638,15 +636,15 @@
                 <div class="cycle-diff-pill-bar">
                     <div class="cycle-diff-pill">
                         <span>累计减重</span>
-                        <strong id="rep-weight-diff">-1.6 斤</strong>
+                        <strong id="rep-weight-diff">—</strong>
                     </div>
                     <div class="cycle-diff-pill">
                         <span>腰围缩减</span>
-                        <strong id="rep-waist-diff">-2.0 cm</strong>
+                        <strong id="rep-waist-diff">—</strong>
                     </div>
                     <div class="cycle-diff-pill">
                         <span>紧致度得分</span>
-                        <strong style="color: #2563EB;" id="rep-tone-level">优+ (89分)</strong>
+                        <strong style="color: #2563EB;" id="rep-tone-level">—</strong>
                     </div>
                 </div>
                 <div style="font-size: 12px; color: var(--text-main); line-height: 1.6;" id="cycle-report-body">
@@ -669,15 +667,15 @@
             <div class="card">
                 <div class="card-title">
                     <span class="title-left">📉 体重下降走势曲线</span>
-                    <span style="font-size: 11px; color: var(--primary-dark); font-weight: 600;">下行稳健</span>
+                    <span style="font-size: 11px; color: var(--primary-dark); font-weight: 600;" id="chart-trend-tag">尚无对比</span>
                 </div>
                 <div class="chart-container">
                     <canvas id="chart-weight" width="340" height="180"></canvas>
                 </div>
                 <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-top: 6px;">
-                    <span>起点: <span id="chart-start-wt">70.0 kg</span></span>
-                    <span>当前: <strong id="chart-cur-wt" style="color: var(--primary-dark);">69.2 kg</strong></span>
-                    <span>目标: <span id="chart-target-wt">60.0 kg</span></span>
+                    <span>起点: <span id="chart-start-wt">—</span></span>
+                    <span>当前: <strong id="chart-cur-wt" style="color: var(--primary-dark);">—</strong></span>
+                    <span>目标: <span id="chart-target-wt">未设置</span></span>
                 </div>
             </div>
 
@@ -685,7 +683,7 @@
             <div class="card">
                 <div class="card-title">
                     <span class="title-left">📊 近7天热量缺口柱状图</span>
-                    <span style="font-size: 11px; color: var(--primary-dark); font-weight: 600;" id="chart-deficit-target-label">目标 450 kcal</span>
+                    <span style="font-size: 11px; color: var(--primary-dark); font-weight: 600;" id="chart-deficit-target-label">目标 — kcal</span>
                 </div>
                 <div class="chart-container">
                     <canvas id="chart-deficit" width="340" height="180"></canvas>
@@ -702,10 +700,9 @@
                         <canvas id="chart-macros" width="140" height="140"></canvas>
                     </div>
                     <div style="font-size: 12px; line-height: 1.8;" id="chart-macros-legend">
-                        <div style="color: #3B82F6;">■ 优质蛋白 <span id="legend-protein">110g (30%)</span></div>
-                        <div style="color: #F59E0B;">■ 复合碳水 <span id="legend-carbs">145g (40%)</span></div>
-                        <div style="color: #EF4444;">■ 优质脂肪 <span id="legend-fat">45g (30%)</span></div>
-                        <div style="color: var(--primary-dark); font-weight: 700; margin-top: 4px;">自制控油率: 92%</div>
+                        <div style="color: #3B82F6;">■ 优质蛋白 <span id="legend-protein">—</span></div>
+                        <div style="color: #F59E0B;">■ 复合碳水 <span id="legend-carbs">—</span></div>
+                        <div style="color: #EF4444;">■ 优质脂肪 <span id="legend-fat">—</span></div>
                     </div>
                 </div>
             </div>
@@ -714,19 +711,19 @@
             <div class="card" style="background: linear-gradient(135deg, #F0FDF4 0%, #FFFFFF 100%); border-color: var(--primary-border);">
                 <div class="card-title">
                     <span class="title-left">🛡️ 外卖拦截自律功勋榜</span>
-                    <span style="font-size: 11px; color: var(--primary-dark); font-weight: 700;">自律战神</span>
+                    <span style="font-size: 11px; color: var(--primary-dark); font-weight: 700;" id="medal-tag">尚无记录</span>
                 </div>
                 <div style="display: flex; justify-content: space-around; text-align: center; margin-top: 8px;">
                     <div>
-                        <div style="font-size: 22px; font-weight: 800; color: var(--danger);" id="stat-intercept-count">5 次</div>
+                        <div style="font-size: 22px; font-weight: 800; color: var(--danger);" id="stat-intercept-count">0 次</div>
                         <div style="font-size: 11px; color: var(--text-muted);">高危外卖已成功拦截</div>
                     </div>
                     <div>
-                        <div style="font-size: 22px; font-weight: 800; color: var(--primary-dark);" id="stat-cal-saved">3,850</div>
+                        <div style="font-size: 22px; font-weight: 800; color: var(--primary-dark);" id="stat-cal-saved">0</div>
                         <div style="font-size: 11px; color: var(--text-muted);">少摄入热量 (kcal)</div>
                     </div>
                     <div>
-                        <div style="font-size: 22px; font-weight: 800; color: var(--accent);" id="stat-fat-saved">1.1 斤</div>
+                        <div style="font-size: 22px; font-weight: 800; color: var(--accent);" id="stat-fat-saved">0 斤</div>
                         <div style="font-size: 11px; color: var(--text-muted);">规避纯脂肪堆积</div>
                     </div>
                 </div>
@@ -870,18 +867,18 @@
             </div>
             <div class="modal-body">
                 <div style="text-align: center; margin-bottom: 12px;">
-                    <div style="font-size: 16px; font-weight: 800; color: #991B1B;" id="modal-dish-name">隆江猪脚饭加卤蛋</div>
-                    <div style="font-size: 11.5px; color: #B91C1C; margin-top: 2px;" id="modal-warning-summary">单餐热量直接溢出今日总预算！</div>
+                    <div style="font-size: 16px; font-weight: 800; color: #991B1B;" id="modal-dish-name">—</div>
+                    <div style="font-size: 11.5px; color: #B91C1C; margin-top: 2px;" id="modal-warning-summary">—</div>
                 </div>
 
                 <div style="background: #FEF2F2; border-radius: var(--radius-sm); padding: 10px; margin-bottom: 12px; font-size: 13px;">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
                         <span>预估总热量：</span>
-                        <strong class="val" id="modal-dish-cal" style="color: var(--danger);">1180 kcal (超标 600)</strong>
+                        <strong class="val" id="modal-dish-cal" style="color: var(--danger);">—</strong>
                     </div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
                         <span>隐形烹调油脂：</span>
-                        <strong class="val" id="modal-dish-oil" style="color: var(--danger);">42 g (超标 260%)</strong>
+                        <strong class="val" id="modal-dish-oil" style="color: var(--danger);">—</strong>
                     </div>
                     <div style="display: flex; justify-content: space-between;">
                         <span>对今日缺口影响：</span>
@@ -892,8 +889,8 @@
                 <!-- 智能低卡平替推荐 -->
                 <div style="background: #F0FDF4; border: 1px solid var(--primary-border); border-radius: var(--radius-sm); padding: 10px; margin-bottom: 14px;">
                     <div style="color: var(--primary-dark); font-weight: 700; font-size: 12px; margin-bottom: 3px;">✨ 严管教练推荐【一键低卡平替】：</div>
-                    <div style="font-size: 13.5px; font-weight: 800; color: #065F46;" id="modal-sub-name">白切鸡饭(去皮去油)+米饭减半</div>
-                    <div style="font-size: 11.5px; color: var(--primary-dark); margin-top: 2px;" id="modal-sub-benefit">热量仅 490 kcal · 优质蛋白35g · 立省 690 kcal！</div>
+                    <div style="font-size: 13.5px; font-weight: 800; color: #065F46;" id="modal-sub-name">—</div>
+                    <div style="font-size: 11.5px; color: var(--primary-dark); margin-top: 2px;" id="modal-sub-benefit">—</div>
                 </div>
 
                 <div style="display: flex; flex-direction: column; gap: 8px;">
@@ -1051,7 +1048,7 @@
                 <!-- 功能亮点提示 -->
                 <div class="download-highlights">
                     <div class="dl-hl-item">✨ <strong>男女身材定制</strong>：8 套身形形态针对性动作库</div>
-                    <div class="dl-hl-item">🚨 <strong>外卖严管门禁</strong>：超标自动弹窗拦截与低卡平替</div>
+                    <div class="dl-hl-item">🚨 <strong>外卖严管门禁</strong>：超标时拦下本页入口，并给出低卡平替</div>
                     <div class="dl-hl-item">📈 <strong>100% 真数据</strong>：公网大屏多端同步，拒绝虚假</div>
                 </div>
             </div>

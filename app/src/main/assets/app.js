@@ -150,6 +150,15 @@ window.addEventListener("DOMContentLoaded", () => {
     if (window.location.hash === "#download" || window.location.search.includes("download=1")) {
         setTimeout(openDownloadModal, 400);
     }
+    // 悬浮下载入口：App 里已经装着客户端，再放一颗"下载App"既多余又压住卡片文字
+    const floating = document.querySelector(".floating-dl-btn");
+    if (floating) {
+        if (window.AndroidBridge && window.AndroidBridge.showToast) {
+            floating.style.display = "none";
+        } else {
+            document.body.classList.add("has-floating-dl");
+        }
+    }
 });
 
 async function initAuthAndData() {
@@ -297,7 +306,19 @@ function applyDashboardData(data) {
         fatG: data.metrics.fat_g,
         summaryText: `${data.profile.height}cm · ${data.current_weight_jin}斤 · ${getGoalName(data.profile.goal_type)}`
     };
-    state.profile = data.profile;
+    // 服务器返回的是存储形状（下划线），UI 读的是驼峰；以前直接赋值导致
+    // 目标体重显示 undefined、差值算成 NaN、身材卡片退回女性第一款。
+    const sp = data.profile || {};
+    state.profile = {
+        gender: sp.gender,
+        age: sp.age,
+        height: sp.height,
+        weightJin: sp.weight_jin,
+        targetWeightJin: sp.target_weight_jin,
+        goalType: sp.goal_type,
+        diningMode: sp.dining_mode,
+        scene: sp.scene
+    };
     state.todayConsumed = data.today_consumed || 0;
     state.todayBurned = data.today_burned || 0;
     state.remainingCal = data.remaining_cal;
@@ -325,6 +346,7 @@ function applyDashboardData(data) {
     }
 
     renderDashboard();
+    renderRealStats(data);
     renderMealDiary();
     renderWaterCups();
     switchShapeGender(data.profile.gender || "female", false);
@@ -469,9 +491,76 @@ function renderDashboard() {
 
     const statusText = document.getElementById("weight-status-text");
     if (statusText) {
-        const diff = (state.currentWeightJin - p.targetWeightJin).toFixed(1);
-        statusText.innerText = `离目标体重还有 ${Math.max(0, diff)} 斤！坚持真打卡，身材稳健蜕变！`;
+        const tgt = Number(p.targetWeightJin);
+        if (!tgt) {
+            statusText.innerText = "还没设置目标体重：点右上角档案填一个，差值才算得出来。";
+        } else {
+            const gap = Math.round((state.currentWeightJin - tgt) * 10) / 10;
+            statusText.innerText = gap > 0
+                ? `离目标体重还有 ${gap} 斤！坚持真打卡，身材稳健蜕变！`
+                : `已达到目标体重（当前比目标低 ${Math.abs(gap)} 斤）。`;
+        }
     }
+}
+
+// 把界面上原本写死的统计全部绑到云端真实数据；没有记录就显示 0，不预先记功
+function setText(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.innerText = val;
+}
+
+function renderRealStats(d) {
+    const s = d.takeout_stats || {};
+    const m = d.metrics || {};
+    const intercepted = s.intercepted || 0;
+
+    setText("stat-intercept-count", intercepted + " 次");
+    setText("stat-cal-saved", (s.cal_saved || 0).toLocaleString());
+    setText("stat-fat-saved", (s.fat_jin || 0) + " 斤");
+    setText("medal-tag", intercepted > 0 ? "已有自律记录" : "尚无记录");
+
+    setText("takeout-quota-badge", `本周点单 ${s.week_launched || 0} 次`);
+    setText("takeout-quota-rule",
+            `本周真实事件 ${s.week_events || 0} 条 · 系统不设次数配额，只如实记录`);
+    const bar = document.getElementById("takeout-quota-bar");
+    if (bar) {
+        const denom = (s.week_launched || 0) + (s.week_events || 0);
+        bar.style.width = denom ? Math.min(100, Math.round((s.week_events || 0) / denom * 100)) + "%" : "0%";
+    }
+
+    if (d.over_cal_total) {
+        setText("banner-over-cal", `+${d.over_cal_total} kcal`);
+    } else {
+        setText("banner-over-cal", "0 kcal");
+    }
+
+    const start = d.start_weight_jin, cur = d.current_weight_jin;
+    const tgt = Number((d.profile || {}).target_weight_jin);
+    setText("chart-start-wt", start ? `${(start / 2).toFixed(1)} kg` : "—");
+    setText("chart-target-wt", tgt ? `${(tgt / 2).toFixed(1)} kg` : "未设置");
+    setText("chart-deficit-target-label", `目标 ${m.deficit || 0} kcal`);
+    const trend = document.getElementById("chart-trend-tag");
+    if (trend) {
+        if (!start || !cur) trend.innerText = "尚无对比";
+        else {
+            const diff = Math.round((cur - start) * 10) / 10;
+            trend.innerText = diff < 0 ? `已降 ${Math.abs(diff)} 斤`
+                : (diff > 0 ? `上升 ${diff} 斤` : "持平");
+            trend.style.color = diff <= 0 ? "var(--primary-dark)" : "var(--danger)";
+        }
+    }
+
+    const pG = m.protein_g || 0, cG = m.carbs_g || 0, fG = m.fat_g || 0;
+    const kcal = pG * 4 + cG * 4 + fG * 9;
+    const pct = (v) => kcal ? Math.round(v * (v === pG ? 4 : (v === cG ? 4 : 9)) / kcal * 100) : 0;
+    setText("legend-protein", `${pG}g (${pct(pG)}%)`);
+    setText("legend-carbs", `${cG}g (${pct(cG)}%)`);
+    setText("legend-fat", `${fG}g (${pct(fG)}%)`);
+
+    const monthly = m.deficit ? Math.round(m.deficit * 30 / 7700 * 2 * 10) / 10 : 0;
+    setText("kpi-cal-sub", m.deficit
+        ? `缺口 ${m.deficit} kcal · 理论约 ${monthly} 斤/月（按 7700 kcal≈1 kg 脂肪折算）`
+        : "未绑定档案");
 }
 
 // 连续超标与脱离计划警报检查
@@ -999,6 +1088,7 @@ function launchTakeoutApp(type) {
         // 触发强力拦截锁
         callNativeVibrate(300);
         callNativeBeep();
+        reportTakeoutEvent("blocked", 0, "");
         alert(`🚨 【外卖严管拦截网启动】\n\n您今日热量已超标，今日额度已用超 ${state.remainingCal} kcal！\n根据减脂塑形计划，外卖点单已被系统严格限制！\n\n💡 建议方案：多饮用 500ml 温水排钠，晚餐改用清爽蔬菜豆腐汤！`);
         return;
     }
@@ -1008,12 +1098,25 @@ function launchTakeoutApp(type) {
     const appName = type === "meituan" ? "美团外卖" : "饿了么";
     const pkgName = type === "meituan" ? "com.sankuai.meituan" : "me.ele";
     callNativeToast(`✅ 减脂备注已复制！今日额度还剩 ${state.remainingCal} kcal，正在前往${appName}...`);
+    reportTakeoutEvent("launched", 0, appName);
 
     if (window.AndroidBridge && window.AndroidBridge.launchApp) {
         window.AndroidBridge.launchApp(pkgName);
     } else {
         const url = type === "meituan" ? "https://i.meituan.com" : "https://h5.ele.me";
         window.open(url, "_blank");
+    }
+}
+
+async function reportTakeoutEvent(type, calAvoided, dish) {
+    if (!state.token) return;
+    try {
+        await postApi("/api/takeout/event",
+            { event_type: type, cal_avoided: calAvoided || 0, dish_name: dish || "" });
+        await syncRemoteDashboard();
+    } catch (e) {
+        // 记录失败不该打断用户当前操作，但也不能假装记上了
+        console.warn("takeout event not saved", e && e.message);
     }
 }
 
@@ -1868,6 +1971,7 @@ function analyzeTakeout() {
     document.getElementById("modal-dish-oil").innerText = `${item.oil} g`;
     document.getElementById("modal-sub-name").innerText = item.subName;
     document.getElementById("modal-sub-benefit").innerText = item.subBenefit;
+    state.lastAudit = { name: text, cal: item.cal, subCal: item.subCal };
 
     document.getElementById("intercept-modal").classList.add("show");
     callNativeVibrate(150);
@@ -1880,36 +1984,80 @@ function closeInterceptModal() {
 
 function acceptSubstitute() {
     closeInterceptModal();
-    callNativeToast("🎉 太棒了！已采纳低卡平替方案，成功为您少摄入几百大卡！");
+    const a = state.lastAudit || {};
+    const saved = Math.max(0, Math.round((a.cal || 0) - (a.subCal || 0)));
+    callNativeToast(saved > 0
+        ? `🎉 已按平替记账：这一单少摄入 ${saved} kcal（${a.name || "本单"}）`
+        : "🎉 已采纳平替方案（这一单本来就在预算内，没有差额可记）");
     callNativeVibrate(60);
+    if (saved > 0) reportTakeoutEvent("substitute", saved, a.name);
 }
 
 function cancelTakeoutOrder() {
     closeInterceptModal();
-    callNativeToast("🛑 帅气退单！自律战神！为您颁发自律之星！");
+    const a = state.lastAudit || {};
+    callNativeToast(a.cal ? `🛑 帅气退单！这一单的 ${a.cal} kcal 没有进肚子。` : "🛑 帅气退单！");
     callNativeVibrate(100);
+    if (a.cal) reportTakeoutEvent("cancelled", a.cal, a.name);
 }
 
-function forceEatTakeout() {
+async function forceEatTakeout() {
     closeInterceptModal();
-    callNativeToast("🤦 已记录外卖超标热量，今晚已自动为您追加消脂快走加练！");
+    const a = state.lastAudit || {};
+    if (!a.cal) {
+        callNativeToast("这一单没有审核过，系统没有热量依据，所以没有记账。");
+        return;
+    }
+    try {
+        const d = await postApi("/api/food/log",
+            { slot: "晚餐", food_name: (a.name || "外卖") + "（坚持下单）", cal: a.cal });
+        callNativeToast(`已按审核估算把 ${d.cal || a.cal} kcal 记入今日晚餐。加练不会自动出现，需要你自己打卡。`);
+        await syncRemoteDashboard();
+        await syncRemoteCharts();
+    } catch (e) {
+        reportWriteFailure(e, "这笔外卖记账");
+    }
 }
 
 // ==========================================
 // AI 顾问与提问
 // ==========================================
-function sendChatMessage() {
+async function sendChatMessage() {
     const input = document.getElementById("chat-input");
     const msg = input.value.trim();
     if (!msg) return;
 
-    appendBubble("user", msg);
+    appendBubble("user", msg, false);
     input.value = "";
+    const bubble = appendBubble("assistant", state.token ? "正在查你的记录和联网资料…" : "未登录，只能给通用建议…", false);
 
-    setTimeout(() => {
-        const reply = generateAiResponse(msg);
-        appendBubble("assistant", reply);
-    }, 350);
+    if (!state.token) {
+        bubble.innerHTML = escapeHtml("【本地通用建议】" + stripTagsLocal(generateAiResponse(msg)))
+            .replace(/\n/g, "<br>") +
+            "<br><br><span style='color:#94A3B8;font-size:11px;'>登录后我才能查你自己的体重、额度与打卡记录。</span>";
+        return;
+    }
+
+    try {
+        const d = await postApi("/api/ask", { question: msg });
+        const tag = { data: "【你的真实记录】", web: "【联网资料】", none: "【没查到】", limited: "【查询过于频繁】" }[d.source] || "";
+        bubble.innerHTML = "<strong>" + tag + "</strong>" + String(d.answer || "").replace(/\n/g, "<br>");
+    } catch (e) {
+        bubble.innerHTML = "<strong>【联网查询失败】</strong>" +
+            escapeHtml((e && e.message) ? e.message : "未知错误") +
+            "<br>下面这段是本地内置建议，不含你的真实数据：<br>" +
+            escapeHtml(stripTagsLocal(generateAiResponse(msg)));
+    }
+    box_scroll();
+}
+
+function stripTagsLocal(s) {
+    return String(s).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function box_scroll() {
+    const box = document.getElementById("chat-messages-box");
+    if (box) box.scrollTop = box.scrollHeight;
 }
 
 function quickAsk(q) {
@@ -1917,13 +2065,15 @@ function quickAsk(q) {
     sendChatMessage();
 }
 
-function appendBubble(role, text) {
+function appendBubble(role, text, asHtml) {
     const box = document.getElementById("chat-messages-box");
     const div = document.createElement("div");
     div.className = `chat-bubble ${role}`;
-    div.innerHTML = text.replace(/\n/g, "<br>");
+    // 默认按纯文本处理：用户输入与任何第三方内容都不许当标签执行
+    div.innerHTML = (asHtml ? String(text) : escapeHtml(String(text))).replace(/\n/g, "<br>");
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
+    return div;
 }
 
 function generateAiResponse(query) {

@@ -33,10 +33,11 @@ function makeCtx() {
   instrument(ctx2d);
 
   const elems = new Map();
-  function mkEl(id) {
-    if (elems.has(id)) return elems.get(id);
+  let dynSeq = 0;
+  function newEl(id) {
+    let _html = "";
     const el = {
-      id, innerText: "", innerHTML: "", value: "", textContent: "",
+      id, innerText: "", value: "", textContent: "",
       style: {}, checked: false, files: null,
       width: 0, height: 0,
       classList: {
@@ -45,17 +46,30 @@ function makeCtx() {
         contains(c) { return this._s.has(c); },
       },
       getContext() { return ctx2d; },
-      appendChild() {}, remove() {}, select() {}, focus() {},
+      _children: [],
+      appendChild(c) { this._children.push(c); return c; },
+      remove() {}, select() {}, focus() {},
       addEventListener() {},
     };
+    // innerHTML 必须有真实父子语义：写 innerHTML 会清掉子节点，appendChild 的内容要能读回来。
+    // 否则 appendBubble 写进去的气泡在断言里永远是空串，测不出任何东西。
+    Object.defineProperty(el, "innerHTML", {
+      enumerable: true,
+      get() { return _html + this._children.map(c => c.innerHTML).join(""); },
+      set(v) { _html = String(v); this._children = []; },
+    });
     Object.defineProperty(el, "parentElement", { value: { clientWidth: 340 } });
-    elems.set(id, el);
     return el;
+  }
+  function mkEl(id) {
+    // getElementById 走缓存（同一个 id 永远是同一个节点）
+    if (!elems.has(id)) elems.set(id, newEl(id));
+    return elems.get(id);
   }
 
   const win = {
     location: { protocol: "http:", hostname: "127.0.0.1", origin: "http://127.0.0.1", hash: "", search: "" },
-    addEventListener() {},
+    addEventListener(ev, fn) { (listeners[ev] = listeners[ev] || []).push(fn); },
     AndroidBridge: {
       showToast(m) { log.toasts.push(String(m)); },
       vibrate(m) { log.vib++; },
@@ -66,6 +80,7 @@ function makeCtx() {
     open() {},
   };
   win.window = win;
+  const listeners = {};
 
   const sandbox = {
     window: win,
@@ -73,8 +88,16 @@ function makeCtx() {
       getElementById: mkEl,
       querySelector: (s) => mkEl("q" + s),
       querySelectorAll: () => [],
-      createElement: (t) => mkEl("new-" + t),
-      body: { appendChild() {}, removeChild() {} },
+      createElement: (t) => newEl("dyn-" + (++dynSeq) + ":" + t),
+      body: {
+        appendChild() {}, removeChild() {},
+        classList: {
+          _s: new Set(),
+          add(c) { this._s.add(c); },
+          remove(c) { this._s.delete(c); },
+          contains(c) { return this._s.has(c); },
+        },
+      },
       execCommand() {},
     },
     navigator: { vibrate: () => true, clipboard: { writeText: () => Promise.resolve() } },
@@ -100,7 +123,7 @@ function makeCtx() {
   };
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
-  return { context, log, sandbox, mkEl, elems };
+  return { context, log, sandbox, mkEl, elems, listeners };
 }
 
 function loadJs(context) {
@@ -281,6 +304,138 @@ check("大屏横幅不回显标签", !bannerHtml.includes("<img src=x onerror"),
 check("大屏横幅已转义", bannerHtml.includes("&lt;img"), bannerHtml.slice(0, 140));
 
 // ------------------------------------------------------------------ 汇总
+// ===== 9. profile 映射：目标体重不该再是 undefined / NaN =====
+function feed(over) {
+  const d = Object.assign({
+    metrics: { bmr: 1500, tdee: 2118, target_cal: 1698, rest_cal: 1648, workout_cal: 1818,
+               deficit: 420, protein_g: 148, carbs_g: 191, fat_g: 47 },
+    profile: { gender: "male", age: 28, height: 175, weight_jin: 140, target_weight_jin: 120,
+               goal_type: "male_v_taper", dining_mode: "takeout", scene: "home" },
+    today_consumed: 900, today_burned: 220, today_macros: { protein: 56, carbs: 101, fat: 30 },
+    remaining_cal: 1018, water_cups: 2, current_weight_jin: 140, today_meals: [],
+    takeout_locked: false, consecutive_over_days: 0, consecutive_slacking_days: 0,
+    over_cal_total: 0, start_weight_jin: 145, latest_cycle: null,
+    takeout_stats: { intercepted: 0, blocked: 0, cancelled: 0, substituted: 0,
+                     cal_saved: 0, fat_jin: 0, week_launched: 0, week_events: 0 },
+    public_url: "http://124.220.54.64/u/x",
+  }, over);
+  run(h.context, `applyDashboardData(${JSON.stringify(d)})`);
+}
+const txt = (id) => String(run(h.context, `document.getElementById("${id}").innerText`));
+
+feed({});
+check("目标体重映射为数字(不再 undefined)", run(h.context, "state.profile.targetWeightJin") === 120, "");
+check("身形 goalType 映射正确", run(h.context, "state.profile.goalType") === "male_v_taper", "");
+check("体重 weightJin 映射正确", run(h.context, "state.profile.weightJin") === 140, "");
+let st = txt("weight-status-text");
+check("差值文案无 undefined/NaN", !/undefined|NaN/.test(st), st);
+check("差值给出真实 20 斤", st.includes("20"), st);
+
+feed({ current_weight_jin: 115 });
+check("已达标时说明已达成", txt("weight-status-text").includes("已达到目标体重"), txt("weight-status-text"));
+
+feed({ profile: { gender: "male", age: 28, height: 175, weight_jin: 140, target_weight_jin: 0,
+                  goal_type: "male_v_taper", dining_mode: "takeout", scene: "home" } });
+check("未设目标时提示去档案", txt("weight-status-text").includes("还没设置目标体重"), txt("weight-status-text"));
+
+// ===== 10. 统计全部绑真实数据；没记录就是 0 =====
+feed({});
+check("拦截次数真实 0", txt("stat-intercept-count") === "0 次", txt("stat-intercept-count"));
+check("少摄入真实 0", txt("stat-cal-saved") === "0", txt("stat-cal-saved"));
+check("规避脂肪真实 0", txt("stat-fat-saved") === "0 斤", txt("stat-fat-saved"));
+check("称号反映无记录", txt("medal-tag").includes("尚无"), txt("medal-tag"));
+check("配额徽章改为真实点单数", txt("takeout-quota-badge").includes("本周点单 0 次"), txt("takeout-quota-badge"));
+
+feed({ takeout_stats: { intercepted: 3, blocked: 1, cancelled: 2, substituted: 1, cal_saved: 1670,
+                        fat_jin: 0.4, week_launched: 2, week_events: 5 } });
+check("有记录时三颗给真实值",
+  txt("stat-intercept-count") === "3 次" && txt("stat-cal-saved") === "1,670" && txt("stat-fat-saved") === "0.4 斤",
+  [txt("stat-intercept-count"), txt("stat-cal-saved"), txt("stat-fat-saved")].join(" / "));
+check("走势按真实首末体重计算", txt("chart-trend-tag").includes("已降 5"), txt("chart-trend-tag"));
+check("起点 kg 绑真实记录", txt("chart-start-wt") === "72.5 kg", txt("chart-start-wt"));
+check("缺口标签绑真实 deficit", txt("chart-deficit-target-label").includes("420"), txt("chart-deficit-target-label"));
+check("宏量图例绑真实克数", txt("legend-protein").startsWith("148g"), txt("legend-protein"));
+check("月减承诺按真实缺口折算", txt("kpi-cal-sub").includes("420 kcal"), txt("kpi-cal-sub"));
+
+// ===== 11. 门禁事件真的上报 =====
+const drain = async (n) => { for (let i = 0; i < (n || 8); i++) await new Promise(r => setImmediate(r)); };
+function lastBody(urlPart) {
+  const hit = log.fetches.filter(f => String(f[0]).includes(urlPart)).pop();
+  if (!hit || !hit[1] || typeof hit[1].body !== "string") return null;
+  try { return JSON.parse(hit[1].body); } catch (e) { return null; }
+}
+sandbox.__fetchHandler = () => Promise.resolve(okJson({ code: 0, msg: "ok" }));
+run(h.context, `state.token="tk"; state.dashboardLoaded=true;`);
+
+log.fetches.length = 0;
+run(h.context, `state.remainingCal=-50; launchTakeoutApp("meituan")`);
+await drain();
+let ev = lastBody("/api/takeout/event");
+check("被拦下上报 blocked", !!ev && ev.event_type === "blocked", JSON.stringify(ev));
+
+log.fetches.length = 0;
+run(h.context, `state.lastAudit={name:"隆江猪脚饭", cal:1180, subCal:490}; acceptSubstitute();`);
+await drain();
+ev = lastBody("/api/takeout/event");
+check("采纳平替上报差额 690", !!ev && ev.event_type === "substitute" && ev.cal_avoided === 690, JSON.stringify(ev));
+
+log.fetches.length = 0;
+run(h.context, `cancelTakeoutOrder();`);
+await drain();
+ev = lastBody("/api/takeout/event");
+check("主动退单上报 1180", !!ev && ev.event_type === "cancelled" && ev.cal_avoided === 1180, JSON.stringify(ev));
+
+log.fetches.length = 0;
+run(h.context, `forceEatTakeout();`);
+await drain();
+const eat = lastBody("/api/food/log");
+check("坚持下单真的记一笔 1180", !!eat && eat.cal === 1180 && /猪脚饭/.test(eat.food_name || ""), JSON.stringify(eat));
+
+log.fetches.length = 0;
+run(h.context, `state.remainingCal=800; launchTakeoutApp("meituan")`);
+await drain();
+ev = lastBody("/api/takeout/event");
+check("放行时上报 launched", !!ev && ev.event_type === "launched", JSON.stringify(ev));
+
+// ===== 12. 顾问走后端、气泡转义、失败退回本地 =====
+sandbox.__fetchHandler = () => Promise.resolve(
+  okJson({ code: 0, source: "data", answer: "你最新记录的空腹体重是 <strong>140 斤</strong>", items: [] }));
+run(h.context, `document.getElementById("chat-input").value="我多重"; sendChatMessage();`);
+await drain();
+const askCall = log.fetches.filter(f => String(f[0]).includes("/api/ask")).pop();
+check("顾问请求 /api/ask", !!askCall && JSON.parse(askCall[1].body).question === "我多重", "");
+check("气泡渲染后端答案", txt2().includes("140 斤"), txt2().slice(-140));
+
+run(h.context, `document.getElementById("chat-input").value="<img src=x onerror=alert(1)>"; sendChatMessage();`);
+await drain();
+const b2 = txt2();
+check("用户输入不被当标签执行", !b2.includes("<img src=x onerror"), b2.slice(-140));
+check("用户输入被转义显示", b2.includes("&lt;img"), b2.slice(-140));
+
+sandbox.__fetchHandler = () => { throw new TypeError("Failed to fetch"); };
+run(h.context, `document.getElementById("chat-input").value="我多重"; sendChatMessage();`);
+await drain();
+const b3 = txt2();
+check("查询失败明说并退回本地建议",
+  b3.includes("联网查询失败") && b3.includes("本地内置建议"), b3.slice(-180));
+
+function txt2() { return String(run(h.context, `document.getElementById("chat-messages-box").innerHTML`)); }
+
+// ===== 13. 悬浮下载入口：App 内隐藏，网页版留白 =====
+const hApp = makeCtx();
+loadJs(hApp.context);
+(hApp.listeners["DOMContentLoaded"] || []).forEach(fn => { try { fn(); } catch (e) {} });
+const fl = hApp.sandbox.document.querySelector(".floating-dl-btn");
+check("App 内隐藏悬浮下载", fl.style.display === "none", JSON.stringify(fl.style));
+
+const hWeb = makeCtx();
+delete hWeb.sandbox.window.AndroidBridge;
+loadJs(hWeb.context);
+(hWeb.listeners["DOMContentLoaded"] || []).forEach(fn => { try { fn(); } catch (e) {} });
+check("网页版给主内容留出底部空间",
+  hWeb.sandbox.document.body.classList.contains("has-floating-dl"), "");
+check("网页版仍显示悬浮下载", hWeb.sandbox.document.querySelector(".floating-dl-btn").style.display !== "none", "");
+
 const bad = R.filter(x => !x[1]);
 console.log(`\n=== ${MUTANT ? "变异样本(HEAD 改动前)" : "当前源码"}：${R.length} 条，绿 ${R.length - bad.length}，红 ${bad.length} ===`);
 for (const [name, ok, detail] of R) console.log(`  ${ok ? "绿" : "红"} ${name}${ok ? "" : "  -> " + detail}`);

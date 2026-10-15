@@ -1846,4 +1846,67 @@ body {
 }
 
 
+/* ============================================================
+   2026-10-16 遮挡与溢出修复（用户实拍：标题挤成四行、档案胶囊文字
+   竖排溢出、悬浮下载按钮压住卡片文字、体重输入框 placeholder 被截断）
+   统一在文件末尾追加覆盖规则，不改动原布局，便于整段回退。
+   ============================================================ */
 
+/* 顶栏：允许换行，品牌区可收缩，长文本走省略号而不是竖排 */
+.app-header .header-top {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.app-header .app-brand,
+.app-header .brand-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.app-header .brand-text h1,
+.app-header .brand-text p {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 右侧按钮组：可收缩但不许被压成竖排 */
+.profile-pill-btn,
+.user-account-badge,
+.header-download-btn {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 42vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.profile-pill-btn #header-profile-summary,
+.user-account-badge #header-username-display {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 悬浮下载按钮：App 内由 JS 直接隐藏（已经装着 App 了，不该再引导下载一次）；
+   网页版保留，但给主内容留出底部空间，避免它压住最后一张卡片 */
+body.has-floating-dl #app-main { padding-bottom: 140px; }
+.floating-dl-btn { max-width: calc(100vw - 28px); }
+
+/* 体重输入行：输入框吃掉剩余宽度，placeholder 不再被截断 */
+#input-weight { flex: 1 1 auto; min-width: 0; width: auto; }
+#weight-unit { flex: 0 0 auto; }
+
+/* 底部七个导航项：等宽收缩 + 文字缩一档，避免横向溢出 */
+.bottom-nav { gap: 0; }
+.nav-item { min-width: 0; flex: 1 1 0; padding-left: 2px; padding-right: 2px; }
+.nav-item > span:not(.nav-icon) {
+    font-size: 9.5px;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}

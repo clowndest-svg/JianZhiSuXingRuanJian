@@ -4,6 +4,10 @@ import hashlib
 import json
 from html import escape as html_escape
 import time
+import re
+import urllib.parse
+import urllib.request
+from collections import defaultdict
 from datetime import datetime, date, timedelta
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Form
@@ -135,6 +139,19 @@ def init_db():
         FOREIGN KEY(user_id) REFERENCES users(id)
     )
     """)
+    # 外卖门禁真实事件流：拦截/退单/采纳平替/放行，全部由客户端在事件发生时上报
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS takeout_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        cal_avoided REAL DEFAULT 0,
+        dish_name TEXT,
+        log_date TEXT NOT NULL,
+        created_at TEXT,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+    """)
     conn.commit()
     conn.close()
 
@@ -239,6 +256,14 @@ class WorkoutLogReq(BaseModel):
 
 class WaterLogReq(BaseModel):
     cups_count: int
+
+class TakeoutEventReq(BaseModel):
+    event_type: str
+    cal_avoided: Optional[float] = 0
+    dish_name: Optional[str] = None
+
+class AskReq(BaseModel):
+    question: str
 
 # Helpers
 def compute_metrics(p):
@@ -448,6 +473,9 @@ def compute_dashboard_data(user: dict) -> dict:
     # Real latest weight log
     c.execute("SELECT * FROM weight_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user["id"],))
     latest_wt = c.fetchone()
+    c.execute("SELECT weight_jin FROM weight_logs WHERE user_id = ? ORDER BY id ASC LIMIT 1", (user["id"],))
+    first_wt = c.fetchone()
+    q_start = first_wt["weight_jin"] if first_wt else None
     current_weight = latest_wt["weight_jin"] if latest_wt else p.get("weight_jin", 140.0)
 
     # Calculate real remaining calorie budget
@@ -468,9 +496,12 @@ def compute_dashboard_data(user: dict) -> dict:
     """, (user["id"], today))
     past_days = c.fetchall()
     consecutive_over = 0
+    over_cal_total = 0
     for day in past_days:
-        if (day["day_cal"] or 0) > target_cal + 100:
+        day_cal = day["day_cal"] or 0
+        if day_cal > target_cal + 100:
             consecutive_over += 1
+            over_cal_total += round(day_cal - target_cal)
         else:
             break
 
@@ -485,6 +516,25 @@ def compute_dashboard_data(user: dict) -> dict:
             cur_d -= timedelta(days=1)
         else:
             break
+
+    # 外卖自律真实统计：只算盘上有记录的事件，没有任何事件就是 0
+    week_start = (date.today() - timedelta(days=date.today().weekday())).isoformat()
+    c.execute("SELECT event_type, COALESCE(SUM(cal_avoided),0) as cal_sum, COUNT(*) as n "
+              "FROM takeout_events WHERE user_id = ? GROUP BY event_type", (user["id"],))
+    ev = {row["event_type"]: row for row in c.fetchall()}
+    # sqlite3.Row 没有 .get()，只能先判存在再取下标
+    def _n(t):
+        return ev[t]["n"] if t in ev else 0
+
+    def _cal(t):
+        return ev[t]["cal_sum"] if t in ev else 0
+
+    blocked_n, cancelled_n, substitute_n = _n("blocked"), _n("cancelled"), _n("substitute")
+    cal_saved = round(_cal("substitute") + _cal("cancelled"))
+    c.execute("SELECT COALESCE(SUM(CASE WHEN event_type='launched' THEN 1 ELSE 0 END),0) as launched, "
+              "COUNT(*) as total FROM takeout_events WHERE user_id = ? AND log_date >= ?",
+              (user["id"], week_start))
+    wk = c.fetchone()
 
     # Latest cycle report
     c.execute("SELECT * FROM body_cycles WHERE user_id = ? ORDER BY cycle_num DESC LIMIT 1", (user["id"],))
@@ -510,6 +560,18 @@ def compute_dashboard_data(user: dict) -> dict:
         "consecutive_over_days": consecutive_over,
         "consecutive_slacking_days": consecutive_slacking,
         "latest_cycle": dict(latest_cycle) if latest_cycle else None,
+        "over_cal_total": over_cal_total,
+        "start_weight_jin": q_start,
+        "takeout_stats": {
+            "intercepted": blocked_n + cancelled_n,
+            "blocked": blocked_n,
+            "cancelled": cancelled_n,
+            "substituted": substitute_n,
+            "cal_saved": cal_saved,
+            "fat_jin": round(cal_saved / 7700.0 * 2, 1),
+            "week_launched": (wk["launched"] if wk else 0),
+            "week_events": (wk["total"] if wk else 0),
+        },
         "public_url": f"http://124.220.54.64/u/{user['username']}"
     }
 
@@ -710,6 +772,208 @@ async def upgrade_cycle(
         "photo_url": photo_url,
         "ai_report": ai_report
     }
+
+
+# ==================== 外卖门禁事件与顾问问答 ====================
+
+@app.post("/api/takeout/event")
+def log_takeout_event(req: TakeoutEventReq, user: dict = Depends(get_current_user)):
+    """门禁真的拦下、用户真的退单或采纳平替时上报一条。
+
+    只接受这四种事件类型；热量差额由客户端按审核库里的真实数值给出，
+    没有热量依据的（比如单纯被门禁拦下）记 0，绝不替用户编一个"省了多少"。"""
+    et = (req.event_type or "").strip()
+    if et not in ("blocked", "cancelled", "substitute", "launched"):
+        raise HTTPException(status_code=400, detail="未知的事件类型")
+    cal = req.cal_avoided or 0
+    if et == "blocked":
+        cal = 0
+    cal = round(max(0.0, float(cal)), 1)
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("INSERT INTO takeout_events (user_id, event_type, cal_avoided, dish_name, log_date, created_at) "
+              "VALUES (?, ?, ?, ?, ?, ?)",
+              (user["id"], et, cal, (req.dish_name or "")[:60], date.today().isoformat(),
+               datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    conn.close()
+    return {"code": 0, "msg": "已记录"}
+
+
+_ASK_LIMIT_PER_MIN = 12
+_ask_hits = defaultdict(list)
+
+
+def _ask_allowed(user_id):
+    """给联网出口加每用户限频，免得这个接口变成开放的免费代理被人刷。"""
+    now = time.time()
+    bucket = _ask_hits[user_id]
+    bucket[:] = [t for t in bucket if now - t < 60]
+    if len(bucket) >= _ASK_LIMIT_PER_MIN:
+        return False
+    bucket.append(now)
+    return True
+
+
+def _strip_tags(s):
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", s or "")).strip()
+
+
+def web_search(query, limit=4):
+    """抓必应国内版的自然结果，返回带来源的条目；抓不到就返回空列表。"""
+    url = "https://cn.bing.com/search?q=" + urllib.parse.quote(query) + "&setmkt=zh-CN"
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+    })
+    with urllib.request.urlopen(req, timeout=12) as resp:
+        html = resp.read().decode("utf-8", "replace")
+    items = re.findall(
+        r'<li class="b_algo".*?<h2>.*?<a[^>]*href="([^"]+)".*?>(.*?)</a>.*?<p[^>]*>(.*?)</p>',
+        html, re.S)
+    out = []
+    for href, title, snip in items:
+        # 先去标签、再转义；先截断再转义，免得把 &amp; 这类实体截成半截
+        title = html_escape(_strip_tags(title))
+        href = (href or "").strip()
+        if not title or not href.startswith("http"):
+            continue
+        out.append({
+            "title": title,
+            "snippet": html_escape(_strip_tags(snip)[:180]),
+            "url": html_escape(href, quote=True),
+            "host": urllib.parse.urlparse(href).netloc,
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def answer_from_user_data(q, d):
+    """能用自己的真实流水回答的问题，优先在这里答，一句都不编。"""
+    m = d["metrics"]
+    consumed = d["today_consumed"]
+    burned = d["today_burned"]
+    net = round(m["tdee"] + burned - consumed) if (consumed or burned) else None
+    wt = d["current_weight_jin"]
+    tgt = (d.get("profile") or {}).get("target_weight_jin")
+
+    if any(k in q for k in ("多重", "体重", "几斤", "多少斤")):
+        gap = round(wt - tgt, 1) if tgt else None
+        line = f"你最新记录的空腹体重是 <strong>{wt} 斤</strong>"
+        if gap is not None and gap > 0:
+            line += f"，离目标 {tgt} 斤还差 <strong>{gap} 斤</strong>"
+        elif gap is not None:
+            line += f"，目标 {tgt} 斤已经达成（比目标低 {abs(gap)} 斤）"
+        start = d.get("start_weight_jin")
+        if start:
+            line += f"；从第一次记录的 {start} 斤算起，累计变化 {round(wt - start, 1)} 斤"
+        return line + "。以上都来自你自己的打卡记录，没有补录也没有估算。"
+
+    if any(k in q for k in ("还剩", "额度", "能吃", "还能吃", "余量")):
+        return (f"今天还能吃 <strong>{d['remaining_cal']} kcal</strong>："
+                f"目标 {m['target_cal']} kcal，已摄入 {consumed} kcal，训练已消耗 {burned} kcal。"
+                + ("额度已用完，外卖门禁会拦下你。" if d["remaining_cal"] <= 0 else ""))
+
+    if any(k in q for k in ("吃了", "摄入", "吃什么了", "吃啥")):
+        meals = d.get("today_meals") or []
+        if not meals:
+            return f"今天还没有一条饮食记录，所以摄入按 0 计（不是按目标计）。记一笔才会有数字。"
+        names = "、".join(f"{html_escape(x['food_name'])}({x['cal']}k)" for x in meals[:6])
+        return (f"今天累计摄入 <strong>{consumed} kcal</strong>，共 {len(meals)} 条：{names}。"
+                f"注意这些热量是系统按菜名关键词粗估的，不是营养成分表数据。")
+
+    if any(k in q for k in ("练了", "训练", "运动", "消耗")):
+        tail = (f"，已连续 {d['consecutive_slacking_days']} 天没有训练记录"
+                if d["consecutive_slacking_days"] else "，昨天也练过")
+        return f"今天训练消耗记录为 <strong>{burned} kcal</strong>{tail}。"
+
+    if any(k in q for k in ("缺口", "赤字", "净缺")):
+        if net is None:
+            return "今天还没有任何摄入或训练记录，所以缺口是 0——没有记录就没有缺口，我不猜。"
+        return (f"今天净缺口 <strong>{net} kcal</strong>"
+                f"（维持代谢 {m['tdee']} + 训练消耗 {burned} − 摄入 {consumed}），"
+                f"你的身形目标缺口是 {m['deficit']} kcal。")
+
+    if any(k in q for k in ("超标", "富余", "超了")):
+        if not d["consecutive_over_days"]:
+            return "最近没有连续超标的记录。"
+        return (f"已连续 <strong>{d['consecutive_over_days']}</strong> 天超出目标，"
+                f"累计富余约 <strong>{d['over_cal_total']} kcal</strong>（按每日目标 {m['target_cal']} kcal 以上部分累加）。")
+
+    if any(k in q for k in ("拦截", "挡了", "自律", "功勋")):
+        s = d["takeout_stats"]
+        if not (s["intercepted"] or s["substituted"] or s["cal_saved"]):
+            return "还没有任何拦截或平替记录。这个数字只统计真实发生过的事件，不会预先给你记功。"
+        return (f"累计拦下 <strong>{s['intercepted']}</strong> 次（门禁硬拦 {s['blocked']} 次、审核后主动退单 {s['cancelled']} 次），"
+                f"另采纳低卡平替 {s['substituted']} 次。"
+                f"有热量依据的少摄入合计 <strong>{s['cal_saved']} kcal</strong>"
+                f"（只累计平替与退单两种算得出差额的事件，单纯被门禁拦下不折算），"
+                f"按 7700 kcal≈1 kg 纯脂肪折约 {s['fat_jin']} 斤。")
+
+    if any(k in q for k in ("喝水", "水", "饮水")):
+        return f"今天记了 <strong>{d['water_cups']} 杯</strong>（约 {d['water_ml']} ml）。"
+
+    if any(k in q for k in ("蛋白", "碳水", "脂肪", "宏量")):
+        mc = d["today_macros"]
+        return (f"目标：蛋白 {m['protein_g']}g / 慢碳 {m['carbs_g']}g / 脂肪 {m['fat_g']}g。"
+                f"今天记录到的：蛋白 {mc['protein']}g / 碳水 {mc['carbs']}g / 脂肪 {mc['fat']}g。"
+                f"注意实际克数是按估算热量的 25%/45%/30% 固定比例倒推的，不是真实营养数据。")
+
+    if any(k in q for k in ("周期", "腰围", "身材照", "围度")):
+        lc = d.get("latest_cycle")
+        if not lc:
+            return "还没有周期记录。上传一次身材照并填体重与肚脐腰围才会建立。"
+        waist = lc.get("waist_cm")
+        wtxt = f"{waist} cm" if waist else "未填（注册时不采集腰围，所以第一次提交只会标『待补围度』）"
+        return (f"当前是第 {lc['cycle_num']} 周期，体重 {lc['weight_jin']} 斤，腰围 {wtxt}，"
+                f"评级：{lc['tone_score']}。")
+
+    return None
+
+
+@app.post("/api/ask")
+def ask(req: AskReq, user: dict = Depends(get_current_user)):
+    q = (req.question or "").strip()[:120]
+    if not q:
+        raise HTTPException(status_code=400, detail="问题为空")
+
+    d = compute_dashboard_data(user)
+    local = answer_from_user_data(q, d)
+    if local:
+        return {"code": 0, "source": "data", "answer": local, "items": []}
+
+    if not _ask_allowed(user["id"]):
+        return {"code": 0, "source": "limited",
+                "answer": f"联网查询太快了（每分钟最多 {_ASK_LIMIT_PER_MIN} 次），先等一会儿再问。",
+                "items": []}
+
+    try:
+        items = web_search(q)
+    except Exception as e:
+        items = []
+        note = f"联网查询没成功（{type(e).__name__}）"
+    else:
+        note = ""
+
+    if not items:
+        return {"code": 0, "source": "none",
+                "answer": (note or "联网没查到可用结果") +
+                          "。我不编答案——你可以换个说法再问，或者先看【食谱/外卖】里的内置建议。",
+                "items": []}
+
+    rows = "".join(
+        f"<div style='margin:6px 0;padding:6px 8px;background:#F8FAFC;border-radius:8px;'>"
+        f"<div style='font-weight:700;'>{it['title']}</div>"
+        f"<div style='color:#475569;font-size:11px;margin-top:2px;'>{it['snippet']}</div>"
+        f"<div style='font-size:10px;color:#94A3B8;margin-top:2px;'>来源 {it['host']}</div></div>"
+        for it in items)
+    return {"code": 0, "source": "web",
+            "answer": f"以下是联网查到的资料（由第三方网站提供，不是本系统的减脂建议，"
+                      f"涉及用药与疾病请咨询医生）：<br>{rows}",
+            "items": [{"title": it["title"], "url": it["url"], "host": it["host"]} for it in items]}
+
 
 # ==================== 100% REAL Chart Data API ====================
 
