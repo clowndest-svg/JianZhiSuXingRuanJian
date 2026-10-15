@@ -19,6 +19,8 @@ Android WebView 壳 + 单页 H5 + 腾讯云 FastAPI 后端的减脂记录工具�
 
 服务器：腾讯云 OpenCloudOS 4C4G，Docker 里的 nginx 容器 `xiaoye-release` 反代到宿主机 `172.17.0.1:8000` 的 uvicorn（`qingsu.service` 守护）。**只有 HTTP 80 端口，没有域名、没有证书。**
 
+仓库内只保留 `qingsu.apk` 一份安装包：此前另有一个中文名副本，md5 与之完全相同（纯属重复占仓库体积），2026-10-16 已删除。
+
 > 本轮改动**已于 2026-10-15 23:15 上线**（后端 `server.py`、前端 `web/app.js`、安装包 `web/qingsu.apk` 三样都换了，服务已重启）。上线后从公网重新拉取做了四项独立验收，逐条结果见文末「线上部署」一节。历史脏数据也已在同日清理完毕。
 
 ---
