@@ -131,9 +131,47 @@ public class WebAppInterface {
         }
     }
 
+    /**
+     * 版本号一律从 PackageManager 取，不再写死字符串。
+     * 旧版这里硬编 "5.0.0"，而 gradle 里是 1.0.0，两处从来没打通——
+     * 检查更新必须信得过这个数，所以让它只有一个来源。
+     */
+    private int selfVersionCode() {
+        try {
+            android.content.pm.PackageInfo pi = context.getPackageManager()
+                    .getPackageInfo(context.getPackageName(), 0);
+            // minSdk 24 要兼容，不能用 API 28 才有的 getLongVersionCode()
+            return pi != null ? pi.versionCode : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
     @JavascriptInterface
     public String getAppVersion() {
-        return "5.0.0 (云端真数据与外卖严管版)";
+        try {
+            android.content.pm.PackageInfo pi = context.getPackageManager()
+                    .getPackageInfo(context.getPackageName(), 0);
+            if (pi != null) {
+                return pi.versionName + " (code " + pi.versionCode + ")";
+            }
+        } catch (Exception ignored) {
+        }
+        return "未知版本";
+    }
+
+    @JavascriptInterface
+    public int getAppVersionCode() {
+        return selfVersionCode();
+    }
+
+    /** 让前端也能主动触发一次检查更新（App 启动时原生也会自己查一遍）。 */
+    @JavascriptInterface
+    public void checkUpdateNow() {
+        if (context instanceof android.app.Activity) {
+            ((android.app.Activity) context).runOnUiThread(
+                    () -> UpdateManager.check((android.app.Activity) context, true));
+        }
     }
 
     // ================= 第五批：通知权限自检 + 外卖 App 使用情况 =================

@@ -518,6 +518,19 @@
         </section>
 
 
+        <!-- 网页独占：只有拿到这条大屏链接的人看得到，装在手机里的 App 不出现这块 -->
+        <div class="card" id="public-tools" style="display:none;">
+            <div class="pub-tools-head">
+                <span class="pub-tools-title">这块大屏独有的功能（App 里没有）</span>
+                <span id="public-refresh-stamp" class="public-refresh-stamp"></span>
+            </div>
+            <div class="pub-tools-row">
+                <button type="button" class="btn-secondary" onclick="makeProgressPoster()">生成进度海报（PNG）</button>
+                <button type="button" class="btn-secondary" onclick="startPublicPolling(); stampPublicRefresh()">立刻刷新一次</button>
+            </div>
+            <div class="pub-tools-note">海报上的数字全部来自这次真实拉到的打卡流水；一条记录都没有时不会生成空海报。</div>
+        </div>
+
         <!-- ================= TAB 4: 形体训练计划 ================= -->
         <section id="panel-workout" class="view-panel">
 
@@ -789,8 +802,18 @@
             <div class="card chat-container">
                 <div class="chat-messages" id="chat-messages-box">
                     <div class="chat-bubble assistant" id="chat-welcome-msg">
-                        您好！我是您的专属塑形顾问（内置免费原生引擎，无需连接外网）。已载入您的专属档案与代谢数据，随时解答任何饮食、外卖避坑、暴食急救与训练问题。您今天想咨询什么？
+                        您好！我是您的专属塑形顾问。数字类问题直接查您自己的真实流水，查不到的才联网；默认走服务器，手机上开了本地模型就优先用本地的。您今天想咨询什么？
                     </div>
+                </div>
+                <div class="ai-engine-row">
+                    <label class="eng-lab" for="ai-engine-sel">回答引擎</label>
+                    <select id="ai-engine-sel" class="eng-sel" onchange="setAiEnginePref(this.value)">
+                        <option value="auto">自动（本地优先，服务器兜底）</option>
+                        <option value="local">只用手机本地模型</option>
+                        <option value="server">只用服务器</option>
+                    </select>
+                    <button type="button" class="eng-test" onclick="reprobeLocalAi()">测本地</button>
+                    <span id="ai-engine-bar" class="ai-engine-bar"><span>未探测</span></span>
                 </div>
                 <div class="chat-input-bar">
                     <input type="text" id="chat-input" placeholder="问点什么，如：吃超了怎么补救" onkeydown="if(event.key==='Enter') sendChatMessage()">
@@ -1135,6 +1158,26 @@
         <span class="floating-dl-pulse"></span>
         <span style="font-size: 17px;">📲</span>
         <span class="floating-dl-text">下载App</span>
+    </div>
+
+    <!-- 动作详情：要点 + 常见错误 + 程序化示意动画。动画是本机画的骨骼，不是真人视频 -->
+    <div class="modal-overlay" id="ex-detail-modal">
+        <div class="modal-card ex-detail">
+            <div class="exd-head">
+                <div>
+                    <div class="exd-name" id="ex-detail-name">动作</div>
+                    <div class="exd-reps" id="ex-detail-reps"></div>
+                </div>
+                <button type="button" class="exd-close" onclick="closeExerciseDetail()">×</button>
+            </div>
+            <canvas id="ex-detail-canvas" class="exd-canvas" width="300" height="330"></canvas>
+            <div class="exd-ctl">
+                <button type="button" class="btn-secondary" id="ex-detail-slow" onclick="toggleExDetailSlow()">慢放：关</button>
+                <span class="exd-note">骨骼动画由本应用按关键帧实时绘制，用于看发力顺序与幅度，不是真人示范视频。</span>
+            </div>
+            <ol class="exd-steps" id="ex-detail-steps"></ol>
+            <div class="ex-wrong" id="ex-detail-wrong"></div>
+        </div>
     </div>
 
     <script src="app.js"></script>

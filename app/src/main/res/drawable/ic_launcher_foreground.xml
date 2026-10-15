@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自适应图标前景（Android 8+）。主体刻意收进中心 72x72，
+     因为圆形/圆角遮罩只会显示这个安全区；直接用 mipmap 那张带环 PNG
+     当圆环最宽处会被切掉。概念与位图一致：度量环 + 被夹住的腰身 + 中心封印。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+        <path android:fillColor="#10B981" android:pathData="M 54,54 m -27,0 a 27,27 0 1,0 54,0 a 27,27 0 1,0 -54,0 z" />
+        <path android:fillColor="#0F172A" android:pathData="M 54,54 m -20,0 a 20,20 0 1,0 40,0 a 20,20 0 1,0 -40,0 z" />
+        <path android:fillColor="#059669" android:pathData="M 37,35 L 71,35 L 59,54 L 49,54 Z M 49,54 L 59,54 L 71,73 L 37,73 Z" />
+        <path android:fillColor="#FF5A36" android:pathData="M 54,54 m -8,0 a 8,8 0 1,0 16,0 a 8,8 0 1,0 -16,0 z" />
+        <path android:fillColor="#0F172A" android:pathData="M 54,54 m -4,0 a 4,4 0 1,0 8,0 a 4,4 0 1,0 -8,0 z" />
+</vector>

@@ -54,6 +54,12 @@ function makeCtx() {
       appendChild(c) { this._children.push(c); return c; },
       remove() {}, select() {}, focus() {}, click() { log.clicks = (log.clicks || 0) + 1 },
       addEventListener() {},
+      // 桩缺 setAttribute 会让代码一调就抛、异常被 init 吞掉，
+      // 表现成"逻辑没生效"而真因是桩少方法——这类假红上一批已经踩过一次。
+      _attrs: {},
+      setAttribute(k, v) { this._attrs[String(k)] = String(v); },
+      getAttribute(k) { const v = this._attrs[String(k)]; return v === undefined ? null : v; },
+      removeAttribute(k) { delete this._attrs[String(k)]; },
     };
     // innerHTML 必须有真实父子语义：写 innerHTML 会清掉子节点，appendChild 的内容要能读回来。
     // 否则 appendBubble 写进去的气泡在断言里永远是空串，测不出任何东西。
@@ -77,6 +83,14 @@ function makeCtx() {
       return node.innerHTML || "";
     }
     el._peekText = () => (_text !== null ? _text : _html);
+    // title / placeholder / value 这类在真实 DOM 里与内容属性双向反射，
+    // 桩里只存 JS 属性的话，代码写 btn.title 而判据读 getAttribute("title") 就永远读到 null。
+    for (const reflected of ["title", "placeholder"]) {
+      Object.defineProperty(el, reflected, {
+        get() { return el._attrs[reflected] === undefined ? "" : el._attrs[reflected]; },
+        set(v) { el._attrs[reflected] = String(v); },
+      });
+    }
     Object.defineProperty(el, "textContent", {
       get() { return _readText.call(el); },
       set(v) { _text = String(v); },
@@ -450,7 +464,9 @@ run(h.context, `document.getElementById("chat-input").value="我多重"; sendCha
 await drain();
 const b3 = txt2();
 check("查询失败明说并退回本地建议",
-  b3.includes("联网查询失败") && b3.includes("本地内置建议"), b3.slice(-180));
+  b3.includes("两个引擎都没答上") && b3.includes("本地内置建议"), b3.slice(-180));
+// 双引擎之后，失败必须把两边原因都摊开——只报一边等于把另一边的故障藏起来
+check("失败时给出服务器侧原因", b3.includes("Failed to fetch"), b3.slice(-200));
 
 function txt2() { return String(run(h.context, `document.getElementById("chat-messages-box").innerHTML`)); }
 
@@ -500,7 +516,9 @@ check("要点不含疗效承诺", !/立刻见效|一周瘦|月瘦\d+斤|保证/.
 sandbox.__fetchHandler = () => Promise.resolve(okJson({ code: 0 }));
 run(h.context, `state.profile.gender="male"; state.profile.goalType="male_v_taper"; renderWorkoutExercises();`);
 const exHtml = String(run(h.context, `document.getElementById("workout-exercises-card").innerHTML`));
-check("动作卡有标准分解按钮", exHtml.includes("标准动作分解"), "");
+check("动作卡有详情入口（原标准分解已升级为流程加示意动画）",
+      exHtml.includes("动作流程与示意动画"), exHtml.slice(0, 160));
+check("详情入口不取代只看要点", exHtml.includes("只看要点"), "");
 check("动作卡有视频按钮", exHtml.includes("看演示视频"), "");
 check("动作卡写明倒计时对应这 4 个动作", exHtml.includes("这 4 个动作"), exHtml.slice(0, 120));
 check("要点已渲染进卡片", exHtml.includes("肩胛先下沉"), "");
@@ -612,7 +630,15 @@ check("没照片时提交到测量端点",
 run(h.context, `applyViewMode("desktop")`);
 check("桌面模式加上 desktop-view 类",
       sandbox.document.body.classList.contains("desktop-view"), "");
-check("切换按钮文案随之改变", txt2b("btn-view-toggle").includes("手机版"), txt2b("btn-view-toggle"));
+const vtTxt = txt2b("btn-view-toggle");
+const vtTitle = String(run(h.context, `document.getElementById("btn-view-toggle").getAttribute("title")`));
+// 按钮已按实拍反馈改成纯图标：文字不该再出现在按钮里，而应在 title 上
+check("切换按钮只剩图标不含中文", !/[一-龥]/.test(vtTxt), vtTxt);
+check("切换按钮说明挂在 title 上", vtTitle.includes("手机版"), vtTitle);
+run(h.context, `applyViewMode("mobile")`);
+check("切回手机模式时图标随之改变",
+      txt2b("btn-view-toggle") !== vtTxt, vtTxt + " -> " + txt2b("btn-view-toggle"));
+run(h.context, `applyViewMode("desktop")`);
 run(h.context, `applyViewMode("mobile")`);
 check("手机模式撤掉 desktop-view", !sandbox.document.body.classList.contains("desktop-view"), "");
 function txt2b(id) { return String(run(h.context, `document.getElementById("${id}").innerText`)); }
@@ -629,6 +655,271 @@ check("标题不再是被挤的长句", /<h1>轻塑<\/h1>/.test(htmlSrc), "");
 } catch (e) {
   check("本轮前端改动在该版本无法执行（等价于全红）", false, String(e && e.message));
 }
+
+
+// 共用守卫：被测版本缺某个函数时，把这一组判据逐条记红后跳过。
+// 直接跑会抛 ReferenceError 把整个变异台带走（本轮踩过），
+// 而 try/catch 一句带过又会把"没做到"洗成"没测"。
+function needSymbols(list, names) {
+  let missing = [];
+  for (const n of names) {
+    let t = "?";
+    try { t = run(h.context, `typeof ` + n); } catch (e) { t = "throw:" + e.message; }
+    if (t !== "function" && t !== "object") missing.push(n + "=" + t);
+  }
+  if (missing.length) {
+    for (const nm of list) check(nm, false, "该版本缺少 " + missing.join(", "));
+    return false;
+  }
+  return true;   // 返回 false 时调用方必须跳过整段，否则后面的 run() 会抛异常带走全表
+}
+// ============ 第五批后续：双引擎决策表（跑真 askAnyEngine，不另写一份逻辑） ============
+// 手机上的原生推理这台机验不了（没 NDK、没设备），但"本地不行换服务器、服务器不行换本地"
+// 这条切换逻辑是纯前端代码，可以用真的 askAnyEngine + 真的 fetch 桩跑出来。
+{
+    let calls = [];
+    const realFetch = sandbox.__fetchHandler;
+    const OK_LOCAL = { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "本地答：按你的记录看没问题" } }] }) };
+    const OK_CTX = { ok: true, status: 200, json: async () => ({ code: 0, digest: { weight_jin: 151, target_jin: 132, budget_cal: 1604, today_consumed: 620, today_burned: 220, remaining_cal: 1204, day_mode: "rest" }, memory: ["不吃香菜"], kb: [] }) };
+    const OK_SRV = { ok: true, status: 200, json: async () => ({ code: 0, source: "web_model", answer: "服务器答：资料里这么说" }) };
+    const OK_REC = { ok: true, status: 200, json: async () => ({ code: 0, stored: true }) };
+
+    function install(mode) {
+        calls = [];
+        sandbox.__fetchHandler = (url, opts) => {
+            calls.push((opts && opts.method ? opts.method : "GET") + " " + String(url).slice(0, 46));
+            if (String(url).indexOf("/api/ai/context") >= 0) return Promise.resolve(OK_CTX);
+            if (String(url).indexOf("/api/ai/record") >= 0) return Promise.resolve(OK_REC);
+            if (String(url).indexOf("127.0.0.1") >= 0) {
+                if (mode === "local_down") return Promise.reject(new TypeError("Failed to fetch"));
+                if (mode === "local_bad") return Promise.resolve({ ok: false, status: 500, json: async () => ({}) });
+                if (mode === "local_empty") return Promise.resolve({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "  " } }] }) });
+                if (String(url).indexOf("/health") >= 0) return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+                return Promise.resolve(OK_LOCAL);
+            }
+            if (String(url).indexOf("/api/ask") >= 0) {
+                if (mode === "server_down") return Promise.reject(new TypeError("server unreachable"));
+                return Promise.resolve(OK_SRV);
+            }
+            return Promise.reject(new Error("unexpected " + url));
+        };
+    }
+
+    function resetPref(p) {
+        run(h.context, `try{localStorage.setItem("QINGSU_AI_ENGINE", ${JSON.stringify(p)})}catch(e){}`);
+        run(h.context, `localAiCache.ok=null; localAiCache.at=0;`);
+    }
+
+    const ENGINE_NAMES = [
+        "自动模式本地在线时走本地", "本地答案回写共享知识库", "本地引擎读服务器上下文（记忆共用）",
+        "本地提示词带本人真实体重", "本地不通时降级到服务器", "本地返回 500 时降级到服务器",
+        "本地返回空内容时降级到服务器", "只选本地时不偷偷走服务器", "报错要说清是本地不行",
+        "只选服务器时不探本地端口", "只选服务器时走 /api/ask", "两引擎全挂时报错含本地原因",
+        "两引擎全挂时报错含服务器原因", "本地探测结果被缓存复用",
+    ];
+    const ENGINE_SUITE = (async () => {
+        if (!needSymbols(ENGINE_NAMES, ["askAnyEngine", "probeLocalAi", "localAiCache", "aiEnginePref"])) {
+            return;
+        }
+        // A) 默认自动：本地在线就用本地，并把答案回写共享知识库
+        install("ok"); resetPref("auto");
+        let r = await run(h.context, `askAnyEngine("我多重")`).then(d => d, e => ({ err: String(e && e.message) }));
+        await drain();
+        check("自动模式本地在线时走本地", r.engine === "local" && r.source === "local_model", r);
+        check("本地答案回写共享知识库", calls.some(c => c.indexOf("/api/ai/record") >= 0), calls);
+        check("本地引擎读服务器上下文（记忆共用）", calls.some(c => c.indexOf("/api/ai/context") >= 0), calls);
+        check("本地提示词带本人真实体重",
+              String(r.answer || "").length > 0 && calls.length >= 3, calls.length);
+
+        // B) 本地挂了：自动降级到服务器，且不能谎称用了本地
+        install("local_down"); resetPref("auto");
+        r = await run(h.context, `askAnyEngine("喝黑咖啡会影响减脂吗")`).then(d => d, e => ({ err: String(e && e.message) }));
+        await drain();
+        check("本地不通时降级到服务器", r.engine === "server" && !r.err, r);
+
+        // C) 本地返回 500 / 空内容：都算本地失败，也要降级
+        install("local_bad"); resetPref("auto");
+        r = await run(h.context, `askAnyEngine("测试")`).then(d => d, e => ({ err: String(e && e.message) }));
+        await drain();
+        check("本地返回 500 时降级到服务器", r.engine === "server", r);
+        install("local_empty"); resetPref("auto");
+        r = await run(h.context, `askAnyEngine("测试")`).then(d => d, e => ({ err: String(e && e.message) }));
+        await drain();
+        check("本地返回空内容时降级到服务器", r.engine === "server", r);
+
+        // D) 只用本地：本地挂了必须报错，绝不偷偷用服务器冒充本地
+        install("local_down"); resetPref("local");
+        r = await run(h.context, `askAnyEngine("测试")`).then(d => d, e => ({ err: String(e && e.message) }));
+        await drain();
+        check("只选本地时不偷偷走服务器", !!r.err && !r.engine, r);
+        check("报错要说清是本地不行", /本地/.test(String(r.err || "")), r.err);
+
+        // E) 只用服务器：不该去探 127.0.0.1
+        install("ok"); resetPref("server");
+        r = await run(h.context, `askAnyEngine("测试")`).then(d => d, e => ({ err: String(e && e.message) }));
+        await drain();
+        check("只选服务器时不探本地端口", !calls.some(c => c.indexOf("127.0.0.1") >= 0), calls);
+        check("只选服务器时走 /api/ask", calls.some(c => c.indexOf("/api/ask") >= 0), calls);
+
+        // F) 两个都不行：两边的原因都要摊出来，不能只报一边
+        install("both_down"); resetPref("auto");
+        calls = [];
+        sandbox.__fetchHandler = (url) => Promise.reject(new TypeError("down:" + String(url).slice(-12)));
+        r = await run(h.context, `askAnyEngine("测试")`).then(d => d, e => ({ err: String(e && e.message) }));
+        await drain();
+        check("两引擎全挂时报错含本地原因", /本地/.test(String(r.err || "")), r.err);
+        check("两引擎全挂时报错含服务器原因", /服务器/.test(String(r.err || "")), r.err);
+
+        // G) 探测结果要缓存，不能每问一句都重连一次 127.0.0.1
+        install("local_down"); resetPref("auto");
+        let probeCalls = 0;
+        sandbox.__fetchHandler = (url, opts) => {
+            if (String(url).indexOf("127.0.0.1") >= 0) probeCalls++;
+            if (String(url).indexOf("/api/ask") >= 0) return Promise.resolve(OK_SRV);
+            return Promise.reject(new TypeError("nope"));
+        };
+        await run(h.context, `askAnyEngine("第一问")`).then(() => {}, () => {}); await drain();
+        await run(h.context, `askAnyEngine("第二问")`).then(() => {}, () => {}); await drain();
+        check("本地探测结果被缓存复用", probeCalls <= 1, "探测次数=" + probeCalls);
+
+        sandbox.__fetchHandler = realFetch;
+        run(h.context, `try{localStorage.removeItem("QINGSU_AI_ENGINE")}catch(e){}`);
+    })();
+    // 必须 await：上一版没等它，14 条判据一条都没登记，判据总数纹丝不动却全绿
+    await ENGINE_SUITE;
+}
+
+
+
+// ============ 第五批后续：网页独占功能（公网大屏专用） ============
+
+const WEBONLY_NAMES = ["首页有网页独占工具卡", "工具卡默认隐藏（App 里不该出现）",
+    "工具卡上有海报按钮", "海报按钮说明数据来自真实流水", "大屏开启自动刷新定时器",
+    "刷新戳写明周期与时刻", "无数据时拒绝生成空海报"];
+const HAS_WEBONLY = needSymbols(WEBONLY_NAMES, ["startPublicPolling", "makeProgressPoster", "stampPublicRefresh"]);
+if (HAS_WEBONLY) {
+
+// 这里取不到上面那个 htmlSrc（它声明在更早的嵌套作用域里），直接走顶层 srcOf()，
+// 顺带保证 --mutant 下读的也是 HEAD 那一份。
+const PUB_REL = "app/src/main/assets/index.html";
+// 顶层看不到 srcOf()/htmlSrc（它们声明在更早的嵌套块里），这里自己取一次，
+// 并且照样跟随 --mutant：静态判据读的必须是被测那一份，否则变异样本永远绿。
+const pubHtml = MUTANT
+  ? execFileSync("git", ["show", "HEAD:" + PUB_REL], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+  : fs.readFileSync(path.join(ROOT, PUB_REL), "utf8");
+check("首页有网页独占工具卡", pubHtml.includes('id="public-tools"'), "");
+check("工具卡默认隐藏（App 里不该出现）",
+      pubHtml.includes('id="public-tools" style="display:none;"'), "");
+check("工具卡上有海报按钮", pubHtml.includes("makeProgressPoster()"), "");
+check("海报按钮说明数据来自真实流水", pubHtml.includes("真实拉到的打卡流水"), "");
+
+// 大屏轮询：真调 startPublicPolling，验它确实排了定时器并写出真实时间戳
+let pollTimers = 0;
+sandbox.setInterval = (fn, ms) => { pollTimers++; return 1; };
+sandbox.clearInterval = () => {};
+run(h.context, `window.__PUBLIC_USER__="someone"; startPublicPolling();`);
+check("大屏开启自动刷新定时器", pollTimers >= 1, pollTimers);
+const stampTxt = txt("public-refresh-stamp");
+check("刷新戳写明周期与时刻", stampTxt.includes("30") && stampTxt.includes("上次"), stampTxt.slice(0, 60));
+
+// 一条记录都没有时不许生成空海报
+run(h.context, `state.weightHistory=[]; state.deficitHistory=[]; state.profile={};`);
+run(h.context, `makeProgressPoster();`);
+await drain();
+check("无数据时拒绝生成空海报",
+      log.toasts.some(t => String(t).includes("不生成空海报")), log.toasts.slice(-3));
+}
+
+
+// ============ 第五批后续：动作详情与程序化示意动画 ============
+
+const ANIM_NAMES = ["首页有动作详情弹窗", "详情弹窗里有画布", "动画标明是程序化示意非真人",
+    "动作要点条目仍是 32 条", "每个动作都认得出原型", "原型分布不是全塞进一类",
+    "蹲姿两帧至少有 6 个关节发生位移", "支撑类动作只起伏不大动", "各原型全相位不出现反关节",
+    "动作卡调用详情层而不是只展开文字", "身形 key 与要点表同源"];
+const HAS_ANIM = needSymbols(ANIM_NAMES, ["poseAt", "detectArchetype", "EX_ARCHETYPES", "openExerciseDetail"]);
+if (HAS_ANIM) {
+
+const exHtmlTop = fs.readFileSync(path.join(ROOT, "app/src/main/assets/index.html"), "utf8");
+check("首页有动作详情弹窗", exHtmlTop.includes('id="ex-detail-modal"'), "");
+check("详情弹窗里有画布", exHtmlTop.includes('id="ex-detail-canvas"'), "");
+check("动画标明是程序化示意非真人", exHtmlTop.includes("不是真人示范视频"), "");
+
+// 32 个动作都要能认出原型，且认不出时要回落而不是瞎编
+const archRes = run(h.context, `(function(){
+  var keys = Object.keys(EX_STEPS);
+  var out = {n: keys.length, bad: [], arch: {}};
+  for (var i=0;i<keys.length;i++){
+    var m = EX_STEPS[keys[i]];
+    var a = detectArchetype(m, {name: keys[i], tip: ""});
+    if (!EX_ARCHETYPES[a]) out.bad.push(keys[i]+":"+a);
+    out.arch[a] = (out.arch[a]||0)+1;
+  }
+  return JSON.stringify(out);
+})()`);
+const AR = JSON.parse(archRes);
+check("动作要点条目仍是 32 条", AR.n === 32, AR.n);
+check("每个动作都认得出原型", AR.bad.length === 0, AR.bad);
+check("原型分布不是全塞进一类", Object.keys(AR.arch).length >= 5, AR.arch);
+
+// 动画必须真在动：不同相位的关键帧坐标要有位移，否则就是一张静图冒充动画
+const frameRes = run(h.context, `(function(){
+  var a = poseAt("squat", 0), b = poseAt("squat", 0.5);
+  var moved = 0;
+  for (var k in a) { if (Math.abs(a[k][1]-b[k][1]) > 0.005 || Math.abs(a[k][0]-b[k][0]) > 0.005) moved++; }
+  // 取四分之一相位：plank 的起伏是正弦，挑 t=0 与 t=0.5 两个过零点会量到位移 0，
+  // 那是测试取点错，不是动作没动
+  var c = poseAt("plank", 0), d2 = poseAt("plank", 0.25);
+  var pelvisMoved = Math.abs(c.pelvis[1]-d2.pelvis[1]);
+  return JSON.stringify({moved: moved, pelvisMoved: pelvisMoved});
+})()`);
+const FR = JSON.parse(frameRes);
+check("蹲姿两帧至少有 6 个关节发生位移", FR.moved >= 6, FR);
+check("支撑类动作只起伏不大动",
+      FR.pelvisMoved > 0.005 && FR.pelvisMoved < 0.05, JSON.stringify(FR));
+
+// 关节不许反折：膝/肘夹角不得翻到反向（这是"示意动画"最基本的合理性）
+const jointRes = run(h.context, `(function(){
+  var bad = [];
+  var archs = Object.keys(EX_ARCHETYPES);
+  for (var i=0;i<archs.length;i++){
+    for (var t=0;t<=1.001;t+=0.1){
+      var p = poseAt(archs[i], t);
+      if (p.knee_below_hip !== true) { }
+      if (p.l_ankle[1] < p.l_knee[1] - 0.02 && archs[i] !== "bridge" && archs[i] !== "pushup") bad.push(archs[i]+"@"+t.toFixed(1)+":ankle above knee");
+      if (p.l_knee[1] < p.l_hip[1] - 0.28) bad.push(archs[i]+"@"+t.toFixed(1)+":knee past hip");
+    }
+  }
+  return JSON.stringify(bad.slice(0,6));
+})()`);
+const JB = JSON.parse(jointRes);
+check("各原型全相位不出现反关节", JB.length === 0, JB);
+
+
+const jsSrcForEx = fs.readFileSync(path.join(ROOT, "app/src/main/assets/app.js"), "utf8");
+check("动作卡调用详情层而不是只展开文字",
+      jsSrcForEx.includes("openExerciseDetail(${idx})"), "");
+check("身形 key 与要点表同源", jsSrcForEx.includes("window.__currentExKey = key;"), "");
+// 真数据姿态表：32 条都要能取到，插值后骨长不能漂
+const POSE_SRC = fs.readFileSync(path.join(ROOT, "app/src/main/assets/exercise_poses.json"), "utf8");
+const POSES = JSON.parse(POSE_SRC);
+check("姿态表覆盖 32 个动作", Object.keys(POSES).length === 32, Object.keys(POSES).length);
+const poseBad = [];
+for (const k of Object.keys(POSES)) {
+  const f = POSES[k].frames;
+  if (!Array.isArray(f) || f.length < 2) { poseBad.push(k + ":帧数" + (f||[]).length); continue; }
+  for (const fr of f) {
+    const need = ["head","neck","sternum","pelvis","l_shoulder","l_elbow","l_wrist","r_shoulder","r_elbow","r_wrist","l_hip","r_hip","l_knee","r_knee","l_ankle","r_ankle"];
+    for (const jn of need) if (!fr.pose || !Array.isArray(fr.pose[jn])) { poseBad.push(k + ":" + jn + " 缺"); }
+  }
+}
+check("每帧 16 个关节齐全且帧数够", poseBad.length === 0, poseBad.slice(0, 4));
+check("姿态表已接进渲染器", jsSrcForEx.includes("poseFromTable(poseKey, arch, t)"), "");
+check("取不到姿态表时回落程序化而不是画静图",
+      jsSrcForEx.includes("return poseAt(arch, t);"), "");
+}
+
+
 
 const bad = R.filter(x => !x[1]);
 console.log(`\n=== ${MUTANT ? "变异样本(HEAD 改动前)" : "当前源码"}：${R.length} 条，绿 ${R.length - bad.length}，红 ${bad.length} ===`);

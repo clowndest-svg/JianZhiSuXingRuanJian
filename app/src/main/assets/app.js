@@ -149,12 +149,20 @@ window.addEventListener("DOMContentLoaded", () => {
     switchShapeGender(state.profile.gender || "female", false);
     initViewMode();
     // 开 App 先查通知权限；外卖真实使用情况读一次
+    loadExercisePoses();
+    paintAiEngineBar();
+    probeLocalAi(false).then(function () { paintAiEngineBar(); });
     initNotifPermissionHint();
     refreshTakeoutUsage();
     if (window.location.hash === "#download" || window.location.search.includes("download=1")) {
         setTimeout(openDownloadModal, 400);
     }
     // 悬浮下载入口：App 里已经装着客户端，再放一颗"下载App"既多余又压住卡片文字
+    // App 本来就装在手机上，顶栏再放一颗"电脑/手机切换"是多余的，直接藏掉
+    if (inApp()) {
+        const vt = document.getElementById("btn-view-toggle");
+        if (vt) vt.style.display = "none";
+    }
     const floating = document.querySelector(".floating-dl-btn");
     if (floating) {
         if (window.AndroidBridge && window.AndroidBridge.showToast) {
@@ -168,6 +176,10 @@ window.addEventListener("DOMContentLoaded", () => {
 async function initAuthAndData() {
     if (window.__PUBLIC_USER__) {
         await loadPublicUserData(window.__PUBLIC_USER__);
+        // 公网大屏是网页独占场景：装在手机里的 App 不会有这条链接
+        const tools = document.getElementById("public-tools");
+        if (tools) tools.style.display = "block";
+        startPublicPolling();
         return;
     }
 
@@ -201,6 +213,7 @@ async function loadPublicUserData(username) {
         const res = await fetch(`${API_BASE}/api/public/dashboard?username=${encodeURIComponent(username)}`);
         if (res.ok) {
             const data = await res.json();
+            state.publicNickname = (data.user && data.user.nickname) || "";
             applyDashboardData(data);
         }
     } catch (e) {
@@ -229,6 +242,16 @@ function escapeHtml(s) {
 }
 
 // 统一的写请求出口：非 2xx 一律抛错。调用方不得把"没落库"播报成成功。
+/** GET 版请求：与 postApi 同一套鉴权与错误口径，别另起炉灶。 */
+async function getJson(path) {
+    const r = await fetch(`${API_BASE}` + path, {
+        headers: { "Authorization": `Bearer ${state.token}` }
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j && j.detail ? j.detail : ("HTTP " + r.status));
+    return j;
+}
+
 async function postApi(path, body, opts) {
     const init = Object.assign({ method: "POST", headers: {} }, opts || {});
     init.headers["Authorization"] = `Bearer ${state.token}`;
@@ -1695,6 +1718,179 @@ function syncTargetWeightPlaceholder() {
     tEl.placeholder = "目标体重（斤）· 按当前体重约 -12% 估的参考值 " + suggest + "，仅供参考，要自己填";
 }
 
+// ============ 第五批后续：网页端独占功能（公开大屏专用） ============
+// App 装在手机上，没有"把链接发给家人盯着"这个场景；这两样只在公网大屏出现。
+
+const PUBLIC_POLL_SEC = 30;
+let publicPollTimer = null;
+
+function isPublicScreen() {
+    return !!window.__PUBLIC_USER__;
+}
+
+/** 公网大屏自动刷新：别人盯你的时候，不该还要手动刷新页面。 */
+function startPublicPolling() {
+    if (!isPublicScreen()) return;
+    stopPublicPolling();
+    publicPollTimer = setInterval(async function () {
+        try {
+            await loadPublicUserData(window.__PUBLIC_USER__);
+            stampPublicRefresh();
+        } catch (e) {
+            // 刷新失败要说出来并保留上一次的数据，不能静默停在旧数字上让人以为那是今天的
+            const el = document.getElementById("public-refresh-stamp");
+            if (el) {
+                el.textContent = "自动刷新失败：" + ((e && e.message) || "未知错误")
+                    + "（下面仍是上次取到的数据）";
+                el.className = "public-refresh-stamp bad";
+            }
+        }
+    }, PUBLIC_POLL_SEC * 1000);
+    stampPublicRefresh();
+}
+
+function stopPublicPolling() {
+    if (publicPollTimer) { clearInterval(publicPollTimer); publicPollTimer = null; }
+}
+
+function stampPublicRefresh() {
+    const el = document.getElementById("public-refresh-stamp");
+    if (!el) return;
+    const d = new Date();
+    const two = function (n) { return (n < 10 ? "0" : "") + n; };
+    el.textContent = "每 " + PUBLIC_POLL_SEC + " 秒自动刷新 · 上次 "
+        + two(d.getHours()) + ":" + two(d.getMinutes()) + ":" + two(d.getSeconds());
+    el.className = "public-refresh-stamp";
+}
+
+/**
+ * 生成进度海报：数字全部取自这次真实拉到的大屏数据，画不出来的就不画。
+ * 没有任何一条流水时直接拒绝生成，而不是画一张空壳冒充进度。
+ */
+async function makeProgressPoster() {
+    // 字段名一律以 applyDashboardData / compute_charts_data 实际产出的为准：
+    // weightHistory 元素是 {date, val(kg), jin}，deficitHistory 元素是 {day, deficit, ...}
+    const pts = (state.weightHistory || []).slice();
+    const bars = (state.deficitHistory || []).slice();
+    const prof = state.profile || {};
+    const d = {
+        current_weight_jin: prof.weightJin,
+        target_weight_jin: prof.targetWeightJin,
+        streak_days: state.streakDays,
+        cycle_day: state.cycleDay,
+        nickname: prof.nickname || state.publicNickname || ""
+    };
+    if (!pts.length && !d.current_weight_jin) {
+        callNativeToast("还没有可画的数据：这条大屏目前一条记录都没有，不生成空海报");
+        return;
+    }
+    const W = 900, H = 1200;
+    const cv = document.createElement("canvas");
+    cv.width = W; cv.height = H;
+    const g = cv.getContext("2d");
+    g.fillStyle = "#0F172A"; g.fillRect(0, 0, W, H);
+    g.fillStyle = "#10B981"; g.fillRect(0, 0, W, 10);
+
+    g.fillStyle = "#F8FAFC";
+    g.font = "bold 56px sans-serif";
+    g.fillText("轻塑 · 减脂进度", 60, 110);
+    g.font = "28px sans-serif";
+    g.fillStyle = "#94A3B8";
+    const who = d.nickname || window.__PUBLIC_USER__ || "";
+    const now = new Date();
+    g.fillText((who ? who + " · " : "") + now.getFullYear() + "-"
+        + (now.getMonth() + 1) + "-" + now.getDate(), 60, 158);
+
+    // 四个真实数字
+    const cells = [
+        ["当前体重", (d.current_weight_jin || (pts.length ? pts[pts.length - 1].jin : null))
+            ? ((d.current_weight_jin || pts[pts.length - 1].jin) + " 斤") : "—"],
+        ["目标体重", d.target_weight_jin ? d.target_weight_jin + " 斤" : "未设"],
+        ["连续记录", (d.streak_days || 0) + " 天"],
+        ["本周期第", (d.cycle_day || "?") + " 天"]
+    ];
+    let x = 60;
+    for (let i = 0; i < cells.length; i++) {
+        g.fillStyle = "#1E293B"; roundRect(g, x, 200, 180, 130, 14); g.fill();
+        g.fillStyle = "#94A3B8"; g.font = "22px sans-serif"; g.fillText(cells[i][0], x + 18, 236);
+        g.fillStyle = "#F1F5F9"; g.font = "bold 34px sans-serif"; g.fillText(cells[i][1], x + 18, 296);
+        x += 200;
+    }
+
+    // 体重曲线（只有真实点，不插值补点）
+    g.fillStyle = "#F8FAFC"; g.font = "bold 30px sans-serif";
+    g.fillText("体重走势（只画真实记录过的那天）", 60, 400);
+    g.strokeStyle = "#334155"; g.lineWidth = 2;
+    g.strokeRect(60, 430, 780, 260);
+    if (pts.length > 1) {
+        const vals = pts.map(function (p) { return Number(p.jin); }).filter(Number.isFinite);
+        const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+        const span = (hi - lo) || 1;
+        g.strokeStyle = "#10B981"; g.lineWidth = 4; g.beginPath();
+        for (let i = 0; i < pts.length; i++) {
+            const v = Number(pts[i].jin);
+            if (!Number.isFinite(v)) continue;
+            const px = 80 + (740 * i / (pts.length - 1));
+            const py = 660 - (220 * (v - lo) / span);
+            if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+        }
+        g.stroke();
+        g.fillStyle = "#94A3B8"; g.font = "20px sans-serif";
+        g.fillText("最低 " + lo.toFixed(1) + " 斤", 80, 715);
+        g.fillText("最高 " + hi.toFixed(1) + " 斤", 620, 715);
+    } else {
+        g.fillStyle = "#64748B"; g.font = "26px sans-serif";
+        g.fillText("只有一个记录点，画不出趋势", 90, 570);
+    }
+
+    // 近 7 天净缺口柱（0 就是 0，不拿目标值冒充）
+    g.fillStyle = "#F8FAFC"; g.font = "bold 30px sans-serif";
+    g.fillText("近 7 天净缺口 kcal", 60, 790);
+    if (bars.length) {
+        const maxV = Math.max.apply(null, bars.map(function (b) { return Math.abs(Number(b.deficit) || 0); })) || 1;
+        let bx = 80;
+        for (let i = 0; i < bars.length; i++) {
+            const v = Number(bars[i].deficit) || 0;
+            const hgt = Math.round(180 * Math.abs(v) / maxV);
+            g.fillStyle = v > 0 ? "#10B981" : "#475569";
+            g.fillRect(bx, 1000 - hgt, 70, hgt);
+            g.fillStyle = "#94A3B8"; g.font = "18px sans-serif";
+            g.fillText(String(v), bx, 1024);
+            g.fillStyle = "#64748B"; g.font = "15px sans-serif";
+            g.fillText(String(bars[i].date || bars[i].day || ""), bx, 1046);
+            bx += 100;
+        }
+    } else {
+        g.fillStyle = "#64748B"; g.font = "26px sans-serif";
+        g.fillText("这 7 天没有可算的缺口记录", 90, 900);
+    }
+
+    g.fillStyle = "#64748B"; g.font = "20px sans-serif";
+    g.fillText("数据来自本人真实打卡流水；热量与宏量为粗估口径，不是营养学数据。", 60, 1120);
+    g.fillText("生成时间 " + now.toLocaleString(), 60, 1152);
+
+    try {
+        const url = cv.toDataURL("image/png");
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "轻塑进度_" + (who || "大屏") + ".png";
+        document.body.appendChild(a); a.click(); a.remove();
+        callNativeToast("海报已生成，数字都来自这次真实拉到的记录");
+    } catch (e) {
+        callNativeToast("这台浏览器不允许导出画布，海报没生成：" + ((e && e.message) || ""));
+    }
+}
+
+function roundRect(g, x, y, w, h, r) {
+    g.beginPath();
+    g.moveTo(x + r, y);
+    g.lineTo(x + w - r, y); g.quadraticCurveTo(x + w, y, x + w, y + r);
+    g.lineTo(x + w, y + h - r); g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    g.lineTo(x + r, y + h); g.quadraticCurveTo(x, y + h, x, y + h - r);
+    g.lineTo(x, y + r); g.quadraticCurveTo(x, y, x + r, y);
+    g.closePath();
+}
+
 function openProfileModal() {
     const p = state.profile;
     const g = p.gender || "female";
@@ -1983,7 +2179,8 @@ function renderWorkoutExercises() {
                 </div>
                 <div class="exercise-tip">${item.tip}</div>
                 <div class="ex-actions">
-                    <button class="ex-btn" onclick="toggleExerciseSteps(${idx})">标准动作分解</button>
+                    <button class="ex-btn" onclick="openExerciseDetail(${idx})">动作流程与示意动画</button>
+                    <button class="ex-btn ghost" onclick="toggleExerciseSteps(${idx})">只看要点</button>
                     <button class="ex-btn video" onclick="openExerciseVideo(${idx})">看演示视频</button>
                 </div>
                 <ol class="ex-steps" id="ex-steps-${idx}">${steps}</ol>
@@ -1993,6 +2190,7 @@ function renderWorkoutExercises() {
     });
     container.innerHTML = html;
     window.__currentExercises = list;
+    window.__currentExKey = key;
 }
 
 // 每个动作的标准分解与常见错误，按「身形key:组内序号」定位。
@@ -2031,6 +2229,306 @@ const EX_STEPS = {
     "male_steady:2": { steps: ["椅背当扶手，屈髋后坐", "轻触椅面即站起，重心在脚跟", "膝盖对准脚尖，不内扣"], wrong: "蹲得太深导致膝痛，深度以不痛为准" },
     "male_steady:3": { steps: ["弹力带固定在身后齐胸高", "双臂向前平举夹胸，肩胛后收下沉", "回位 2 秒，不耸肩"], wrong: "含胸驼背用手臂硬推，胸没感觉" },
 };
+
+// ============ 第五批后续：逐动作详情 + 程序化 3D 示意动画 ============
+// 为什么不是真人视频：仓库里没有教程素材也没有转载授权，内置别人的视频是侵权。
+// 所以这里画一个由关键帧插值出来的骨骼人物，并在界面上写明"程序化示意，非真人实拍"。
+// 原型靠要点文字里的动词识别，不另建一张映射表——EX_STEPS 改了它自动跟着变。
+
+const EX_ARCHETYPES = {
+    bridge:   { cn: "髋链 · 臀桥", view: "side",  amp: 0.30 },
+    deadbug:  { cn: "仰卧对侧伸展", view: "back",  amp: 0.34 },
+    clamshell:{ cn: "髋外展 · 蚌式", view: "back",  amp: 0.30 },
+    birddog:  { cn: "四点跪位对侧伸展", view: "side", amp: 0.28 },
+    squat:    { cn: "蹲 · 膝髋联动", view: "front", amp: 0.34 },
+    sideleg:  { cn: "侧向抬腿", view: "front", amp: 0.32 },
+    pushup:   { cn: "推 · 俯卧撑", view: "side",  amp: 0.30 },
+    walk:     { cn: "有氧步态", view: "side",    amp: 0.26 },
+    plank:    { cn: "支撑 · 平板", view: "side",  amp: 0.12 },
+    lunge:    { cn: "弓步蹲", view: "front",     amp: 0.32 },
+    press:    { cn: "上举", view: "front",       amp: 0.36 },
+    twist:    { cn: "躯干旋转", view: "front",   amp: 0.24 },
+};
+
+/** 从三条要点 + 常见错误文本里认动作原型。认不出就回落到 plank（小幅呼吸示意），不硬编一个假动作。 */
+function detectArchetype(meta, item) {
+    const hay = ((meta && meta.steps || []).join(" ") + " " + ((meta && meta.wrong) || "")
+        + " " + ((item && item.name) || "") + " " + ((item && item.tip) || "")).toLowerCase();
+    const has = function (arr) { return arr.some(function (k) { return hay.indexOf(k) >= 0; }); };
+    if (has(["臀桥", "送髋", "脚跟下压", "夹紧臀部"])) return "bridge";
+    if (has(["鸟狗", "四点跪位", "骨盆保持水平"])) return "birddog";
+    if (has(["蚌式", "开膝", "弹力带套在膝盖"])) return "clamshell";
+    if (has(["90 度", "对侧手脚", "下背", "双臂伸直指向天花板"])) return "deadbug";
+    if (has(["俯卧撑", "撑地", "肘约 45 度", "肩胛向前"])) return "pushup";
+    if (has(["侧抬腿", "向后上方抬起", "脚尖朝前,骨盆不翻", "骨盆不翻"])) return "sideleg";
+    if (has(["步频", "落地用中足", "慢走", "心率"])) return "walk";
+    if (has(["平板", "手肘撑", "身体一条直线向下压"])) return "plank";
+    if (has(["弓步", "前腿", "后膝"])) return "lunge";
+    if (has(["过顶", "举", "推举", "哑铃"])) return "press";
+    if (has(["转体", "旋转", "扭转"])) return "twist";
+    if (has(["下蹲", "蹲", "膝盖对准脚尖"])) return "squat";
+    return "plank";
+}
+
+/** 基础站姿骨架（归一化坐标，y 向下）。所有原型都在它之上做位移。 */
+function basePose() {
+    return {
+        head: [0.50, 0.16], neck: [0.50, 0.24], sternum: [0.50, 0.34], pelvis: [0.50, 0.50],
+        l_shoulder: [0.42, 0.25], r_shoulder: [0.58, 0.25],
+        l_elbow: [0.39, 0.37], r_elbow: [0.61, 0.37],
+        l_wrist: [0.38, 0.49], r_wrist: [0.62, 0.49],
+        l_hip: [0.45, 0.51], r_hip: [0.55, 0.51],
+        l_knee: [0.44, 0.68], r_knee: [0.56, 0.68],
+        l_ankle: [0.43, 0.86], r_ankle: [0.57, 0.86]
+    };
+}
+
+function move(p, joint, x, y) {
+    const v = p[joint]; if (!v) return;
+    v[0] += x; v[1] += y;
+}
+
+/** 按原型与相位 t(0..1) 生成一帧姿态。sin 让动作来回，不是单向摆 pose。 */
+function poseAt(arch, t) {
+    const p = basePose();
+    const s = Math.sin(t * Math.PI * 2);          // -1..1
+    const u = (1 - Math.cos(t * Math.PI * 2)) / 2; // 0..1
+    switch (arch) {
+        case "squat":
+        case "lunge": {
+            const d = 0.16 * u;
+            ["pelvis", "l_hip", "r_hip", "sternum", "neck", "head"].forEach(function (j) { move(p, j, 0, d); });
+            ["l_knee", "r_knee", "l_shoulder", "r_shoulder"].forEach(function (j) { move(p, j, 0, d * 0.55); });
+            move(p, "l_knee", -0.03 * u, 0); move(p, "r_knee", 0.03 * u, 0);
+            move(p, "l_wrist", -0.05 * u, -0.06 * u); move(p, "r_wrist", 0.05 * u, -0.06 * u);
+            if (arch === "lunge") { move(p, "r_knee", 0.05, 0.05); move(p, "r_ankle", 0.09, 0.0); }
+            break;
+        }
+        case "bridge": {
+            const lift = 0.13 * u;
+            move(p, "pelvis", 0, -lift); move(p, "sternum", 0, -lift * 0.45);
+            move(p, "l_hip", 0, -lift * 0.8); move(p, "r_hip", 0, -lift * 0.8);
+            break;
+        }
+        case "pushup": {
+            const down = 0.11 * u;
+            ["sternum", "neck", "head", "pelvis"].forEach(function (j) { move(p, j, 0, down); });
+            move(p, "l_elbow", -0.02, down * 0.6); move(p, "r_elbow", 0.02, down * 0.6);
+            break;
+        }
+        case "press": {
+            const up = 0.20 * u;
+            move(p, "l_wrist", -0.02, -up); move(p, "r_wrist", 0.02, -up);
+            move(p, "l_elbow", -0.02, -up * 0.6); move(p, "r_elbow", 0.02, -up * 0.6);
+            break;
+        }
+        case "sideleg":
+        case "clamshell": {
+            const out = 0.16 * u;
+            move(p, "r_knee", out * 0.6, -out * 0.35); move(p, "r_ankle", out, -out * 0.6);
+            break;
+        }
+        case "deadbug":
+        case "birddog": {
+            move(p, "r_wrist", 0.10 * u, -0.10 * u); move(p, "r_elbow", 0.06 * u, -0.05 * u);
+            move(p, "l_knee", -0.06 * u, 0.07 * u); move(p, "l_ankle", -0.09 * u, 0.10 * u);
+            break;
+        }
+        case "walk": {
+            const sw = 0.11 * s;
+            move(p, "l_knee", sw * 0.5, -Math.max(0, s) * 0.05); move(p, "l_ankle", sw, -Math.max(0, s) * 0.09);
+            move(p, "r_knee", -sw * 0.5, -Math.max(0, -s) * 0.05); move(p, "r_ankle", -sw, -Math.max(0, -s) * 0.09);
+            move(p, "l_wrist", -sw * 0.7, 0); move(p, "r_wrist", sw * 0.7, 0);
+            break;
+        }
+        case "twist": {
+            const r = 0.07 * s;
+            move(p, "sternum", r, 0); move(p, "neck", r * 1.2, 0); move(p, "head", r * 1.4, 0);
+            move(p, "l_shoulder", r, 0); move(p, "r_shoulder", r, 0);
+            move(p, "l_wrist", r * 1.8, 0); move(p, "r_wrist", r * 1.8, 0);
+            break;
+        }
+        default: {   // plank：只起伏，不假装在动大关节
+            const b = 0.02 * s;
+            ["pelvis", "sternum", "neck", "head"].forEach(function (j) { move(p, j, 0, b); });
+        }
+    }
+    return p;
+}
+
+const BONES = [
+    ["neck", "sternum", 9], ["sternum", "pelvis", 12],
+    ["l_shoulder", "r_shoulder", 8], ["l_hip", "r_hip", 9],
+    ["l_shoulder", "l_elbow", 6], ["l_elbow", "l_wrist", 5],
+    ["r_shoulder", "r_elbow", 6], ["r_elbow", "r_wrist", 5],
+    ["l_hip", "l_knee", 8], ["l_knee", "l_ankle", 6],
+    ["r_hip", "r_knee", 8], ["r_knee", "r_ankle", 6],
+    ["neck", "l_shoulder", 6], ["neck", "r_shoulder", 6],
+    ["pelvis", "l_hip", 6], ["pelvis", "r_hip", 6]
+];
+
+/** 画一帧：远处肢体先画（暗、细），近处后画（亮、粗），加上投影，得到立体感。 */
+function drawFrame(g, W, H, pose, arch, t) {
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = "#0B1220"; g.fillRect(0, 0, W, H);
+    const grd = g.createLinearGradient(0, H * 0.55, 0, H);
+    grd.addColorStop(0, "#111C2E"); grd.addColorStop(1, "#0B1220");
+    g.fillStyle = grd; g.fillRect(0, H * 0.55, W, H * 0.45);
+
+    const px = function (v) { return [v[0] * W, v[1] * H]; };
+    // 落地投影随起伏缩放，是判断"有没有真在动"最直观的线索
+    const lift = 1 - Math.abs(Math.sin(t * Math.PI * 2)) * 0.18;
+    g.fillStyle = "rgba(16,185,129,0.16)";
+    g.beginPath(); g.ellipse(W * 0.5, H * 0.9, W * 0.2 * lift, H * 0.022, 0, 0, Math.PI * 2); g.fill();
+
+    const back = ["l_shoulder", "l_elbow", "l_wrist", "l_hip", "l_knee", "l_ankle"];
+    for (let i = 0; i < BONES.length; i++) {
+        const b = BONES[i];
+        const isNear = back.indexOf(b[0]) >= 0 || back.indexOf(b[1]) >= 0;
+        if (isNear) continue;
+        g.strokeStyle = "#34D399"; g.lineWidth = b[2] * 0.9; g.lineCap = "round";
+        const a = px(pose[b[0]]), c = px(pose[b[1]]);
+        g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(c[0], c[1]); g.stroke();
+    }
+    for (let i = 0; i < BONES.length; i++) {
+        const b = BONES[i];
+        const isNear = back.indexOf(b[0]) >= 0 || back.indexOf(b[1]) >= 0;
+        if (!isNear) continue;
+        g.strokeStyle = "#0E7490"; g.lineWidth = b[2] * 0.75; g.lineCap = "round";
+        const a = px(pose[b[0]]), c = px(pose[b[1]]);
+        g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(c[0], c[1]); g.stroke();
+    }
+    const hd = px(pose.head);
+    g.fillStyle = "#10B981"; g.beginPath(); g.arc(hd[0], hd[1], W * 0.045, 0, Math.PI * 2); g.fill();
+    const pel = px(pose.pelvis);
+    g.fillStyle = "rgba(255,90,54,0.9)"; g.beginPath(); g.arc(pel[0], pel[1], W * 0.016, 0, Math.PI * 2); g.fill();
+
+    g.fillStyle = "#64748B"; g.font = "12px sans-serif";
+    g.fillText("程序化示意 · 非真人实拍", 10, H - 10);
+    const meta = EX_ARCHETYPES[arch] || EX_ARCHETYPES.plank;
+    g.fillStyle = "#94A3B8"; g.fillText(meta.cn + " · " + (meta.view === "side" ? "侧面" : meta.view === "back" ? "仰卧" : "正面"), 10, 18);
+}
+
+let exAnim = null;
+
+// 真数据优先：仓库里带了一份 32 动作 × 4 关键帧的姿态表（按固定骨长生成，
+// 已核过骨长恒定与肘膝不反折）。取不到时回落到上面的程序化原型，而不是画一张静图。
+let EX_POSES = null;
+let exPosesTried = false;
+
+function loadExercisePoses() {
+    if (exPosesTried) return Promise.resolve(EX_POSES);
+    exPosesTried = true;
+    return new Promise(function (resolve) {
+        let done = false;
+        const finish = function (v) { if (!done) { done = true; EX_POSES = v; resolve(v); } };
+        try {
+            const xhr = new XMLHttpRequest();
+            xhr.open("GET", "exercise_poses.json", true);
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState !== 4) return;
+                if (xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300)) {
+                    try { finish(JSON.parse(xhr.responseText)); } catch (e) { finish(null); }
+                } else {
+                    finish(null);
+                }
+            };
+            xhr.onerror = function () { finish(null); };
+            xhr.send(null);
+            // 2.5 秒还没回来就先按程序化画，不让用户对着空白等
+            setTimeout(function () { finish(EX_POSES); }, 2500);
+        } catch (e) {
+            finish(null);
+        }
+    });
+}
+
+/** 线性插值两帧，得到连续动作而不是四张幻灯。 */
+function lerpFrames(a, b, k) {
+    const out = {};
+    for (const jn in a) {
+        if (!Object.prototype.hasOwnProperty.call(a, jn)) continue;
+        const p = a[jn];
+        const q = (b && b[jn]) || a[jn];
+        out[jn] = [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k];
+    }
+    return out;
+}
+
+/** 关键帧表按 t(0..1) 取一帧；表里没有这个动作就回落到程序化原型。 */
+function poseFromTable(key, arch, t) {
+    const e = (EX_POSES || {})[key];
+    if (!e || !Array.isArray(e.frames) || e.frames.length < 2) return poseAt(arch, t);
+    const n = e.frames.length;
+    const pos = t * n;
+    const i0 = Math.floor(pos) % n;
+    const i1 = (i0 + 1) % n;
+    const k = pos - Math.floor(pos);
+    return lerpFrames(e.frames[i0].pose, e.frames[i1].pose, k);
+}
+
+function currentExKey(idx) {
+    return (window.__currentExKey || "female_hourglass") + ":" + idx;
+}
+
+function closeExerciseDetail() {
+    if (exAnim) { cancelAnimationFrame(exAnim.raf); exAnim = null; }
+    const m = document.getElementById("ex-detail-modal");
+    if (m) m.classList.remove("show");
+}
+
+/** 打开详情：名称、组数、要点、常见错误、动画、慢放开关。 */
+function openExerciseDetail(idx) {
+    const list = window.__currentExercises || [];
+    const item = list[idx];
+    if (!item) { callNativeToast("这个动作还没载入，先回到训练计划再点"); return; }
+    const key = (state.profile && state.profile.goalType ? state.profile.goalType : "female_hourglass") + ":" + idx;
+    const meta = EX_STEPS[key] || {};
+    const arch = detectArchetype(meta, item);
+    const poseKey = currentExKey(idx);
+    const nameEl = document.getElementById("ex-detail-name");
+    const repsEl = document.getElementById("ex-detail-reps");
+    const stepsEl = document.getElementById("ex-detail-steps");
+    const wrongEl = document.getElementById("ex-detail-wrong");
+    const cv = document.getElementById("ex-detail-canvas");
+    if (!nameEl || !cv) return;
+
+    nameEl.textContent = String(item.name || "").replace(/^\d+\.\s*/, "");
+    repsEl.textContent = item.reps || "";
+    const steps = (meta.steps || []);
+    stepsEl.innerHTML = steps.length
+        ? steps.map(function (x, i) { return "<li>" + (i + 1) + ". " + escapeHtml(x) + "</li>"; }).join("")
+        : "<li>这个动作还没有分解要点记录</li>";
+    wrongEl.innerHTML = meta.wrong
+        ? "常见错误：" + escapeHtml(meta.wrong)
+        : "暂无常见错误条目";
+
+    const modal = document.getElementById("ex-detail-modal");
+    modal.classList.add("show");
+
+    const g = cv.getContext("2d");
+    if (!g) { callNativeToast("这台设备的画布不可用，动画放不出来"); return; }
+    if (exAnim) cancelAnimationFrame(exAnim.raf);
+    const start = Date.now();
+    exAnim = { raf: 0, slow: false };
+    const loop = function () {
+        if (!exAnim) return;
+        const speed = exAnim.slow ? 0.35 : 1;
+        const t = (((Date.now() - start) / 2600) * speed) % 1;
+        drawFrame(g, cv.width, cv.height, poseFromTable(poseKey, arch, t), arch, t);
+        exAnim.raf = requestAnimationFrame(loop);
+    };
+    loop();
+    const btn = document.getElementById("ex-detail-slow");
+    if (btn) btn.textContent = "慢放：关";
+}
+
+function toggleExDetailSlow() {
+    if (!exAnim) return;
+    exAnim.slow = !exAnim.slow;
+    const btn = document.getElementById("ex-detail-slow");
+    if (btn) btn.textContent = exAnim.slow ? "慢放：开" : "慢放：关";
+}
 
 function toggleExerciseSteps(idx) {
     const el = document.getElementById("ex-steps-" + idx);
@@ -2325,6 +2823,188 @@ async function forceEatTakeout() {
 // ==========================================
 // AI 顾问与提问
 // ==========================================
+// ================= 第五批后续：双引擎 AI（手机本地优先 + 服务器兜底） =================
+// 用户提的实质担忧是"用户量上来服务器吃不消"。所以推理尽量落到用户自己手机上，
+// 但记忆库与知识库仍然只有服务器那一份：换引擎不能让用户之前说过的话失效。
+const LS_ENGINE = "QINGSU_AI_ENGINE";
+const LS_LOCAL_PORT = "QINGSU_LOCAL_AI_PORT";
+const LOCAL_PROBE_MS = 1500;
+
+function aiEnginePref() {
+    try { return localStorage.getItem(LS_ENGINE) || "auto"; } catch (e) { return "auto"; }
+}
+
+function setAiEnginePref(v) {
+    try { localStorage.setItem(LS_ENGINE, v); } catch (e) {}
+    localAiCache.ok = null;
+    paintAiEngineBar();
+}
+
+function localAiBase() {
+    let port = 8081;
+    try { port = parseInt(localStorage.getItem(LS_LOCAL_PORT), 10) || 8081; } catch (e) {}
+    return "http://127.0.0.1:" + port;
+}
+
+const localAiCache = { ok: null, at: 0, ms: 0, why: "" };
+
+/** 带超时的 fetch。AbortController 在旧 WebView 里可能没有，没有就直接放弃探测。 */
+async function fetchWithTimeout(url, opts, ms) {
+    if (typeof AbortController === "undefined") {
+        const r = await fetch(url, opts);
+        return r;
+    }
+    const ctl = new AbortController();
+    const timer = setTimeout(() => { try { ctl.abort(); } catch (e) {} }, ms);
+    try {
+        const o = Object.assign({}, opts || {}, { signal: ctl.signal });
+        return await fetch(url, o);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+/**
+ * 探一次手机上的本地模型。结果缓存 20 秒，免得每问一句都白等一次连接超时。
+ * 返回 {ok, ms, why}：why 必须能给人看——探测失败要说清是没开、连不上还是超时。
+ */
+async function probeLocalAi(force) {
+    const now = Date.now();
+    if (!force && localAiCache.ok !== null && now - localAiCache.at < 20000) {
+        return { ok: localAiCache.ok, ms: localAiCache.ms, why: localAiCache.why };
+    }
+    let out;
+    try {
+        const r = await fetchWithTimeout(localAiBase() + "/health", { method: "GET" }, LOCAL_PROBE_MS);
+        out = { ok: r.status === 200, ms: 0, why: r.status === 200 ? "" : "本地服务返回 " + r.status };
+    } catch (e) {
+        const name = (e && e.name) === "AbortError" ? "连接超时" : ((e && e.message) || "连不上");
+        out = { ok: false, ms: 0, why: "127.0.0.1 上没有可用的本地模型（" + name + "）" };
+    }
+    out.ms = Date.now() - now;
+    localAiCache.ok = out.ok; localAiCache.at = now; localAiCache.ms = out.ms; localAiCache.why = out.why;
+    return out;
+}
+
+/** 把服务器给的真实数据摘要 + 记忆 + 知识库要点拼进本地提示词。 */
+function buildLocalPrompt(question, ctx) {
+    const d = ctx.digest || {};
+    const facts = [];
+    if (d.weight_jin) facts.push("最新体重 " + d.weight_jin + " 斤");
+    if (d.target_jin) facts.push("目标体重 " + d.target_jin + " 斤");
+    if (d.budget_cal) facts.push("今天(" + (d.day_mode === "workout" ? "运动日" : "休息日") + ")热量预算 " + d.budget_cal + " kcal");
+    facts.push("今日已摄入 " + (d.today_consumed || 0) + " kcal，已消耗 " + (d.today_burned || 0) + " kcal");
+    if (typeof d.remaining_cal === "number") facts.push("剩余额度 " + d.remaining_cal + " kcal");
+    const mem = (ctx.memory || []).length ? "此人明确记下的：" + ctx.memory.join("；") : "此人没有额外备注";
+    const kb = (ctx.kb || []).length
+        ? "知识库近几条：" + ctx.kb.map(k => k.answer).join(" / ")
+        : "知识库里还没有相关条目";
+    return "你是减脂记录工具里的助手。规则：涉及数字只能用【本人数据】里出现过的；"
+        + "资料没写到的结论不要补；不知道就说不知道，不要编。用中文两三句说完，不要复述问题。\n"
+        + "【本人数据】" + facts.join("；") + "\n"
+        + "【记忆】" + mem + "\n"
+        + "【知识库】" + kb + "\n"
+        + "【问题】" + question + "\n【回答】";
+}
+
+/** 走手机上的本地模型。返回 {answer, engine}；任何一步不成都抛，交给上层降级。 */
+async function askViaLocal(question) {
+    const ctx = await getJson("/api/ai/context");
+    const r = await fetchWithTimeout(localAiBase() + "/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            messages: [{ role: "user", content: buildLocalPrompt(question, ctx) }],
+            max_tokens: 220, temperature: 0.2, stream: false
+        })
+    }, 25000);
+    if (!r.ok) throw new Error("本地模型返回 " + r.status);
+    const j = await r.json();
+    const txt = (((j.choices || [])[0] || {}).message || {}).content || "";
+    if (!txt.trim()) throw new Error("本地模型返回空内容");
+    // 本地查出来的东西回写服务器知识库：两个引擎共用同一份，不是各记各的
+    try {
+        await postApi("/api/ai/record", { question: question, answer: txt, sources: [] });
+    } catch (e) {
+        console.warn("local answer not recorded", e && e.message);
+    }
+    return { answer: escapeHtml(stripTagsLocal(txt)), engine: "local", source: "local_model" };
+}
+
+/** 走服务器问答接口（本机模型 + 联网 + 规则都在服务端）。 */
+async function askViaServer(question) {
+    const d = await postApi("/api/ask", { question: question });
+    return { answer: String(d.answer || ""), engine: "server", source: d.source || "none" };
+}
+
+/**
+ * 引擎决策。auto = 本地优先、服务器兜底；
+ * 两个都不行时不假装成功，直接把两边的失败原因都摆出来。
+ */
+async function askAnyEngine(question) {
+    const pref = aiEnginePref();
+    const errs = [];
+    let localNote = "";
+    if (pref !== "server") {
+        const p = await probeLocalAi(false);
+        if (p.ok) {
+            try {
+                return await askViaLocal(question);
+            } catch (e) {
+                errs.push("本地：" + ((e && e.message) || "失败"));
+                localAiCache.ok = null;
+            }
+        } else {
+            // auto 模式下本地离线是常态，单说它没意义；但要是服务器也跟着挂，
+            // 就必须让用户知道本地那条路当时也不通，否则他只看到服务器报错
+            localNote = "本地：" + p.why;
+            if (pref === "local") errs.push(localNote);
+        }
+        if (pref === "local" && errs.length) {
+            const err = new Error(errs.join("；"));
+            err.noFallback = true;
+            throw err;
+        }
+    }
+    try {
+        return await askViaServer(question);
+    } catch (e) {
+        errs.push("服务器：" + ((e && e.message) || "失败"));
+        if (localNote && errs.indexOf(localNote) < 0) errs.push(localNote);
+        throw new Error(errs.join("；") || "两个引擎都没答上");
+    }
+}
+
+function engineTag(source) {
+    return {
+        data: "【你的真实记录】", web: "【联网资料】", web_model: "【服务器模型整理】",
+        kb: "【本机知识库】", memory: "【你的备注】", none: "【没查到】",
+        limited: "【查询过于频繁】", local_model: "【手机本地模型】"
+    }[source] || "";
+}
+
+function paintAiEngineBar() {
+    const el = document.getElementById("ai-engine-bar");
+    if (!el) return;
+    const pref = aiEnginePref();
+    const sel = document.getElementById("ai-engine-sel");
+    if (sel && sel.value !== pref) sel.value = pref;
+    if (localAiCache.ok === null) {
+        el.innerHTML = "<span>正在探本地模型…</span>";
+        return;
+    }
+    el.innerHTML = localAiCache.ok
+        ? "<span class='eng-ok'>本地模型在线</span><span class='eng-ms'>" + localAiCache.ms + "ms</span>"
+        : "<span class='eng-no'>本地模型离线</span><span class='eng-why'>" + escapeHtml(localAiCache.why) + "</span>";
+}
+
+async function reprobeLocalAi() {
+    localAiCache.ok = null;
+    paintAiEngineBar();
+    await probeLocalAi(true);
+    paintAiEngineBar();
+}
+
 async function sendChatMessage() {
     const input = document.getElementById("chat-input");
     const msg = input.value.trim();
@@ -2332,7 +3012,7 @@ async function sendChatMessage() {
 
     appendBubble("user", msg, false);
     input.value = "";
-    const bubble = appendBubble("assistant", state.token ? "正在查你的记录和联网资料…" : "未登录，只能给通用建议…", false);
+    const bubble = appendBubble("assistant", state.token ? "正在查你的记录（本地模型优先，服务器兜底）…" : "未登录，只能给通用建议…", false);
 
     if (!state.token) {
         bubble.innerHTML = escapeHtml("【本地通用建议】" + stripTagsLocal(generateAiResponse(msg)))
@@ -2342,11 +3022,15 @@ async function sendChatMessage() {
     }
 
     try {
-        const d = await postApi("/api/ask", { question: msg });
-        const tag = { data: "【你的真实记录】", web: "【联网资料】", none: "【没查到】", limited: "【查询过于频繁】" }[d.source] || "";
-        bubble.innerHTML = "<strong>" + tag + "</strong>" + String(d.answer || "").replace(/\n/g, "<br>");
+        const d = await askAnyEngine(msg);
+        const LF = String.fromCharCode(10);
+        bubble.innerHTML = "<strong>" + engineTag(d.source) + "</strong>"
+            + String(d.answer || "").split(LF).join("<br>")
+            + "<br><span class='eng-line'>引擎："
+            + (d.engine === "local" ? "手机本地模型" : "服务器") + " · 记忆与知识库两端共用</span>";
     } catch (e) {
-        bubble.innerHTML = "<strong>【联网查询失败】</strong>" +
+        // 两个引擎都失败时把两边原因都摊开，再给内置建议，并明说这段不含真实数据
+        bubble.innerHTML = "<strong>【两个引擎都没答上】</strong>" +
             escapeHtml((e && e.message) ? e.message : "未知错误") +
             "<br>下面这段是本地内置建议，不含你的真实数据：<br>" +
             escapeHtml(stripTagsLocal(generateAiResponse(msg)));
@@ -2424,7 +3108,7 @@ function generateAiResponse(query) {
 4. <strong>顺序：</strong>先喝清汤 ➔ 蔬菜 ➔ 肉蛋 ➔ 最后吃少许玉米土豆！`;
     }
     return `💡 <strong>专属塑形顾问建议：</strong><br>
-我是您的纯本地免费顾问，国内使用无需外网。已基于您的真实档案（${c.summaryText}，每日目标 ${c.restCal}-${c.workoutCal} kcal）优化。牢记进餐顺序：先水、再菜、后肉、最后慢碳！若有任何外卖犹豫，先去【外卖拦截】审一下！`;
+这段是内置规则建议，不查网络也不查你的流水。真实档案（${c.summaryText}，每日目标 ${c.restCal}-${c.workoutCal} kcal）优化。牢记进餐顺序：先水、再菜、后肉、最后慢碳！若有任何外卖犹豫，先去【外卖拦截】审一下！`;
 }
 
 // 原生 Android 桥接与 Web 端兼容 Toast
@@ -2484,11 +3168,26 @@ function callNativeBeep() {
 // ==========================================
 // APK 手机客户端下载与扫码弹窗逻辑
 // ==========================================
+const MOB_ICON = "📱";
+const PC_ICON = "🖥️";
+
+/** 是否跑在 App 的 WebView 里。网页版返回 false；两处行为要分开都走这个判断。 */
+function inApp() {
+    return !!(window.AndroidBridge && window.AndroidBridge.showToast);
+}
+
 function applyViewMode(mode) {
     document.body.classList.toggle("desktop-view", mode === "desktop");
     document.body.classList.toggle("mobile-view", mode !== "desktop");
     const btn = document.getElementById("btn-view-toggle");
-    if (btn) btn.innerText = mode === "desktop" ? "📱 手机版" : "🖥️ 电脑版";
+    if (btn) {
+        // 只放图标：这颗按钮在窄屏顶栏里，一带字就换行顶出按钮框
+        btn.innerText = (mode === "desktop") ? MOB_ICON : PC_ICON;
+        btn.title = (mode === "desktop")
+            ? "当前电脑版排版 · 点一下切回手机版"
+            : "当前手机版排版 · 点一下切电脑版（宽屏双栏）";
+        btn.setAttribute("aria-label", btn.title);
+    }
     try { localStorage.setItem("QINGSU_VIEW_MODE", mode); } catch (e) {}
     setTimeout(() => { renderCharts(); }, 60);
 }

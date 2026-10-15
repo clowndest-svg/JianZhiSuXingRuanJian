@@ -341,24 +341,18 @@ def _ip(request):
 
 
 def _login_blocked(key):
-    ts = [t for t in _login_fails.get(key, []) if time.time() - t < _LOGIN_WINDOW]
-    _login_fails[key] = ts
-    return len(ts) >= _LOGIN_MAX_FAILS
+    return rate_peek("login:" + key) >= _LOGIN_MAX_FAILS
 
 
 def _login_fail(key):
-    _login_fails.setdefault(key, []).append(time.time())
+    # 只记不判：上限给到极大，纯粹借它做"窗口内 +1 并在首次设 TTL"
+    rate_hit("login:" + key, 10 ** 9, _LOGIN_WINDOW)
 
 
 def _public_allowed(ip):
     """公开接口按 IP 限 60 次/分，堵住用户名枚举与拖库脚本。"""
-    now = time.time()
-    bucket = _public_hits[ip]
-    bucket[:] = [t for t in bucket if now - t < 60]
-    if len(bucket) >= 60:
-        return False
-    bucket.append(now)
-    return True
+    ok, _where, _n = rate_hit("pub:" + ip, 60, 60)
+    return ok
 
 
 def hash_pw(pw: str) -> str:
@@ -1190,14 +1184,14 @@ _ask_hits = defaultdict(list)
 
 
 def _ask_allowed(user_id):
-    """给联网出口加每用户限频，免得这个接口变成开放的免费代理。"""
-    now = time.time()
-    bucket = _ask_hits[user_id]
-    bucket[:] = [t for t in bucket if now - t < 60]
-    if len(bucket) >= _ASK_LIMIT_PER_MIN:
-        return False
-    bucket.append(now)
-    return True
+    """给联网出口加每用户限频，免得这个接口变成开放的免费代理。
+
+    计数优先落 Redis：进程内字典一重启就清零，用户会觉得"刚限完又放开了"，
+    而多进程部署时进程内计数各算各的，等于限流形同虚设。Redis 不通时
+    rate_hit 自己退回内存，不会因为缓存挂了就把问答整个拒掉。
+    """
+    ok, _where, _n = rate_hit("ask:" + str(user_id), _ASK_LIMIT_PER_MIN, 60)
+    return ok
 
 
 def _strip_tags(s):
@@ -1350,6 +1344,256 @@ def answer_from_user_data(q, d):
         return f"当前{mode_txt}，第 {lc['cycle_num']} 周期：{lc['cycle_name']}，评级 {lc['tone_score']}。"
 
     return None
+
+
+# ==================== Redis 与 AI 引擎状态（第五批后续） ====================
+# Redis 用 stdlib 直连 RESP，不引 redis-py：这台机的运行时依赖越少越好装、越好回滚。
+# 所有 Redis 调用都允许失败并退回进程内实现——缓存挂了不能把整个应用带崩。
+_REDIS_HOST = os.environ.get("QINGSU_REDIS_HOST", "127.0.0.1")
+_REDIS_PORT = int(os.environ.get("QINGSU_REDIS_PORT", "6379"))
+_redis_fail_until = [0.0]
+_redis_last_err = [""]      # 最近一次 Redis 失败原因，状态接口要能说出来
+_redis_seen = [False]
+
+
+def _redis_read(f):
+    """按 RESP 类型递归读一条完整回复。
+
+    靠数换行符判断读完是不可靠的：空数组、批量回复、空值回复都会读歪，
+    所以这里严格按首字节分支走。
+    """
+    line = f.readline()
+    if not line:
+        raise OSError("redis closed")
+    head = line[:1]
+    rest = line[1:].rstrip(b"\r\n")
+    if head == b"+":
+        return rest.decode("utf-8", "replace")
+    if head == b":":
+        return int(rest or b"0")
+    if head == b"-":
+        raise OSError(rest.decode("utf-8", "replace"))
+    if head == b"$":
+        n = int(rest)
+        if n < 0:
+            return None
+        data = f.read(n)
+        f.read(2)
+        return data.decode("utf-8", "replace")
+    if head == b"*":
+        n = int(rest)
+        if n < 0:
+            return None
+        return [_redis_read(f) for _ in range(n)]
+    raise OSError("bad RESP head")
+
+
+def _redis_cmd(args, timeout=0.35):
+    """发一条 RESP 命令，返回 (ok, value)。不可用返回 (False, None)，调用方自己兜底。"""
+    import socket
+    if time.time() < _redis_fail_until[0]:
+        return False, None
+    sock = None
+    try:
+        sock = socket.create_connection((_REDIS_HOST, _REDIS_PORT), timeout=timeout)
+        buf = bytearray(("*%d\r\n" % len(args)).encode("ascii"))
+        for a in args:
+            b = str(a).encode("utf-8")
+            buf += b"$%d\r\n" % len(b)
+            buf += b
+            buf += b"\r\n"
+        sock.sendall(bytes(buf))
+        val = _redis_read(sock.makefile("rb"))
+        _redis_seen[0] = True
+        _redis_last_err[0] = ""
+        return True, val
+    except Exception as e:
+        _redis_fail_until[0] = time.time() + 30
+        _redis_last_err[0] = "%s: %s" % (type(e).__name__, str(e)[:90])
+        return False, None
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
+def redis_up():
+    ok, v = _redis_cmd(["PING"])
+    return bool(ok and v == "PONG")
+
+
+_mem_buckets = {}   # Redis 不可用时的进程内兜底
+
+
+def rate_hit(key, limit, window_sec):
+    """固定窗口计数。Redis 在就用 Redis（重启不清零、多进程共享），不在就用内存。
+
+    这条是"失败要看得见"的落点：返回值第二个元素说明计数存在哪，
+    状态接口会把它显示出来，免得 Redis 挂了很久而没人知道限流口径已经变了。
+    """
+    ok, val = _redis_cmd(["INCR", "qs:rl:" + key])
+    if ok and isinstance(val, int):
+        if val == 1:
+            _redis_cmd(["EXPIRE", "qs:rl:" + key, window_sec])
+        return val <= limit, "redis", val
+    now = time.time()
+    bucket = _mem_buckets.setdefault(key, [])
+    bucket[:] = [t for t in bucket if now - t < window_sec]
+    bucket.append(now)
+    return len(bucket) <= limit, "memory", len(bucket)
+
+
+def rate_peek(key):
+    """只读当前窗口计数，不自增。登录失败检查用这条——查一次不该等于失败一次。"""
+    ok, val = _redis_cmd(["GET", "qs:rl:" + key])
+    if ok:
+        try:
+            return int(val or 0)
+        except (TypeError, ValueError):
+            return 0
+    now = time.time()
+    return len([t for t in _mem_buckets.get(key, []) if now - t < _LOGIN_WINDOW])
+
+
+def rate_reset_all_ask():
+    """清掉所有问答限流窗口（回归台与运维临时放行用）。"""
+    ok, val = _redis_cmd(["KEYS", "qs:rl:ask:*"])
+    if ok and isinstance(val, list):
+        for k in val:
+            _redis_cmd(["DEL", k])
+    for k in [x for x in list(_mem_buckets) if x.startswith("ask:")]:
+        _mem_buckets.pop(k, None)
+
+
+def rate_reset(key):
+    """清掉一个限流窗口。测试要用，运维临时放行某人也只用得着这一句。"""
+    _redis_cmd(["DEL", "qs:rl:" + key])
+    _mem_buckets.pop(key, None)
+
+
+def cache_get(k):
+    ok, v = _redis_cmd(["GET", "qs:kb:" + k])
+    return v if ok else None
+
+
+def cache_set(k, val, ttl):
+    ok, _ = _redis_cmd(["SETEX", "qs:kb:" + k, ttl, val])
+    return ok
+
+
+# ---------- 给本机（手机上的）AI 用的共享上下文与回写 ----------
+
+@app.get("/api/ai/status")
+def ai_status(user: dict = Depends(get_current_user)):
+    """引擎健康面：本机模型、服务器模型、Redis 各自通不通，前端据此决定用谁。"""
+    ok = llm_chat("ping", max_tokens=4) is not None
+    r_ok = redis_up()
+    return {"code": 0,
+            "server_model": "up" if ok else "down",
+            "model_name": "qwen2.5-0.5b-instruct-q8_0",
+            "redis": "up" if r_ok else "down",
+            "redis_why": "" if r_ok else (_redis_last_err[0] or "冷却中或从未连上"),
+            "kb_backend": "redis+sqlite" if r_ok else "sqlite"}
+
+
+@app.get("/api/ai/context")
+def ai_context(user: dict = Depends(get_current_user)):
+    """把本人真实数据摘要 + 长期记忆 + 知识库要点打包给客户端。
+
+    两个引擎（手机本地的、服务器上的）读的是同一份，所以记忆与知识是共用的，
+    换引擎不会让用户之前说过的话失效。
+    """
+    d = compute_dashboard_data(user)
+    mem = memory_list(user["id"])
+    conn = get_db()
+    c = conn.cursor()
+    rows = c.execute("SELECT answer, fetched_at FROM kb_entries "
+                     "ORDER BY fetched_at DESC LIMIT 6").fetchall()
+    conn.close()
+    kb = [{"answer": html_escape((r["answer"] or "")[:160]), "at": (r["fetched_at"] or "")[:10]}
+          for r in rows]
+    digest = {
+        "weight_jin": d["current_weight_jin"],
+        "target_jin": (d.get("profile") or {}).get("target_weight_jin"),
+        "budget_cal": d.get("budget_cal"),
+        "today_consumed": d["today_consumed"],
+        "today_burned": d["today_burned"],
+        "remaining_cal": d.get("remaining_cal"),
+        "day_mode": d.get("day_mode"),
+        "cycle_day": d.get("cycle_day"),
+        "streak_days": d.get("streak_days"),
+        "water_target_ml": d.get("water_target_ml"),
+    }
+    return {"code": 0, "digest": digest, "memory": mem, "kb": kb}
+
+
+class AiRecordReq(BaseModel):
+    question: str
+    answer: str
+    sources: Optional[List[dict]] = None
+
+
+@app.post("/api/ai/record")
+def ai_record(req: AiRecordReq, user: dict = Depends(get_current_user)):
+    """本机引擎查到的东西也写回同一个知识库——用户说的"共用线上知识库"就是这条通道。"""
+    q = (req.question or "").strip()[:120]
+    a = (req.answer or "").strip()[:1200]
+    if not q or not a:
+        raise HTTPException(status_code=400, detail="问题和答案都不能为空")
+    ok, where, _ = rate_hit("rec:" + str(user["id"]), 20, 60)
+    if not ok:
+        return {"code": 0, "stored": False,
+                "msg": "回写太快了（每分钟 20 条），这条没存进知识库；计数存在 %s" % where}
+    srcs = []
+    for it in (req.sources or [])[:5]:
+        if not isinstance(it, dict):
+            continue
+        url = str(it.get("url") or "")
+        if not url.startswith("http"):
+            continue
+        srcs.append({"title": str(it.get("title") or "")[:120], "url": url[:500],
+                     "host": str(it.get("host") or urllib.parse.urlparse(url).netloc)[:80]})
+    kb_store(q, html_escape(_plain(a)), srcs, "local")
+    return {"code": 0, "stored": True, "kb_backend": "redis" if cache_get(_qkey(q)) else "sqlite"}
+
+
+class MemoryReq(BaseModel):
+    text: Optional[str] = None
+    forget_all: Optional[bool] = False
+
+
+@app.post("/api/ai/memory")
+def ai_memory(req: MemoryReq, user: dict = Depends(get_current_user)):
+    """记忆的统一写入口：本机引擎也走这里，保证两边看到同一份记忆。"""
+    if req.forget_all:
+        n = memory_forget(user["id"], "")
+        return {"code": 0, "cleared": n, "memory": memory_list(user["id"])}
+    t = (req.text or "").strip()[:120]
+    if not t:
+        raise HTTPException(status_code=400, detail="要记的内容不能为空")
+    saved = memory_put(user["id"], "记住" + t)
+    return {"code": 0, "saved": bool(saved), "memory": memory_list(user["id"])}
+
+
+@app.get("/api/dashboard/cached")
+def dashboard_cached(user: dict = Depends(get_current_user)):
+    """公开大屏用的缓存版：同一用户 8 秒内重复拉取走 Redis，不打穿到 SQLite。
+
+    大屏是自动轮询的，用户量上来后这是最先压垮数据库的一条路。
+    """
+    key = "dash:" + str(user["id"])
+    hit = cache_get(key)
+    if hit:
+        try:
+            return json.loads(hit)
+        except Exception:
+            pass
+    data = compute_dashboard_data(user)
+    payload = {"code": 0, "data": data, "cached": False}
+    cache_set(key, json.dumps(payload, ensure_ascii=False).replace("<", chr(92) + "u003c"), 8)
+    return payload
 
 
 # ==================== AI 顾问 v2 ====================
@@ -1542,6 +1786,19 @@ def synthesize(q, items, mem):
     if txt:
         return html_escape(best), "insufficient"
     return html_escape(best), "extract"
+
+
+# 版本清单：App 启动时读它决定要不要提醒更新。
+# 必须 no-cache——这条要是被缓存住，用户会永远停在旧版还以为自己最新。
+# 内容不在代码里写死，由 make_version_json.py 从 build.gradle 与 qingsu.apk 现算生成。
+@app.get("/version.json")
+def version_json():
+    path = os.path.join(WEB_DIR, "version.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="版本清单还没发布")
+    with io.open(path, "r", encoding="utf-8") as f:
+        raw = f.read()
+    return Response(content=raw, media_type="application/json", headers=_no_cache())
 
 
 @app.post("/api/ask")
@@ -1741,6 +1998,16 @@ def get_app_js():
     if os.path.exists(path):
         return FileResponse(path, media_type="application/javascript", headers=_no_cache())
     raise HTTPException(status_code=404, detail="app.js not found")
+
+# 动作关键帧表：App 从 assets 直读，网页版必须也能取到，
+# 否则网页永远只能用程序化回落，而界面看不出来差别（这条就是踩过 404 才发现的）
+@app.get("/exercise_poses.json")
+def get_exercise_poses():
+    path = os.path.join(WEB_DIR, "exercise_poses.json")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="application/json", headers=_no_cache())
+    raise HTTPException(status_code=404, detail="动作姿态表未部署")
+
 
 @app.get("/qingsu.apk")
 def download_apk():

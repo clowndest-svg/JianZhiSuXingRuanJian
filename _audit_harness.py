@@ -9,6 +9,7 @@
 import asyncio
 import html as html_lib
 import gc
+import hashlib
 from datetime import date, timedelta
 import io
 import json
@@ -145,6 +146,18 @@ def install_stub_fastapi():
                       ("fastapi.responses", rs), ("pydantic", py)]:
         sys.modules[name] = mod
     mw.cors = cors
+
+
+def reset_ask_limiter(m):
+    """重置问答限流窗口。新版计数在 Redis/内存里由 rate_reset_all_ask 清，
+    旧版只有进程内 _ask_hits 字典——两边都要真的清掉，不能因为版本没这个函数就跳过。"""
+    if hasattr(m, "rate_reset_all_ask"):
+        m.rate_reset_all_ask()
+    else:
+        try:
+            m._ask_hits.clear()
+        except Exception:
+            pass
 
 
 def load_server(source_text):
@@ -820,7 +833,7 @@ def main():
                      "snippet": html_lib.escape("过度节食会让夜间饥饿感增强&nbsp;&ensp;这点要注意"),
                      "url": "https://example.com/b", "host": "example.com"}]
         m.web_search = fake_web
-        m._ask_hits.clear()
+        reset_ask_limiter(m)
 
         u2 = mkuser("r5_ai")
         d2 = m.compute_dashboard_data(u2)
@@ -834,7 +847,7 @@ def main():
               a_bad["answer"][:130])
 
         # 2) 搜索词必须被改写，不能把整句口语直接扔进去
-        m._ask_hits.clear()
+        reset_ask_limiter(m)
         a_web = m.ask(m.AskReq(question="请问不吃晚饭真的能瘦得更快吗？"), u2)
         check("联网问题确实发过一次搜索", len(seen_queries) >= 1, seen_queries)
         rewrote = seen_queries[-1] if seen_queries else ""
@@ -850,13 +863,13 @@ def main():
 
         # 3) 模型没跑时：说人话承认是摘录，不假装有 AI
         m.llm_chat = lambda *a, **k: None
-        m._ask_hits.clear()
+        reset_ask_limiter(m)
         del seen_queries[:]
         a_no = m.ask(m.AskReq(question="喝可乐会影响减脂吗？"), u2)
         check("模型不通时明确说未运行", "本机模型未运行" in a_no["answer"], a_no["answer"][:160])
         check("未运行文案带得出真实原因", "原因：" in a_no["answer"], a_no["answer"][:200])
         # 模型回了"不够"≠模型没跑：这两种兜底话术必须不同，否则把原因赖到没发生的事实上
-        m._ask_hits.clear()
+        reset_ask_limiter(m)
         del seen_queries[:]
         m.llm_chat = lambda *a, **k: "不够"
         q_ins = "午睡多久合适？"
@@ -869,7 +882,7 @@ def main():
 
         # 4) 模型给的文本必须转义后才能出网（反射型 XSS 的新入口）
         m.llm_chat = lambda *a, **k: "好的<img src=x onerror=alert(1)>按资料是 300 到 500 kcal"
-        m._ask_hits.clear()
+        reset_ask_limiter(m)
         del seen_queries[:]
         a_xss = m.ask(m.AskReq(question="咖啡会不会影响减脂？"), u2)
         # 实现走的是剥标签（比转义更强：标签整个不存在），所以不能断言 "&lt;img 出现"，
@@ -881,7 +894,7 @@ def main():
         m.llm_chat = real_llm
 
         # 5) 长期记忆：显式写入 / 列出 / 清空
-        m._ask_hits.clear()
+        reset_ask_limiter(m)
         a_mem = m.ask(m.AskReq(question="记住我不吃香菜和动物内脏"), u2)
         check("记住某事写入成功", a_mem["source"] == "memory" and "不吃香菜" in a_mem["answer"],
               a_mem["answer"][:120])
@@ -893,23 +906,23 @@ def main():
         b_ls = m.ask(m.AskReq(question="你记得我什么"), u3)
         check("别的用户查不到这条记忆", "香菜" not in b_ls["answer"], b_ls["answer"][:120])
         check("记忆确实是空的那一位", "还没有" in b_ls["answer"], b_ls["answer"][:120])
-        m._ask_hits.clear()
+        reset_ask_limiter(m)
         a_forget = m.ask(m.AskReq(question="把记住的删掉，忘记所有"), u2)
         check("可一键清空记忆",
               a_forget["source"] == "memory" and "清空" in a_forget["answer"], a_forget["answer"][:120])
         check("清空后确实查不到", "香菜" not in m.memory_list(u2["id"]), m.memory_list(u2["id"]))
 
         # 7) 知识库：同问题第二次不该再抓一次必应，且要说明这不是实时结果
-        m._ask_hits.clear()
+        reset_ask_limiter(m)
         del seen_queries[:]
         q_kb = "嚼口香糖会不会影响减脂？"
         a1 = m.ask(m.AskReq(question=q_kb), u2)
         n1 = len(seen_queries)
-        m._ask_hits.clear()
+        reset_ask_limiter(m)
         a2 = m.ask(m.AskReq(question=q_kb), u2)
         # source 与答案来历必须一致：模型说"不够"时是摘录，不许标成 web_model
         check("摘录兜底不冒充模型合成", a_no["source"] == "web", a_no["source"])
-        m._ask_hits.clear()
+        reset_ask_limiter(m)
         del seen_queries[:]
         m.llm_chat = lambda *a, **k: "黑咖啡对减脂没有直接作用，关键是总热量。"
         q_ok = "喝牛奶会影响减脂吗？"
@@ -928,6 +941,124 @@ def main():
         check("kb_entries 表存在", "kb_entries" in tables, tables)
 
         m.web_search = real_web
+
+
+    # ============ 第五批后续：Redis 限流、AI 引擎端点、版本清单 ============
+    R6_NAMES = [
+        "rate_hit 返回三元组且标明计数存放处", "rate_hit 超上限后拒绝",
+        "Redis 不通时限流退回内存而不是放行", "Redis 不通时不抛异常",
+        "ai_status 报三态字段", "ai_context 给出本人真实摘要",
+        "ai_context 未登录取不到", "ai_record 空答案被拒",
+        "ai_record 写入后另一账号可命中同一知识库", "ai_record 拒绝非 http 来源",
+        "version.json 路由存在", "version.json 字段齐且与实际包体一致",
+        "版本清单走 no-cache", "RegisterReq 不再带身体默认值",
+    ]
+    if not hasattr(m, "rate_hit") or not hasattr(m, "ai_status"):
+        for nm in R6_NAMES:
+            check(nm, False, "该版本没有对应实现")
+    else:
+        u6 = mkuser("r6_ai")
+        # 用 mkuser 返回的整行当 user：手搓字段会漏掉 nickname，
+        # 而 compute_dashboard_data 要读它——漏了就变成测试自己把产品测崩
+        user6 = u6
+
+        # 本机 6379 上真有个 RESP 服务（另一个项目留的），键会跨次存活：
+        # 不先清窗口，第一次就会读到上一轮遗留的计数，判据不幂等
+        m.rate_reset("r6:test")
+        ok_a, where_a, n_a = m.rate_hit("r6:test", 2, 60)
+        ok_b, _w2, _n2 = m.rate_hit("r6:test", 2, 60)
+        ok_c, _w3, _n3 = m.rate_hit("r6:test", 2, 60)
+        check("rate_hit 返回三元组且标明计数存放处", where_a in ("redis", "memory"), where_a)
+        check("rate_hit 超上限后拒绝", (ok_a and ok_b) and ok_c is False, (ok_a, ok_b, ok_c))
+        check("rate_reset 能清掉窗口", (n_a == 1) and (ok_a is True), (n_a, ok_a))
+
+        # Redis 不可用时必须退回内存计数，既不能放行也不能整个接口报错
+        real_cmd = m._redis_cmd
+        m._redis_cmd = lambda *a, **k: (False, None)
+        m._mem_buckets.clear()
+        try:
+            res = [m.rate_hit("r6:fallback", 1, 60) for _ in range(2)]
+            check("Redis 不通时限流退回内存而不是放行",
+                  res[0][0] is True and res[1][0] is False and res[0][1] == "memory", res)
+            check("Redis 不通时不抛异常", m.redis_up() is False, "")
+        except Exception as e:
+            check("Redis 不通时限流退回内存而不是放行", False, "抛了 " + repr(e))
+            check("Redis 不通时不抛异常", False, repr(e))
+        finally:
+            m._redis_cmd = real_cmd
+
+        st = m.ai_status(user=user6)
+        check("ai_status 报三态字段",
+              set(["server_model", "redis", "model_name"]).issubset(set(st.keys())), st)
+        check("RegisterReq 不再带身体默认值",
+              getattr(m.RegisterReq, "age", None) is None
+              and getattr(m.RegisterReq, "weight_jin", None) is None,
+              (getattr(m.RegisterReq, "age", "?"), getattr(m.RegisterReq, "weight_jin", "?")))
+
+        ctx = m.ai_context(user=user6)
+        dg = ctx.get("digest") or {}
+        check("ai_context 给出本人真实摘要",
+              "weight_jin" in dg and "budget_cal" in dg and "remaining_cal" in dg, dg)
+        # 直接传 user=None 只会抛 TypeError，测不到鉴权；鉴权是 Depends 层的事，
+        # 所以这里核对源码确实挂了 get_current_user，再由公网那条真请求兜底
+        ctx_src = srv_txt[srv_txt.index("def ai_context"):srv_txt.index("def ai_context") + 400]
+        check("ai_context 未登录取不到", "Depends(get_current_user)" in ctx_src, ctx_src[:120])
+
+        try:
+            m.ai_record(m.AiRecordReq(question="x", answer=""), user=user6)
+            check("ai_record 空答案被拒", False, "没抛异常")
+        except Exception as e:
+            check("ai_record 空答案被拒", getattr(e, "status_code", 0) == 400,
+                  getattr(e, "status_code", 0))
+        r_bad = m.ai_record(m.AiRecordReq(question="javascript 注入", answer="内容",
+                                          sources=[{"title": "t", "url": "javascript:alert(1)",
+                                                    "host": "x"}]), user=user6)
+        kb_rows = q("SELECT sources FROM kb_entries WHERE qkey = ?", (m._qkey("javascript 注入"),))
+        check("ai_record 拒绝非 http 来源",
+              bool(kb_rows) and "javascript:" not in kb_rows[0]["sources"],
+              kb_rows[0]["sources"][:80] if kb_rows else "没落库")
+        u7 = mkuser("r6_ai2")
+        user7 = u7
+        kb2 = m.kb_lookup("javascript 注入")
+        check("ai_record 写入后另一账号可命中同一知识库", bool(kb2), kb2 and kb2.get("answer"))
+
+        # 版本清单：路由存在、字段齐、且与实际躺在盘上的包体一致（防手抄）
+        # 框架 stub 不注册路由，读 m.routes 永远是空——那等于没测。改核源码里的装饰器。
+        check("version.json 路由存在", '@app.get("/version.json")' in srv_txt, "源码里找不到该路由")
+        check("动作姿态表有公网路由",
+              '@app.get("/exercise_poses.json")' in srv_txt, "网页版会 404 只能走回落")
+        # 断言里要拼出的是 @app.get("/app.js") 这样的完整串，
+        # 上一版把 + f 写进了字符串字面量，于是四项全"找不到"——判据自己假红
+        STATIC_ROUTES = ["app.js", "style.css", "exercise_poses.json", "version.json"]
+        missing_routes = [f for f in STATIC_ROUTES
+                          if ('@app.get("/' + f + '")') not in srv_txt]
+        check("静态件都有显式公网路由", not missing_routes, missing_routes)
+        # 核的是仓库里那份将要发布的清单，对的是仓库里那个 apk——这条专门防手抄错 md5
+        vpath = os.path.join(ROOT, "app", "src", "main", "web_version.json")
+        apkpath = os.path.join(ROOT, "qingsu.apk")
+        if os.path.exists(vpath) and os.path.exists(apkpath):
+            vj = json.loads(io.open(vpath, encoding="utf-8").read())
+            blob = io.open(apkpath, "rb").read()
+            gradle = io.open(os.path.join(ROOT, "app", "build.gradle"), encoding="utf-8").read()
+            import re as _re
+            gcode = _re.search(r"versionCode\s+(\d+)", gradle)
+            check("version.json 字段齐且与实际包体一致",
+                  all(k in vj for k in ("version_code", "version_name", "apk_url", "size", "md5"))
+                  and vj["md5"] == hashlib.md5(blob).hexdigest()
+                  and vj["size"] == len(blob)
+                  and gcode is not None and int(gcode.group(1)) == vj["version_code"],
+                  {"清单md5": str(vj.get("md5"))[:8], "实际md5": hashlib.md5(blob).hexdigest()[:8],
+                   "清单size": vj.get("size"), "实际size": len(blob),
+                   "gradle_code": gcode.group(1) if gcode else "?", "清单code": vj.get("version_code")})
+        else:
+            check("version.json 字段齐且与实际包体一致", False,
+                  "缺文件：web_version.json=%s qingsu.apk=%s"
+                  % (os.path.exists(vpath), os.path.exists(apkpath)))
+        vsrc = srv_txt[srv_txt.index('@app.get("/version.json")'):][:900]
+        check("版本清单走 no-cache", "headers=_no_cache()" in vsrc, vsrc[:160])
+        check("版本清单不写死版本号", "version_code" not in vsrc.split("def version_json")[1][:400]
+              or "WEB_DIR" in vsrc, "路由里疑似硬编版本")
+        q("DELETE FROM kb_entries")
 
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (

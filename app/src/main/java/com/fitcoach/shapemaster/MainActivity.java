@@ -84,6 +84,9 @@ public class MainActivity extends Activity {
 
         // 开 App 先查通知权限：没授权就弹说明并送到系统设置
         checkNotificationPermissionOnLaunch();
+
+        // 启动即在原生层查一次线上版本：页面自己加载失败时更要能提醒更新
+        UpdateManager.check(this, false);
     }
 
     // ================= 第五批：开 App 先查通知权限 =================
