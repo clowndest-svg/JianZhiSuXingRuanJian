@@ -158,7 +158,60 @@ curl -s --max-time 180 -o /tmp/chk.apk http://124.220.54.64/qingsu.apk && md5sum
 python remote_exec.py "cd /opt/qingsu && cp server.py.bak-raudit server.py && cp web/app.js.bak-raudit web/app.js && cp web/qingsu.apk.bak-raudit web/qingsu.apk && systemctl restart qingsu"
 ```
 
-**遗留脏数据**：改代码不会让历史库里那条伪造的 `waist_cm=78.0` 消失。本轮之前注册的用户，`weight_logs` 首条与 `body_cycles` 第 1 周期的腰围仍是 78，他们第一次提交周期照时依然会算出一个假的围度增减。上面第一条命令量到的就是涉及多少人；要不要清是数据决定，得单独定，别顺手 `UPDATE`。
+**遗留脏数据**：改代码不会让历史库里那条伪造的 `waist_cm=78.0` 消失。本轮之前注册的用户，`weight_logs` 首条与 `body_cycles` 第 1 周期的腰围仍是 78，他们第一次提交周期照时依然会算出一个假的围度增减。清理脚本见下，**必须在部署新版后端之后跑**，顺序反了会白清一遍。
+
+### 清理注册时伪造的 78cm 腰围
+
+先备份库（用 sqlite3 的 `.backup` 而不是 `cp`，服务在写的时候直接拷文件可能拷到半截页）：
+
+```bash
+python remote_exec.py "sqlite3 /opt/qingsu/data/qingsu.db '.backup /opt/qingsu/data/qingsu.db.bak-raudit' && ls -l /opt/qingsu/data/"
+```
+
+**判据要先看清，不能拿 `WHERE waist_cm=78.0` 一把梭**——78 cm 是一个完全可能的真实腰围。只清"注册那一刻由服务端自动生成"的行，用账号创建时间戳做身份指纹：
+
+```sql
+-- 1) 先看命中范围（应远小于"所有等于78的行"）
+SELECT 'wl_注册生成='||count(*) FROM weight_logs
+ WHERE waist_cm=78.0 AND (user_id, created_at) IN (SELECT id, created_at FROM users);
+SELECT 'wl_真实78='||count(*) FROM weight_logs
+ WHERE waist_cm=78.0 AND (user_id, created_at) NOT IN (SELECT id, created_at FROM users);
+SELECT 'bc1_注册生成='||count(*) FROM body_cycles WHERE cycle_num=1 AND waist_cm=78.0;
+
+-- 2) 归零：注册那条体重记录
+UPDATE weight_logs SET waist_cm=0
+ WHERE waist_cm=78.0 AND (user_id, created_at) IN (SELECT id, created_at FROM users);
+
+-- 3) 归零 + 对齐新版口径：第 1 周期
+UPDATE body_cycles SET waist_cm=0, tone_score='待首次打卡'
+ WHERE cycle_num=1 AND waist_cm=78.0;
+
+-- 4) 被这个假基准污染过的后续周期报告：围度结论标注为无效
+UPDATE body_cycles
+   SET tone_score='历史数据（围度基准无效）',
+       ai_report='<p style="color:#B45309;">⚠️ 本次对比的上一周期腰围为系统早期预填值，该条围度结论无效，请以最新一次提交为准。</p>' || ai_report
+ WHERE (user_id, cycle_num) IN (
+     SELECT c2.user_id, c2.cycle_num
+       FROM body_cycles c1
+       JOIN body_cycles c2 ON c2.user_id = c1.user_id AND c2.cycle_num = c1.cycle_num + 1
+      WHERE c1.cycle_num = 1 AND c1.waist_cm = 78.0);
+```
+
+第 4 条用的是子查询而不是 `UPDATE ... FROM`，因为 `UPDATE...FROM` 要 SQLite 3.33+，服务器上的 sqlite3 版本没量过，别赌。同理 `.backup` / `.restore` 要 3.27+，跑第一句时若报 `unknown command`，就改用 `systemctl stop qingsu && cp /opt/qingsu/data/qingsu.db /opt/qingsu/data/qingsu.db.bak-raudit && systemctl start qingsu`。
+
+第 4 条要在第 3 条**之前**跑（它靠 `c1.waist_cm=78.0` 找受害者，基准被归零后就找不到了）。正确顺序：备份 → 查命中范围 → 第 4 条 → 第 3 条 → 第 2 条。
+
+跑完独立复核，三条都必须成立：
+
+```sql
+SELECT '残留bc1='||count(*) FROM body_cycles WHERE cycle_num=1 AND waist_cm=78.0;  -- 必须 0
+SELECT '残留wl='||count(*) FROM weight_logs
+ WHERE waist_cm=78.0 AND (user_id, created_at) IN (SELECT id, created_at FROM users);  -- 必须 0
+SELECT 'users='||count(*) FROM users;   -- 与清理前一致
+SELECT 'food='||count(*) FROM food_logs; -- 与清理前一致（本清理不该碰饮食）
+```
+
+真实测过 78cm 的用户（第 1 条查询里的 `wl_真实78`）不该被动过，复核时他们的值仍应是 78.0。回滚只需要一句：`sqlite3 /opt/qingsu/data/qingsu.db '.restore /opt/qingsu/data/qingsu.db.bak-raudit'`（服务需先 `systemctl stop qingsu`）。
 
 ---
 
