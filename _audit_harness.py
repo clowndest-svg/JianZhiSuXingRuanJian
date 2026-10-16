@@ -918,14 +918,14 @@ def main():
         m.llm_chat = lambda *a, **k: None
         reset_ask_limiter(m)
         del seen_queries[:]
-        a_no = m.ask(m.AskReq(question="喝可乐会影响减脂吗？"), u2)
+        a_no = m.ask(m.AskReq(question="吃苹果会不会影响减脂吗？"), u2)
         check("模型不通时明确说未运行", "本机模型未运行" in a_no["answer"], a_no["answer"][:160])
         check("未运行文案带得出真实原因", "原因：" in a_no["answer"], a_no["answer"][:200])
         # 模型回了"不够"≠模型没跑：这两种兜底话术必须不同，否则把原因赖到没发生的事实上
         reset_ask_limiter(m)
         del seen_queries[:]
         m.llm_chat = lambda *a, **k: "不够"
-        q_ins = "午睡多久合适？"
+        q_ins = "喝酸奶会不会影响减脂吗？"
         a_ins = m.ask(m.AskReq(question=q_ins), u2)
         check("资料不足与模型未运行文案分开",
           "资料不足以回答" in a_ins["answer"] and "本机模型未运行" not in a_ins["answer"],
@@ -968,7 +968,7 @@ def main():
         # 7) 知识库：同问题第二次不该再抓一次必应，且要说明这不是实时结果
         reset_ask_limiter(m)
         del seen_queries[:]
-        q_kb = "喝奶茶会不会影响减脂？"
+        q_kb = "喝牛奶会不会影响减脂？"
         a1 = m.ask(m.AskReq(question=q_kb), u2)
         n1 = len(seen_queries)
         reset_ask_limiter(m)
@@ -978,7 +978,7 @@ def main():
         reset_ask_limiter(m)
         del seen_queries[:]
         m.llm_chat = lambda *a, **k: "黑咖啡对减脂没有直接作用，关键是总热量。"
-        q_ok = "喝牛奶会影响减脂吗？"
+        q_ok = "吃香蕉会不会影响减脂吗？"
         a_ok = m.ask(m.AskReq(question=q_ok), u2)
         check("模型真合成时标 web_model", a_ok["source"] == "web_model", a_ok["source"])
         m.llm_chat = lambda *a, **k: None
@@ -1112,6 +1112,30 @@ def main():
         check("版本清单不写死版本号", "version_code" not in vsrc.split("def version_json")[1][:400]
               or "WEB_DIR" in vsrc, "路由里疑似硬编版本")
         q("DELETE FROM kb_entries")
+
+    # 评测里抓到的两条真 bug，各钉一条
+    reset_ask_limiter(m)
+    q("DELETE FROM kb_entries")
+    a_gum = m.ask(m.AskReq(question="嚼口香糖会不会影响减脂"), user)
+    check("单字糖不会把口香糖抢进奶茶场景",
+          "想喝甜的" not in a_gum.get("answer", "") and a_gum["source"] in ("none", "limited"),
+          "%s %s" % (a_gum["source"], a_gum.get("answer", "")[:90]))
+    a_last = m.ask(m.AskReq(question="我上次训练是什么时候"), user)
+    check("上次训练走本人流水不掉联网",
+          a_last["source"] == "data" and ("训练记录在" in a_last["answer"] or "还没有任何训练记录" in a_last["answer"]),
+          "%s %s" % (a_last["source"], a_last["answer"][:100]))
+    a_cake = m.ask(m.AskReq(question="明天能不能吃一整个蛋糕"), user)
+    check("预测型提问给算法不给承诺", a_cake["source"] == "scene" and "7700" in a_cake["answer"],
+          "%s %s" % (a_cake["source"], a_cake["answer"][:100]))
+    a_period = m.ask(m.AskReq(question="生理期要不要停训练"), user)
+    check("生理期不被训练流水抢走", a_period["source"] == "scene" and "生理期" in a_period["answer"],
+          "%s %s" % (a_period["source"], a_period["answer"][:90]))
+    # 场景层与无领域词的拒绝都不该吃联网配额
+    reset_ask_limiter(m)
+    for _i in range(14):
+        m.ask(m.AskReq(question="量子计算是什么"), user)
+    a_after2 = m.ask(m.AskReq(question="吃苹果会不会影响减脂"), user)
+    check("拒答不耗尽联网配额", a_after2["source"] != "limited", a_after2["source"])
 
     reset_ask_limiter(m)
     q("DELETE FROM kb_entries")
@@ -1270,13 +1294,17 @@ def main():
     # 这类字典页；"减脂+整句"则永远返回同三篇泛泛减脂科普；"平台期体重不掉"返回
     # 微信公众平台，"黑咖啡"返回网易邮箱。所以联网只能当"有对题命中才允许出现"的
     # 参考，答案本体一律来自本人流水与内置场景库。
-    check("场景库存在且覆盖六个场景", len(getattr(m, "SCENE_RULES", [])) == 6,
+    check("场景库存在且覆盖十八个场景", len(getattr(m, "SCENE_RULES", [])) >= 18,
           len(getattr(m, "SCENE_RULES", [])))
     js_terms_sets = set(re.findall(r'q\.includes\("([^"]+)"\)', js_txt))
     srv_terms_sets = set(k for keys, _t in getattr(m, "SCENE_RULES", []) for k in keys)
-    check("前后端场景关键词一致", js_terms_sets == srv_terms_sets,
-          "只在服务端: %s 只在前端: %s" % (sorted(srv_terms_sets - js_terms_sets),
-                                            sorted(js_terms_sets - srv_terms_sets)))
+    # 服务端是权威一份（场景更多），前端本地层只要求是它的子集，不许有服务端没有的词
+    check("前端场景词都在服务端里", js_terms_sets <= srv_terms_sets,
+          "只在前端: %s" % sorted(js_terms_sets - srv_terms_sets))
+    check("场景关键词不许用单字", not [k for k in srv_terms_sets if len(k) < 2],
+          sorted(k for k in srv_terms_sets if len(k) < 2))
+    check("场景库扩到十八条", len(getattr(m, "SCENE_RULES", [])) >= 18,
+          len(getattr(m, "SCENE_RULES", [])))
 
     probe = []
     m.web_search = lambda query, limit=4: (probe.append(query), [
@@ -1317,7 +1345,7 @@ def main():
     for _i in range(25):
         m.ask(m.AskReq(question="在外聚餐吃火锅该怎么点"), user)
     del probe[:]
-    a_after = m.ask(m.AskReq(question="喝奶茶会不会影响减脂"), user)
+    a_after = m.ask(m.AskReq(question="吃苹果会不会影响减脂"), user)
     check("连问场景不耗尽联网配额", len(probe) == 1 and a_after["source"] != "limited",
           "probe=%d source=%s" % (len(probe), a_after["source"]))
 

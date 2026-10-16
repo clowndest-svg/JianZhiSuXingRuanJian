@@ -4040,7 +4040,7 @@ function generateAiResponse(query) {
 2. <strong>查记录而不是查代谢：</strong>翻看【图表】的赤字柱，连续 2 天以上缺口归零多半是漏记的酱料、油、饮品，身体不会骗人，记录会；<br>
 3. <strong>真到平台期再动两件事：</strong>把主食按现有量减 1/4（不砍蛋白质），并把运动日改成 2 次短时快走替代长时间同强度有氧；连着两周不动且腰围也不降，再来找我调整身形目标。`;
     }
-    if (q.includes("很饿") || q.includes("饿") || q.includes("能吃什么") || q.includes("练完") || q.includes("运动完")) {
+    if (q.includes("很饿") || q.includes("饿了") || q.includes("能吃什么") || q.includes("练完") || q.includes("运动完")) {
         return `🍽️ <strong>练后饿的正确吃法（不是忍着）：</strong><br>
 1. <strong>练后 1 小时内补：</strong>蛋白质 20-30g + 少量慢碳，例：无糖希腊酸奶 100g + 半根玉米，约 180-220 kcal；<br>
 2. <strong>怕睡前长肉就选高 Volume 低热量：</strong>冬瓜虾滑汤、菌菇豆腐汤、焯拌黄瓜鸡蛋，胃填满而热量不到 200 kcal；<br>

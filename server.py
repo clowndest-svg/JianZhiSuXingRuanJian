@@ -745,6 +745,18 @@ def compute_dashboard_data(user: dict) -> dict:
         else:
             break
 
+    # 最近一次训练的真实日期：数据层要能回答"上次是什么时候"，
+    # 否则这句会被丢给联网，回一句百科页里的日期糊弄人
+    c.execute("SELECT log_date, cal_burned FROM workout_logs WHERE user_id = ? "
+              "ORDER BY log_date DESC LIMIT 1", (user["id"],))
+    lw = c.fetchone()
+    if lw:
+        last_workout_date = lw["log_date"]
+        last_workout_cal = lw["cal_burned"] or 0
+        last_workout_ago = (date.today() - date.fromisoformat(lw["log_date"])).days
+    else:
+        last_workout_date, last_workout_cal, last_workout_ago = None, 0, 0
+
     # 外卖自律真实统计：只算盘上有记录的事件，没有任何事件就是 0
     week_start = (date.today() - timedelta(days=date.today().weekday())).isoformat()
     c.execute("SELECT event_type, COALESCE(SUM(cal_avoided),0) as cal_sum, COUNT(*) as n "
@@ -843,6 +855,9 @@ def compute_dashboard_data(user: dict) -> dict:
         "takeout_warning": takeout_warning,
         "consecutive_over_days": consecutive_over,
         "consecutive_slacking_days": consecutive_slacking,
+        "last_workout_date": last_workout_date,
+        "last_workout_days_ago": last_workout_ago,
+        "last_workout_cal": last_workout_cal,
         "latest_cycle": dict(latest_cycle) if latest_cycle else None,
         "body_suspect": body_looks_invented(p),
         "over_cal_total": over_cal_total,
@@ -1466,7 +1481,9 @@ def answer_from_user_data(q, d):
             line += f"；按最近几天的真实速率，约还需 {d['eta_days']} 天到达标（速率一变就会重算，不是承诺）"
         return line + "。以上都来自你自己的打卡记录，没有补录也没有估算。"
 
-    if any(k in q for k in ("还剩", "额度", "能吃", "还能吃", "余量")):
+    # "明天能不能吃一整个蛋糕"问的是未来那一顿，不是今天剩多少额度——
+    # 让它落到场景层给折算算法，别用今天的余额糊过去
+    if any(k in q for k in ("还剩", "额度", "能吃", "还能吃", "余量"))             and not any(k in q for k in ("明天", "后天", "一整个", "一顿吃完")):
         return (f"今天是{mode_txt}，预算 <strong>{d['budget_cal']} kcal</strong>，"
                 f"还能吃 <strong>{d['remaining_cal']} kcal</strong>"
                 f"（已摄入 {consumed}，训练已消耗 {burned}）。"
@@ -1507,11 +1524,24 @@ def answer_from_user_data(q, d):
         return (f"今天累计摄入 <strong>{consumed} kcal</strong>，共 {len(meals)} 条：{names}。"
                 f"注意这些热量是系统按菜名关键词粗估的，不是营养成分表数据。")
 
-    if any(k in q for k in ("练了", "训练", "运动了吗", "打卡了吗")):
+    # 这一支只回答"我练了没有/练掉多少"，所以"要不要练/停不停"这类方法问句必须让路，
+    # 否则"生理期要不要停训练"会被一句流水数字顶掉。
+    if any(k in q for k in ("练了", "练过", "训练了吗", "今天练", "打卡了吗", "练得")) \
+            and not any(k in q for k in ("要不要", "该不该", "能不能", "可不可以", "停", "要不要")):
         done = "今天已有训练记录" if d.get("today_workout_done") else "今天还没有训练记录"
-        tail = (f"，已连续 {d['consecutive_slacking_days']} 天没练"
+        # 这个天数是从昨天往前数的，说成"已连续 N 天没练"会和上一句"今天已练"打脸
+        tail = (f"；今天之前已连续 {d['consecutive_slacking_days']} 天没练"
                 if d.get("consecutive_slacking_days") else "")
         return f"{done}，训练消耗记录为 <strong>{burned} kcal</strong>{tail}。"
+
+    if any(k in q for k in ("上次训练", "最近一次练", "哪天练", "几天没练", "练于")):
+        last = d.get("last_workout_date")
+        if not last:
+            return "还没有任何训练记录，所以没有「上次」可说。第一次练完点【记录今日训练打卡】才会有日期。"
+        return (f"最近一次训练记录在 <strong>{html_escape(last)}</strong>"
+                f"（{d.get('last_workout_days_ago', 0)} 天前），"
+                f"当时记的消耗是 <strong>{d.get('last_workout_cal', 0)} kcal</strong>。"
+                f"今天{'已经练过' if d.get('today_workout_done') else '还没练'}。")
 
     if any(k in q for k in ("缺口", "赤字", "净缺")):
         if not consumed and not burned:
@@ -2043,23 +2073,38 @@ def _fmt_snippet(it):
     return "%s：%s" % (_plain(it["title"]), _plain(it["snippet"]))
 
 
-def synthesize(q, items, mem):
+def _rank_items(items, terms):
+    """摘录兜底取的是 items[0]——那条恰好是"能量守恒"就完蛋了。
+    按"标题命中领域词 > 摘要命中次数"排过再取，兜底的那一段才是真的最相关。"""
+    def score(it):
+        title = it.get("title") or ""
+        snip = it.get("snippet") or ""
+        return (2 if any(t in title for t in terms) else 0) + sum(snip.count(t) for t in terms)
+    return sorted(items, key=score, reverse=True)
+
+
+def synthesize(q, items, mem, terms=None):
     """有模型：照资料组织，禁止补资料里没有的数字。
     没模型：直接把最相关一条的原文摘出来，并标注是摘录。两条路都不给它自由发挥。"""
     if not items:
         return None, "none"
-    ctx = "\n".join("- " + _fmt_snippet(it) for it in items[:3])
+    ranked = _rank_items(items, terms or [])
+    ctx = "\n".join("- " + _fmt_snippet(it) for it in ranked[:3])
     if mem:
         ctx += "\n（此人此前明确记下的：" + "；".join(mem[:5]) + "）"
     prompt = ("你在帮一个减脂用户查资料。只准用【资料】里的内容回答，"
-              "资料里没有的数字、剂量、结论一律不许出现；用中文两三句话说完，"
-              "不要复述问题。若资料不足以回答，就只回两个字：不够。\n"
+              "资料里没有的数字、剂量、结论一律不许出现；"
+              "先给一句结论，再补最多两句依据，用中文说完，不复述问题；"
+              "不要写\"作为一个\"\"作为AI\"\"建议您\"\"抱歉\"\"无法回答\"这类话，"
+              "资料互相矛盾时直说矛盾在哪。"
+              "若资料不足以回答，就只回两个字：不够。\n"
               "【资料】\n%s\n【问题】%s\n【回答】" % (ctx, q))
-    txt = llm_chat(prompt)
+    # 这是"照着资料归纳"，不是创作：温度压到 0.1，模型越自由越容易补出资料里没有的数字
+    txt = llm_chat(prompt, temperature=0.1)
     if txt and "不够" not in txt[:6]:
         clean = html_escape(_plain(txt)[:600])
         return clean, "model"
-    best = _plain(items[0]["snippet"])[:220]
+    best = _plain(ranked[0]["snippet"])[:220]
     # 模型说"不够"和模型根本没跑是两回事，兜底文案必须分开——
     # 把前者写成后者就是把原因赖到一个没发生的事实上
     if txt:
@@ -2091,19 +2136,151 @@ SCENE_RULES = [
      '📷 <strong>形体周期更新与身材照追踪指南：</strong><br>\n1. <strong>多图挑选心仪身材：</strong>在【形体照】或顶部【👤档案】中，点击图示即可在【S型沙漏马甲线 / 修长轻盈 / 健美微肌 / 大基数脱脂】间自由切换，规划会自动联动！<br>\n2. <strong>周期拍照对比：</strong>每 7 天在【形体照】上传或拍摄空腹身材照，记录腰围变化；<br>\n3. <strong>更新下一周期规划：</strong>提交后点击【更新规划】，系统会根据你的蜕变数据，自动把下一周期的训练动作与饮食方案进阶升级！'),
     (('平台期', '不掉了', '不掉', '卡住'),
      '🛑 <strong>体重平台期先别加练饿肚子，按这三步查因：</strong><br>\n1. <strong>先分清真假平台期：</strong>连续 3 天晨起空腹同条件称重，波动在 ±0.6 斤内且围度仍在降，是水分波动不是平台；<br>\n2. <strong>查记录而不是查代谢：</strong>翻看【图表】的赤字柱，连续 2 天以上缺口归零多半是漏记的酱料、油、饮品，身体不会骗人，记录会；<br>\n3. <strong>真到平台期再动两件事：</strong>把主食按现有量减 1/4（不砍蛋白质），并把运动日改成 2 次短时快走替代长时间同强度有氧；连着两周不动且腰围也不降，再来找我调整身形目标。'),
-    (('很饿', '饿', '能吃什么', '练完', '运动完'),
+    (('很饿', '饿了', '能吃什么', '练完', '运动完'),
      '🍽️ <strong>练后饿的正确吃法（不是忍着）：</strong><br>\n1. <strong>练后 1 小时内补：</strong>蛋白质 20-30g + 少量慢碳，例：无糖希腊酸奶 100g + 半根玉米，约 180-220 kcal；<br>\n2. <strong>怕睡前长肉就选高 Volume 低热量：</strong>冬瓜虾滑汤、菌菇豆腐汤、焯拌黄瓜鸡蛋，胃填满而热量不到 200 kcal；<br>\n3. <strong>别用"练过了"当加餐理由：</strong>今日打卡的训练消耗只按 220 kcal 记账，喝一杯奶茶就抵光了；<br>\n4. 真饿得难受，先喝 300ml 温水等 10 分钟，仍饿就按上面第 2 条吃，不要跳过头餐。'),
     (('火锅', '聚餐'),
      '🍲 <strong>在外吃火锅必胜避坑守则（国内适用）：</strong><br>\n1. <strong>锅底：</strong>坚决选清汤/菌菇锅，杜绝牛油红油！<br>\n2. <strong>蘸料：</strong>薄盐生抽+香醋+蒜泥+小米辣（不要麻酱与香油，立省300kcal）！<br>\n3. <strong>点菜：</strong>多点精瘦牛肉、大虾仁、鲜毛肚、冬瓜、萝卜；炸响铃与冻豆腐千万别下辣汤！<br>\n4. <strong>顺序：</strong>先喝清汤 ➔ 蔬菜 ➔ 肉蛋 ➔ 最后吃少许玉米土豆！'),
 ]
 
 
+SCENE_RULES += [
+    (("生理期", "月经", "大姨妈", "姨妈期", "经期"),
+     "🩸 <strong>生理期不是停练的理由，但这两件事要改：</strong><br>\n"
+     "1. <strong>强度降一档就行，别停：</strong>把深蹲/硬拉这类大重量换成中等重量、组数减 1/3，"
+     "或改成快走与拉伸；经期第 1-3 天如果腹痛，休息也是按计划，不是偷懒。<br>\n"
+     "2. <strong>体重涨 1-3 斤是水分，不是脂肪：</strong>这段时间不要称重，"
+     "也别因为数字上涨去砍额度——按 7700 kcal 折脂肪，几天内根本造不出那 1 斤。<br>\n"
+     "3. <strong>食欲变强就加蛋白质和慢碳，不是忍着：</strong>鸡蛋、无糖酸奶、玉米、红薯排在前面，"
+     "巧克力奶茶换成热牛奶加少量黑巧；铁和维 C 从瘦牛肉、菠菜、橙子拿。<br>\n"
+     "4. 本系统不做诊断。经量骤增、痛到影响日常、周期突然紊乱，请去医院，不要在这里找答案。"),
+    (("代餐", "蛋白粉", "增肌粉", "补剂", "左旋肉碱", "酵素", "白芸豆", "阻断", "燃脂丸"),
+     "💊 <strong>补剂的实话，按值不值得花钱排：</strong><br>\n"
+     "1. <strong>可以买：</strong>蛋白粉（只是方便凑蛋白，食物够就不需要）、肌酸（最便宜、证据最足的力量补剂）、"
+     "维生素 D（少见日照的人）。<br>\n"
+     "2. <strong>别指望：</strong>左旋肉碱、酵素、白芸豆提取物、各类\"燃脂丸\"——它们改变的是账单，不是体脂。<br>\n"
+     "3. <strong>代餐能顶一时不能替你吃饭：</strong>一餐代餐通常 150-250 kcal，长期当正餐会掉肌肉、"
+     "反弹更快；应急一次可以，天天用就是给自己埋坑。<br>\n"
+     "4. 任何写着\"不运动不节食月瘦 X 斤\"的产品，直接跳过。涉及用药必须问医生。"),
+    (("便秘", "拉不出", "排便"),
+     "🚽 <strong>减脂期便秘是四件事凑出来的，按顺序补：</strong><br>\n"
+     "1. <strong>吃太少：</strong>残渣不够就没有便意。先把蔬菜加到每餐一拳头以上（西兰花、菠菜、冬瓜）。<br>\n"
+     "2. <strong>水不够：</strong>目标按体重算，每公斤 35 ml。你现在这个体量大约要 2500-3000 ml，"
+     "分次喝，别一次灌。<br>\n"
+     "3. <strong>油太狠：</strong>完全无油会滑不动肠道。每天留 20-30 g 真油（做菜用的，不是油炸）。<br>\n"
+     "4. <strong>动起来：</strong>每天 20 分钟快走 + 腹部按摩，比任何\"清肠茶\"都可靠。"
+     "超过一周不排便伴腹痛、带血，去医院，别在这里问。"),
+    (("睡眠", "失眠", "熬夜", "睡不够", "睡不好"),
+     "😴 <strong>睡不够会让减脂更难，机制很实在：</strong><br>\n"
+     "1. <strong>饿素升、瘦素降：</strong>熬夜后第二天食欲明显变强，尤其想吃甜的油的，"
+     "这不是你意志力差，是激素在推你。<br>\n"
+     "2. <strong>掉的多是肌肉：</strong>同样减重，睡 5.5 小时比 7.5 小时掉的有效瘦体重更多，"
+     "基础代谢跟着降。<br>\n"
+     "3. <strong>能做的三件：</strong>固定起床时间（比固定睡觉更有用）、睡前 1 小时离开手机、"
+     "下午 3 点后不再摄入咖啡因。<br>\n"
+     "4. 长期失眠请就医，本系统不诊断。"),
+    (("波动", "早上重", "晚上重", "一天", "忽高忽低", "重了", "轻了"),
+     "⚖️ <strong>一天之内体重差 1-3 斤是正常的，别被它牵着走：</strong><br>\n"
+     "1. <strong>差的是水和食物残渣，不是脂肪：</strong>一顿咸的、一杯奶茶、一次没排便，"
+     "都能让秤上浮两斤；反过来出身汗就掉一斤。<br>\n"
+     "2. <strong>只看一个数：</strong>每天早晨、上完厕所、穿同样衣服称，取<strong>连续 7 天的平均值</strong>"
+     "去比上一周的平均值，单天数字没有意义。<br>\n"
+     "3. <strong>本系统的曲线也是这么画的：</strong>一天只留一个点（第一次记的那条），"
+     "重复记会覆盖不了历史，但趋势仍按天算。<br>\n"
+     "4. 一周平均不动，才轮到看缺口是不是被漏记的酱料油饮品吃掉了。"),
+    (("只运动", "不控制", "管不住", "忌口", "光练", "只练"),
+     "🏃 <strong>只运动不管嘴，多数人是练不瘦的，原因在数字上：</strong><br>\n"
+     "1. <strong>消耗有多小：</strong>本系统按训练日 +220 kcal 记账，这已经是一节认真练的量级；"
+     "一杯奶茶 360、一份薯条 280，练完喝一口就白练。<br>\n"
+     "2. <strong>摄入有多大：</strong>手一抖多 300 kcal 很容易，多 300 天就是 90000 kcal，"
+     "折合约 11.7 斤脂肪。<br>\n"
+     "3. <strong>正确顺序：</strong>先把每天吃了的记下来（不用精确，先记），"
+     "再把额度稳定在缺口 300-500，最后才谈加练。<br>\n"
+     "4. 运动真正的价值是保住肌肉、稳住情绪和睡眠，不是那 220 kcal。"
+     "别把它当赎罪券，也别把它当唯一变量。"),
+    (("主食", "碳水", "生酮", "不吃饭", "辟谷", "断碳"),
+     "🍚 <strong>主食一刀切掉，通常撑不过两周：</strong><br>\n"
+     "1. <strong>掉的是水和肌肉：</strong>糖原带着水，头三天掉两斤很好看，第七天开始平台，"
+     "同时开始掉力量。<br>\n"
+     "2. <strong>要减的是量不是类：</strong>把当前主食减 1/4，蛋白质不动，"
+     "把一部分白米面换成糙米、燕麦、玉米、红薯（同热量下更顶饿）。<br>\n"
+     "3. <strong>什么时候该认真控碳水：</strong>只有连续两周记录显示缺口被主食吃掉时才有必要，"
+     "凭感觉减碳基本都是白饿。<br>\n"
+     "4. 生酮等极端方案需要医生或营养师跟着，本系统不推荐也不跟踪。"),
+    (("大基数", "基数大", "很胖", "太胖", "一开始", "从哪开始", "新手"),
+     "🐘 <strong>基数大反而最好起步，抓这四件就够：</strong><br>\n"
+     "1. <strong>先只记两件事：</strong>每天早晨空腹体重 + 每天吃了什么。不用算得准，先记满 7 天。<br>\n"
+     "2. <strong>缺口别贪大：</strong>一天 500 kcal 就够（一周约 1 斤脂肪）。"
+     "开 1000 的缺口，两周内一定崩，还掉肌肉。<br>\n"
+     "3. <strong>护住膝盖：</strong>前期用快走、椭圆机、游泳、靠墙静蹲替代跑步；"
+     "体重降到接近目标再谈跑。<br>\n"
+     "4. <strong>蛋白质优先：</strong>每餐一掌心瘦肉/蛋/豆制品，"
+     "它决定你掉的是脂肪还是肌肉。BMI 超过 32 或有基础疾病，先去医院营养科。"),
+    (("奶茶", "饮料", "果汁", "可乐", "吃糖", "甜食", "咖啡加糖", "全糖"),
+     "🧋 <strong>想喝甜的不用忍到爆发，按替代来：</strong><br>\n"
+     "1. <strong>先看差多少：</strong>全糖奶茶约 360 kcal，无糖茶/气泡水接近 0，"
+     "一周三杯全糖就是约 3 斤脂肪的量级。<br>\n"
+     "2. <strong>降档而不是戒掉：</strong>三分糖 + 去奶盖 + 小杯，一杯能省 150-200 kcal，"
+     "比\"这周不喝了\"更能坚持。<br>\n"
+     "3. <strong>真想要口感：</strong>无糖酸奶 + 少量蓝莓、气泡水加柠檬、热牛奶加半勺蜂蜜。<br>\n"
+     "4. 果汁不等于水果：榨完糖还在、纤维没了，两杯起下不封顶。"
+     "本系统的记账按你填的菜名粗估，奶茶记进去才会有这个数。"),
+    (("烧烤", "撸串", "喝酒", "酒精", "聚餐", "应酬"),
+     "🍢 <strong>烧烤局和酒局怎么把损失压到最小：</strong><br>\n"
+     "1. <strong>点单顺序：</strong>先要一份烤蔬菜/凉拌菜垫底，再点瘦牛肉、鸡胸、大虾、生蚝；"
+     "五花、鸡翅尖、烤面包片是热量陷阱。<br>\n"
+     "2. <strong>酱是隐形热量：</strong>刷酱和干碟差别很大，能选干碟、少酱、多柠檬/醋。<br>\n"
+     "3. <strong>酒：</strong>酒精 7 kcal/g 且优先被烧掉，脂肪氧化当场暂停。"
+     "啤酒一杯半就够意思了，中间夹一杯水。<br>\n"
+     "4. <strong>第二天照常记账：</strong>不催吐、不断食补偿，"
+     "把当天额度按正常餐吃完，一顿毁不掉一周。"),
+    (("反弹", "复食", "恢复饮食", "会反弹", "结束", "维持"),
+     "📉 <strong>减完会不会反弹，取决于减脂最后两周你怎么做：</strong><br>\n"
+     "1. <strong>别一步回到原样：</strong>达标后每周把额度加回 100-150 kcal，"
+     "用 3-4 周爬到维持热量，身体和行为都有适应时间。<br>\n"
+     "2. <strong>蛋白质保持高位：</strong>这是最不容易掉肌肉、最不容易饿的一项。<br>\n"
+     "3. <strong>秤继续称，但看周平均：</strong>一周涨超过 1.5 斤就回到上一个额度档，"
+     "不要等涨 5 斤才发现。<br>\n"
+     "4. <strong>训练不要停：</strong>维持期把目标改成\"每周两次力量\"，"
+     "比\"每天有氧\"更容易长期执行。"),
+    (("能不能吃", "一顿吃完", "一整个", "明天吃", "后天会胖", "会不会胖"),
+     "🍰 <strong>\"明天能不能吃一整个蛋糕\"这种预测我做不了，能做的是把账算给你看：</strong><br>\n"
+     "1. <strong>一顿的量级：</strong>一整个 6 寸奶油蛋糕约 1800-2400 kcal，"
+     "相当于你 1-2 天的全部预算。<br>\n"
+     "2. <strong>会不会当场长脂肪：</strong>7700 kcal 才折 1 kg 纯脂肪，"
+     "所以一顿超 1500 kcal ≈ 折算 0.4 斤，是折算不是实测——秤上第二天的涨幅多半是水。"
+     "<br>\n"
+     "3. <strong>真要吃怎么吃：</strong>当天把主食和油减半、蛋白质保住，"
+     "分两餐吃、别空腹一次吃完，第二天照常记账不断食补偿。<br>\n"
+     "4. 我不预测\"明天能不能\"，因为那取决于你明天实际吃了多少——"
+     "记进【食谱/外卖】之后，我按真实数字告你超了多少。"),
+    (("删掉", "删除", "删记录", "改记录", "重置", "撤销"),
+     "🗑️ <strong>我不会替你改或删记录，这一点说清楚：</strong><br>\n"
+     "1. <strong>为什么：</strong>流水的价值就在于它是你真实发生过的行为。"
+     "能随手删掉的记录，之后所有报告、周期对比和达标预估都不可信。<br>\n"
+     "2. <strong>记错了怎么办：</strong>饮食和体重按天累计，多记的那一笔请在下一餐的额度里扣掉，"
+     "并在心里把它当成一次修正，不是造假。<br>\n"
+     "3. <strong>要清空重来：</strong>可以注册一个新账号，从那天起重新开始，"
+     "旧数据保留着，以后还能对比。<br>\n"
+     "4. 需要真正删除整账号数据（合规要求），告诉我，我加一个带确认的接口，"
+     "但不会做成\"一键抹掉今天\"。"),
+]
+
 def answer_from_scenes(q):
-    """命中场景就给成体系的建议；这是答案，不是"参考链接"。"""
+    """命中场景就给成体系的建议；这是答案，不是"参考链接"。
+
+    一条问题可能同时命中多个场景（"生理期便秘"），取命中关键词最长的那条——
+    越具体的词越贴近真实意图，按表顺序先到先得会让排在前面的一般场景抢走。"""
+    best, best_len = None, 0
     for keys, text in SCENE_RULES:
-        if any(k in q for k in keys):
-            return text
-    return None
+        # 单字词一律不参与匹配：旧表里的"饿""糖"会让"嚼口香糖"被当成想喝甜的、
+        # "饿得快是不是代谢好"被当成练后加餐。要覆盖就用两字以上的具体说法。
+        hit = [k for k in keys if len(k) >= 2 and k in q]
+        if not hit:
+            continue
+        longest = max(len(k) for k in hit)
+        if longest > best_len:
+            best, best_len = text, longest
+    return best
 
 
 @app.post("/api/ask")
@@ -2140,6 +2317,15 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
     if scene:
         return {"code": 0, "source": "scene", "answer": scene, "items": []}
 
+    # 认不出领域词就直接拒，这条判断不碰网络，所以不能算进每分钟配额——
+    # 否则连问几个"量子计算是什么"会把真正需要联网的问题挤到限流后面
+    if not _question_terms(q):
+        return {"code": 0, "source": "none",
+                "answer": "这个问题里我没有能确认的减脂相关词，联网搜回来的东西判断不了对不对题，"
+                          "所以不拿它凑答案。换个带具体食物或场景的说法再问"
+                          "（例：吃火锅怎么点、中午吃多了怎么办），或先看【食谱/外卖】里的内置建议。",
+                "items": []}
+
     if not _ask_allowed(user["id"]):
         return {"code": 0, "source": "limited",
                 "answer": f"联网查询太快了（每分钟最多 {_ASK_LIMIT_PER_MIN} 次），先等一会儿再问。",
@@ -2159,13 +2345,6 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
                            "host": html_escape(it.get("host", ""), quote=True)} for it in items]}
 
     terms = _question_terms(q)
-    if not terms:
-        # 认不出领域词就不搜——搜回来的东西我们没法判断对不对题，宁可不答
-        return {"code": 0, "source": "none",
-                "answer": "这个问题里我没有能确认的减脂相关词，联网搜回来的东西判断不了对不对题，"
-                          "所以不拿它凑答案。换个带具体食物或场景的说法再问"
-                          "（例：吃火锅怎么点、中午吃多了怎么办），或先看【食谱/外卖】里的内置建议。",
-                "items": []}
     search_q = _rewrite_query(q)
     try:
         items = web_search(search_q)
@@ -2183,7 +2362,7 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
                 "items": []}
     items = kept
 
-    answer, how = synthesize(q, items, mem)
+    answer, how = synthesize(q, items, mem, terms)
     if not answer:
         return {"code": 0, "source": "none", "answer": "查到的资料里没有可用内容。", "items": []}
     kb_store(q, answer, items, how)
