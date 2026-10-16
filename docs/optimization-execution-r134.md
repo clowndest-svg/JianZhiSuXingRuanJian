@@ -115,6 +115,8 @@
   1 个 `live134*` 账号按 id 逐个删除（含各 user_id 子表），
   删后 `users` 只剩 `tiangang`、`木木`，`pragma foreign_key_check` 0 条，
   两个真实账号在各表的行数删前删后逐项相同。
+- CI：run `38972823858`（`0a345b9`）两个作业 `integration`、`android` 均 `success`，
+  取的是 `/actions/runs/{id}/jobs` 的逐步结论，不是"绿色图标"。
 
 ## 5. 仍未覆盖（不写成通过）
 
