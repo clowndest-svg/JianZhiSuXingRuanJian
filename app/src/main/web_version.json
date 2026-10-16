@@ -1,8 +1,8 @@
 {
- "version_code": 2,
- "version_name": "1.1.0",
- "apk_url": "/qingsu.apk",
- "size": 5737029,
- "md5": "a1b514f0d38a291570ea1e44898d7f5b",
- "notes": "饮食记录接入AI模型与权威食物成分表双重精准核算；重构桌面端排版解决面板重叠与按钮无响应；全面升级网页端工作台与统计大屏。"
+  "version_code": 2,
+  "version_name": "1.1.0",
+  "apk_url": "/qingsu.apk",
+  "size": 5737673,
+  "md5": "908afbb93e2d0849214a73fee4bdb1f7",
+  "notes": "饮食记录接入AI模型与权威食物成分表双重精准核算；重构桌面端排版解决面板重叠与按钮无响应；全面升级网页端工作台与统计大屏。"
 }

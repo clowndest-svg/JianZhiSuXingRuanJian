@@ -229,6 +229,23 @@
                 </div>
             </div>
 
+            <!-- 今日晨起体重快速打卡 -->
+            <div class="card">
+                <div class="card-title">
+                    <span class="title-left">⚖️ 今日空腹体重记录</span>
+                    <span style="font-size: 11px; color: var(--text-muted);" id="current-weight-summary">当前 — 斤 / 目标 — 斤</span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <input type="number" step="0.1" id="input-weight" placeholder="体重（斤）" class="input-control" style="flex: 1;">
+                    <select id="weight-unit" class="input-control" style="width: 75px; flex-shrink: 0;">
+                        <option value="jin">斤</option>
+                        <option value="kg">kg</option>
+                    </select>
+                    <button class="btn-primary" style="width: auto; padding: 9px 18px; flex-shrink: 0;" onclick="saveWeight()">打卡</button>
+                </div>
+                <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px;" id="weight-status-text">登录后按你自己的打卡记录计算差值</p>
+            </div>
+
             <!-- 进餐顺序黄金法则 -->
             <div class="callout">
                 <strong>💡 进餐顺序黄金法则（抑制脂肪合成）：</strong><br>
@@ -245,23 +262,6 @@
                     </div>
                 </div>
                 <span style="font-size: 12px; color: var(--primary-dark); font-weight: bold;">进入 ➔</span>
-            </div>
-
-            <!-- 今日晨起体重快速打卡 -->
-            <div class="card">
-                <div class="card-title">
-                    <span class="title-left">⚖️ 今日空腹体重记录</span>
-                    <span style="font-size: 11px; color: var(--text-muted);" id="current-weight-summary">当前 — 斤 / 目标 — 斤</span>
-                </div>
-                <div style="display: flex; gap: 8px; align-items: center;">
-                    <input type="number" step="0.1" id="input-weight" placeholder="体重（斤）" class="input-control" style="flex: 1;">
-                    <select id="weight-unit" class="input-control" style="width: 75px; flex-shrink: 0;">
-                        <option value="jin">斤</option>
-                        <option value="kg">kg</option>
-                    </select>
-                    <button class="btn-primary" style="width: auto; padding: 9px 18px; flex-shrink: 0;" onclick="saveWeight()">打卡</button>
-                </div>
-                <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px;" id="weight-status-text">登录后按你自己的打卡记录计算差值</p>
             </div>
 
         </section>
@@ -688,7 +688,25 @@
                 <span class="tag-offline-free">周期智能进阶</span>
             </div>
 
-            <!-- 周期状态横幅 -->
+            <!-- 用户自选身材目标预览卡片 (分男女、选身材，桌面端全宽4列紧凑横向展示) -->
+            <div class="card full-width-card body-shape-card-container">
+                <div class="card-title">
+                    <span class="title-left">🎯 我所追求的理想身材目标</span>
+                    <div class="gender-mini-tabs">
+                        <button type="button" class="gender-mini-btn active" id="tab-gender-female" onclick="switchShapeGender('female')">👩 女性塑形</button>
+                        <button type="button" class="gender-mini-btn" id="tab-gender-male" onclick="switchShapeGender('male')">👨 男性塑形</button>
+                    </div>
+                </div>
+                <div id="target-physique-summary-card">
+                    <!-- 动态渲染当前选中的身材图与规划 -->
+                </div>
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); margin: 10px 0 6px;">👇 挑选心仪身材（点击立即生效并动态自适应训练与饮食）：</div>
+                <div class="body-shape-selector-grid" id="main-body-shapes-grid">
+                    <!-- JS 根据当前性别动态渲染 4 款专属身材卡片 -->
+                </div>
+            </div>
+
+            <!-- 周期状态横幅与拍摄指引 -->
             <div class="cycle-badge-header">
                 <div>
                     <div class="cycle-step-indicator" id="cycle-title-display">📅 尚未建立周期</div>
@@ -705,24 +723,6 @@
                     <div class="cycle-step-sub" id="cycle-goal-display">阶段目标：先把每日记录做满，围度与体重变化由你自己的打卡算出来</div>
                 </div>
                 <span class="tag-offline-free" id="cycle-badge-tag">进行中</span>
-            </div>
-
-            <!-- 用户自选身材目标预览卡片 (分男女、选身材) -->
-            <div class="card">
-                <div class="card-title">
-                    <span class="title-left">🎯 我所追求的理想身材目标</span>
-                    <div class="gender-mini-tabs">
-                        <button type="button" class="gender-mini-btn active" id="tab-gender-female" onclick="switchShapeGender('female')">👩 女性塑形</button>
-                        <button type="button" class="gender-mini-btn" id="tab-gender-male" onclick="switchShapeGender('male')">👨 男性塑形</button>
-                    </div>
-                </div>
-                <div id="target-physique-summary-card">
-                    <!-- 动态渲染当前选中的身材图与规划 -->
-                </div>
-                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); margin: 10px 0 6px;">👇 挑选心仪身材（点击立即生效并动态自适应训练与饮食）：</div>
-                <div class="body-shape-selector-grid" id="main-body-shapes-grid">
-                    <!-- JS 根据当前性别动态渲染 4 款专属身材卡片 -->
-                </div>
             </div>
 
             <!-- 周期身材照前后对比画廊 (Before & After) -->
