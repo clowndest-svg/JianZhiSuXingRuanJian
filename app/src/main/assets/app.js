@@ -3929,9 +3929,20 @@ function paintAiEngineBar() {
         el.innerHTML = "<span>正在探本地模型…</span>";
         return;
     }
-    el.innerHTML = localAiCache.ok
-        ? "<span class='eng-ok'>本地模型在线</span><span class='eng-ms'>" + localAiCache.ms + "ms</span>"
-        : "<span class='eng-no'>本地模型离线</span><span class='eng-why'>" + escapeHtml(localAiCache.why) + "</span>";
+    if (localAiCache.ok) {
+        el.innerHTML = "<span class='eng-ok'>本机模型在线</span><span class='eng-ms'>" + localAiCache.ms + "ms</span>";
+        return;
+    }
+    // 没开本机模型是默认状态，不是故障：说清"这条走服务器"就够，
+    // 别用红色"离线 + Failed to fetch"在页面上常驻一条像报错的噪音
+    const label = pref === "local"
+        ? "本机没开模型，只用本机的话这条答不了"
+        : "本机没开模型 · 这条走服务器";
+    const why = String(localAiCache.why || "")
+        .replace(new RegExp("[（(]?Failed to fetch[）)]?", "g"), "")
+        .replace(/[（(]\s*[)）]/g, "").replace(/\s+$/g, "").trim();
+    el.innerHTML = "<span class='eng-no'>" + label + "</span>"
+        + (why ? "<span class='eng-sep'>·</span><span class='eng-why'>" + escapeHtml(why) + "</span>" : "");
 }
 
 async function reprobeLocalAi() {

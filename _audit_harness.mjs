@@ -1089,6 +1089,26 @@ check("打印样式只留复盘页",
   check("相位只报屏上看得见的半程",
         rJs.includes("前半程（起身/推起方向）") && !rJs.includes("向心收缩 (爆发发力)"), "");
 
+  // 7.5) 用户实拍那一屏：发几条消息后气泡压到下一张卡上，根因是分栏子元素规则
+  //      强加 display:inline-block，把 .chat-container 本来的 flex 顶掉了
+  const kidRule = rCss.slice(rCss.indexOf(".view-panel.active > *"), rCss.indexOf("横幅类与全宽卡片"));
+  const spanRule = rCss.slice(rCss.indexOf("横幅类与全宽卡片"), rCss.indexOf("饮食计划子视图"));
+  check("分栏与跨栏规则都不抢 display",
+        kidRule.length > 30 && spanRule.length > 30
+        && !/display:/.test(kidRule) && !/display:/.test(spanRule),
+        "子元素规则命中 display=" + /display:/.test(kidRule) + " 跨栏规则命中 display=" + /display:/.test(spanRule));
+  // 跨栏/半栏规则里写的类名必须真的在页面里，否则那条规则永远不命中（.chat-box 就是这一类）
+  const clsRefs = [...new Set([...rCss.matchAll(/body\.desktop-view[^{]*>\.([a-z][a-z0-9-]*)/g)].map(m => m[1]))];
+  const clsDead = clsRefs.filter(cn => !new RegExp("\b" + cn + "\b").test(rHtml));
+  check("桌面样式引用的类名都真实存在", clsDead.length === 0,
+        "死选择器: " + JSON.stringify(clsDead) + " 共 " + clsRefs.length + " 条");
+  // 电脑版只留顶栏一排：底部 dock 必须藏掉，否则同一组按钮出现两次
+  const dockAt = rCss.indexOf("body.desktop-view .bottom-nav {");
+  check("桌面端只有一排导航", dockAt >= 0 && /display:\s*none/.test(rCss.slice(dockAt, dockAt + 160)),
+        dockAt < 0 ? "没有桌面端 dock 规则" : rCss.slice(dockAt, dockAt + 120));
+  check("本机没开模型不写成故障", !rJs.includes("本地模型离线") && rJs.includes("本机没开模型 · 这条走服务器"),
+        rJs.includes("本地模型离线"));
+
   // 8) 标签说要亮的肌肉，屏幕上必须真有一块体块会亮（正向核对，不是"包含于"）
   try {
     const list = run(h.context, `Object.keys(ACTIVE_MUSCLES)`);

@@ -1988,9 +1988,7 @@ body.desktop-view main .view-panel.active > * {
     -webkit-column-break-inside: avoid;
     page-break-inside: avoid;
     margin-bottom: 16px;
-    display: inline-block;
     width: 100%;
-    vertical-align: top;
     box-sizing: border-box;
 }
 
@@ -2012,9 +2010,12 @@ body.desktop-view main > #web-workbench,
 body.desktop-view main > #public-tools,
 body.desktop-view main > #body-suspect-card,
 body.desktop-view #panel-recipes > .card,
-body.desktop-view #panel-gemini > .chat-box,
+body.desktop-view #panel-gemini > .chat-container,
 body.desktop-view #panel-takeout > .card {
-    display: block !important;
+    /* 这里绝不能再写 display：跨栏清单里有 .chat-container（flex）、
+       .daily-strip（grid）这类靠自身 display 排布的组件，
+       一旦强制成 block，它们内部的 flex:1 / grid-template-columns 全部失效，
+       聊天记录就会撑破 380px 卡片压到下一张卡上。 */
     width: 100%;
     grid-column: 1 / -1;
     column-span: all;
@@ -2038,9 +2039,7 @@ body.desktop-view #dining-takeout-view > * {
     -webkit-column-break-inside: avoid;
     page-break-inside: avoid;
     margin-bottom: 16px;
-    display: inline-block;
     width: 100%;
-    vertical-align: top;
     box-sizing: border-box;
 }
 body.desktop-view #dining-cook-view > .plan-tabs {
@@ -2063,7 +2062,6 @@ body.desktop-view #panel-charts > .card {
     grid-column: auto;
     column-span: none;
     -webkit-column-span: none;
-    display: inline-block;
     width: 100%;
 }
 /* 电脑版各弹窗排版优化：适度放宽宽度，提供更开阔呼吸感，严防内容挤压 */
@@ -2108,8 +2106,10 @@ body.desktop-view .d-nav-item.active {
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 
-/* 电脑版底部悬浮控制台 (Dock 模式) */
+/* 电脑版只留顶栏那一排导航：底部再放一排 dock，同一组按钮出现两次，
+   点下面那排还会把页面滚到顶（switchTab 里的 scrollTo），看着像"胡乱定位"。 */
 body.desktop-view .bottom-nav {
+    display: none;
     max-width: 820px;
     left: 50%;
     transform: translateX(-50%);
