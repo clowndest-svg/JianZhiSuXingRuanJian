@@ -183,6 +183,7 @@ public class DeviceSmokeTest {
         assertTrue("画面上几乎没有墨迹: " + s3d, j3d.getDouble("coverage") > 3.0);
         assertTrue("人体只占画面一小条，取景没贴住身体: " + s3d, j3d.getDouble("fill") > 45.0);
         assertTrue("有肢体被裁在画面外，取景没包住全身: " + s3d, j3d.getDouble("ndcMax") <= 0.99);
+        assertEquals("有体块离所有关节都太远（装错位置或飞出画面）: " + s3d, 0, j3d.optInt("orphan", -1));
         assertTrue("相机几乎沿体长轴看过去，任何姿势都会压成一团: " + s3d, j3d.getDouble("endOn") <= 0.5);
         assertTrue("骨骼没有被驱动，等于站桩假动画: " + st3d.toString(), st3d.getInt("solvedBones") >= 10);
         assertTrue("取景算出过荒谬相机距离（坏帧会让画面歪掉而不自知）: " + st3d.toString(),
@@ -208,6 +209,7 @@ public class DeviceSmokeTest {
         int exCount = Integer.parseInt(js("window.__currentExercises ? __currentExercises.length : 0"));
         assertTrue("训练计划至少给出 3 个动作供 3D 检查", exCount >= 3);
         StringBuilder exBad = new StringBuilder();
+        String standingShot = null;
         for (int i = 0; i < exCount; i++) {
             js("openExerciseDetail(" + i + ")"); Thread.sleep(1200);
             String each = js("JSON.stringify(Body3D.selfTest(                poseFromTable(exActivePoseKey, exActiveArch, 0.5), posePlane(exActivePoseKey), ex3DCamera.yaw))");
@@ -219,9 +221,17 @@ public class DeviceSmokeTest {
                     .append(" fill=").append(e.optDouble("fill", -1))
                     .append(" ndc=").append(e.optDouble("ndcMax", -1)).append("]");
             else if (e.optDouble("ndcMax", 9) > 0.99) exBad.append("[").append(i).append(label).append(" 肢体被裁 ").append(e.optDouble("ndcMax", 9)).append("]");
+            else if (e.optInt("orphan", -1) != 0) exBad.append("[").append(i).append(label).append(" 有 ").append(e.optInt("orphan", -1)).append(" 块体块飞离关节]");
             else if (e.optDouble("endOn", 0) > 0.6) exBad.append("[").append(i).append(label).append(" 几乎沿体长轴看 ").append(e.optDouble("endOn", 0)).append("]");
+            // 站姿和躺姿是两套完全不同的轮廓：肩宽、脚朝向只在站着做的动作里才暴露问题，
+            // 所以遇到冠状面动作留一张证据。
+            if ("true".equals(js("posePlane(exActivePoseKey)===\"frontal\"")) && standingShot == null) {
+                standingShot = "exercise-3d-standing";
+                screenshot(standingShot);
+            }
         }
         assertEquals("每个动作的 3D 演示都要画全: " + exBad, "", exBad.toString());
+        assertNotNull("这一版训练计划里没有站着做的动作，站姿外观没被截图覆盖", standingShot);
         js("openExerciseDetail(0)"); Thread.sleep(900);
         screenshot("exercise-3d");
         screenshot("exercise");

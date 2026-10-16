@@ -15,8 +15,8 @@ import { GLTFLoader } from './vendor/GLTFLoader.js';
 
 const MODEL_URL = 'models/cesium_man.glb';
 const BODY_SCALE = 1.72;              // 归一化后的身高（米）
-const SHOULDER_HALF = 0.10;           // 左右肢体分离
-const HIP_HALF = 0.045;
+const SHOULDER_HALF = 0.152;          // 左右肢体分离（肩/髋到中线）
+const HIP_HALF = 0.082;
 
 /* 一根骨是"从自己的起点关节伸向子骨的起点"，所以：
      上臂骨(起点=肩) 用 肩->肘 转；前臂骨(起点=肘) 用 肘->腕 转。
@@ -38,7 +38,11 @@ const BONES = [
     ['r_foot',      'leg_joint_R_3', null, null],
     ['l_thigh',     'leg_joint_L_1', 'l_hip',  'l_knee'],
     ['l_shin',      'leg_joint_L_2', 'l_knee', 'l_ankle'],
-    ['l_foot',      'leg_joint_L_3', null, null]
+    ['l_foot',      'leg_joint_L_3', null, null],
+    /* 脚往哪儿踩，模型自己知道：这两个端点骨是踝骨的孩子，绑定方向就是脚尖。
+       靠"膝盖朝前"推脚向，站姿会退化成零向量，脚就乱转。 */
+    ['r_toe',       'leg_joint_R_5', null, null],
+    ['l_toe',       'leg_joint_L_5', null, null]
 ];
 /* 解算顺序从躯干到四肢、从近端到远端，子骨才能读到父骨刚写好的世界旋转 */
 const SOLVE_ORDER = ['pelvis', 'spine', 'chest', 'neck', 'head',
@@ -53,7 +57,8 @@ const JOINT_BONE = {
     r_shoulder: 'r_upper_arm', r_elbow: 'r_forearm', r_wrist: 'r_hand',
     l_shoulder: 'l_upper_arm', l_elbow: 'l_forearm', l_wrist: 'l_hand',
     r_hip: 'r_thigh', r_knee: 'r_shin', r_ankle: 'r_foot',
-    l_hip: 'l_thigh', l_knee: 'l_shin', l_ankle: 'l_foot'
+    l_hip: 'l_thigh', l_knee: 'l_shin', l_ankle: 'l_foot',
+    r_toe: 'r_toe', l_toe: 'l_toe'
 };
 
 const BONE_BY_NAME = {};
@@ -67,7 +72,8 @@ const State = {
     bindBoneQuat: {},               // 语义名 -> 绑定时世界四元数
     bindBoneLocal: {},              // 语义名 -> 绑定时局部四元数（不动这根骨头时该用它）
     bindJoint: {},                  // 关节名 -> 绑定时世界坐标
-    markers: null, rig: null, rigJoints: null, jointWorld: {},
+    parts: null, blobs: null, ground: null, jointWorld: {},
+    matSkin: null, matHot: null,
     yaw: Math.PI / 2, pitch: 0.1, camR: 0, camWant: 0, camY: 0.9, camCenter: [0, 0, 0], badFrame: null,
     frameMs: 0, triangles: 0, drawCalls: 0, solved: 0, frames: 0, nanBones: 0
 };
@@ -142,21 +148,54 @@ function poseTo3D(pose, plane) {
     return out;
 }
 
-/* 外壳尺寸（米）。蒙皮网格是 2013 年的测试人台，一摆躺姿就塌成一团，
-   所以这里只借它的骨骼（骨长、关节位置都是真的），外壳按关节自己画：
-   骨头=圆柱、关节=球，粗细由这张表控制，不会再出现"臃肿成一坨"。 */
-const BONE_R = {
-    pelvis: 0.070, spine: 0.074, chest: 0.080, neck: 0.032,
-    r_upper_arm: 0.034, r_forearm: 0.028, l_upper_arm: 0.034, l_forearm: 0.028,
-    r_thigh: 0.052, r_shin: 0.040, l_thigh: 0.052, l_shin: 0.040
-};
-const JOINT_R = {
-    pelvis: 0.076, sternum: 0.082, neck: 0.040, head: 0.092,
-    r_shoulder: 0.048, l_shoulder: 0.048, r_elbow: 0.032, l_elbow: 0.032,
-    r_wrist: 0.026, l_wrist: 0.026, r_hip: 0.052, l_hip: 0.052,
-    r_knee: 0.040, l_knee: 0.040, r_ankle: 0.030, l_ankle: 0.030
-};
-const SHELL_PAD = 0.10;               // 外壳比关节最粗的一档再探出去的距离
+/* 外壳：只借模型的骨骼（骨长、关节、脚尖方向都是真的），肉由这里现算。
+   原来那版是"同样粗的直杆 + 关节球"，看着像碰撞测试假人；这里每一块都是
+   沿骨长方向的半径曲线绕轴旋出来的旋转体，所以小腿有腓肠肌的鼓、大腿有
+   股四头肌的鼓、腰有收口。a/b 是两个关节，p 是 [沿骨长位置, 半径米]。 */
+const PARTS = [
+    { k: 'torso', a: 'pelvis', b: 'sternum', m: ['core', 'pelvis', 'back'], w: 1.16, d: .80,
+      p: [[0, .092], [.14, .104], [.34, .074], [.58, .082], [.82, .100], [1, .112]] },
+    { k: 'chest', a: 'sternum', b: 'neck', m: ['chest'], w: 1.22, d: .76,
+      p: [[0, .112], [.26, .118], [.58, .082], [.86, .056], [1, .048]] },
+    { k: 'neck', a: 'neck', b: 'head', m: [], w: 1.0, d: 1.0,
+      p: [[0, .048], [.5, .041], [1, .032]] },
+    { k: 'arm_r', a: 'r_shoulder', b: 'r_elbow', m: ['arm_r'], w: 1.0, d: .94,
+      p: [[0, .056], [.22, .050], [.6, .038], [1, .032]] },
+    { k: 'fore_r', a: 'r_elbow', b: 'r_wrist', m: ['arm_r'], w: 1.0, d: .94,
+      p: [[0, .038], [.26, .033], [.72, .024], [1, .020]] },
+    { k: 'arm_l', a: 'l_shoulder', b: 'l_elbow', m: ['arm_l'], w: 1.0, d: .94,
+      p: [[0, .056], [.22, .050], [.6, .038], [1, .032]] },
+    { k: 'fore_l', a: 'l_elbow', b: 'l_wrist', m: ['arm_l'], w: 1.0, d: .94,
+      p: [[0, .038], [.26, .033], [.72, .024], [1, .020]] },
+    { k: 'thigh_r', a: 'r_hip', b: 'r_knee', m: ['thigh_r', 'glutes', 'quads', 'hamstrings'], w: 1.04, d: .96,
+      p: [[0, .072], [.24, .064], [.6, .050], [1, .042]] },
+    { k: 'shin_r', a: 'r_knee', b: 'r_ankle', m: ['calf_r', 'hamstrings'], w: .96, d: 1.08,
+      p: [[0, .046], [.22, .054], [.46, .046], [.78, .030], [1, .025]] },
+    { k: 'thigh_l', a: 'l_hip', b: 'l_knee', m: ['thigh_l', 'glutes', 'quads', 'hamstrings'], w: 1.04, d: .96,
+      p: [[0, .072], [.24, .064], [.6, .050], [1, .042]] },
+    { k: 'shin_l', a: 'l_knee', b: 'l_ankle', m: ['calf_l', 'hamstrings'], w: .96, d: 1.08,
+      p: [[0, .046], [.22, .054], [.46, .046], [.78, .030], [1, .025]] },
+    /* 脚：踝 -> 脚尖端点，方向由模型给，不再靠推。
+       端点离踝只有 8cm（真脚 16cm 以上），所以整段再沿同方向拉长 1.9 倍。 */
+    { k: 'foot_r', a: 'r_ankle', b: 'r_toe', m: ['calf_r'], w: .95, d: 1.25, stretch: 1.9,
+      p: [[0, .036], [.26, .034], [.62, .030], [1, .016]] },
+    { k: 'foot_l', a: 'l_ankle', b: 'l_toe', m: ['calf_l'], w: .95, d: 1.25, stretch: 1.9,
+      p: [[0, .036], [.26, .034], [.62, .030], [1, .016]] }
+];
+
+/* 椭球件：头颅、三角肌、手掌。at 是中心关节，along 提供朝向（+Y 对齐到它），
+   off 是沿该方向再挪多少米，r 是 [x, y, z] 半轴。 */
+const BLOBS = [
+    /* t 是"沿 along 方向再挪多少米"。这里写成 0.52 米时头颅直接飞到画面外，
+       而 ndcMax 只统计关节点，判据照样绿——所以第 5 步把判据改成量外壳。 */
+    { k: 'skull', at: 'neck', along: 'head', t: .044, r: [.076, .098, .090], m: [] },
+    { k: 'delt_r', at: 'r_shoulder', along: 'r_elbow', t: .022, r: [.060, .062, .056], m: ['deltoid_r', 'shoulders'] },
+    { k: 'delt_l', at: 'l_shoulder', along: 'l_elbow', t: .022, r: [.060, .062, .056], m: ['deltoid_l', 'shoulders'] },
+    { k: 'pelvis', at: 'pelvis', along: 'sternum', t: -.055, r: [.104, .072, .086], m: ['glutes', 'pelvis'] },
+    { k: 'hand_r', at: 'r_wrist', along: 'r_elbow', out: 1, t: .055, r: [.030, .062, .026], m: ['arm_r'] },
+    { k: 'hand_l', at: 'l_wrist', along: 'l_elbow', out: 1, t: .055, r: [.030, .062, .026], m: ['arm_l'] }
+];
+const SHELL_PAD = 0.168;              // 外壳最粗一档（胸宽 0.156、骨盆 0.104）再探出去的距离
 
 /* ---------- 骨骼求解 ---------- */
 
@@ -202,56 +241,82 @@ function solve(target) {
 
 const _up = new THREE.Vector3(0, 1, 0);
 
+function lathe(profile) {
+    const pts2 = profile.map(pr => new THREE.Vector2(Math.max(pr[1], 0.004), pr[0]));
+    return new THREE.LatheGeometry(pts2, 22);
+}
+
 function buildRig() {
-    const mat = new THREE.MeshStandardMaterial({ color: 0xEAF0F8, roughness: 0.55, metalness: 0.04 });
-    const tube = new THREE.CylinderGeometry(1, 1, 1, 14);
-    const ball = new THREE.SphereGeometry(1, 18, 14);
-    State.rig = [];
-    State.rigJoints = [];
-    for (const def of BONES) {
-        const r = BONE_R[def[0]];
-        if (!r) continue;                       // 手/脚末端没有独立骨长，交给关节球
-        const mesh = new THREE.Mesh(tube, mat);
+    State.matSkin = new THREE.MeshStandardMaterial({
+        color: 0xE6C4A6, roughness: 0.66, metalness: 0.0
+    });
+    State.matHot = new THREE.MeshStandardMaterial({
+        color: 0xB9615A, roughness: 0.6, metalness: 0.0,
+        emissive: 0x2E0D09, emissiveIntensity: 0.16
+    });
+    const ball = new THREE.SphereGeometry(1, 20, 16);
+    State.parts = [];
+    State.blobs = [];
+    for (const part of PARTS) {
+        const mesh = new THREE.Mesh(lathe(part.p), State.matSkin);
         mesh.frustumCulled = false;
         State.scene.add(mesh);
-        State.rig.push({ from: def[2], to: def[3], mesh: mesh, r: r });
+        State.parts.push({ part: part, mesh: mesh });
     }
-    for (const joint of Object.keys(JOINT_R)) {
-        const mesh = new THREE.Mesh(ball, mat);
+    for (const blob of BLOBS) {
+        const mesh = new THREE.Mesh(ball, State.matSkin);
         mesh.frustumCulled = false;
         State.scene.add(mesh);
-        State.rigJoints.push({ joint: joint, mesh: mesh, r: JOINT_R[joint] });
+        State.blobs.push({ blob: blob, mesh: mesh });
     }
 }
 
-/** 每帧按"解算之后的关节世界坐标"重摆外壳。
-    骨骼只管指向，外壳跟着关节走，蒙皮塌陷就不可能出现。 */
+/** 逐帧把每块肉摆到"这一帧两个关节的真实位置"之间。
+    两端各外扩 6%：相邻体块在关节处叠住，才看不见旋转体的切口。 */
 function updateRig() {
-    if (!State.rig) return;
-    for (const item of State.rig) {
-        const a = State.jointWorld[item.from], b = State.jointWorld[item.to];
+    if (!State.parts) return;
+    for (const item of State.parts) {
+        const a = State.jointWorld[item.part.a], b = State.jointWorld[item.part.b];
         if (!a || !b) { item.mesh.visible = false; continue; }
         _dir.copy(b).sub(a);
         const len = _dir.length();
         if (!(len > 1e-4)) { item.mesh.visible = false; continue; }
-        item.mesh.visible = true;
-        item.mesh.position.copy(a).addScaledVector(_dir, 0.5);
         _dir.multiplyScalar(1 / len);
-        item.mesh.quaternion.setFromUnitVectors(_up, _dir);
-        item.mesh.scale.set(item.r, len, item.r);
-    }
-    for (const item of State.rigJoints) {
-        let p = State.jointWorld[item.joint];
-        if (!p) { item.mesh.visible = false; continue; }
         item.mesh.visible = true;
-        if (item.joint === 'head') {
-            // head 关节在颅顶：球要落在颈→头这一段偏上的位置，不然脑袋会浮在头顶外
-            const n = State.jointWorld.neck;
-            if (n) { _bindDir.copy(p).sub(n).multiplyScalar(0.62); p = _v2.copy(n).add(_bindDir); }
-        }
-        item.mesh.position.copy(p);
-        item.mesh.scale.setScalar(item.r);
+        item.mesh.quaternion.setFromUnitVectors(_up, _dir);
+        const st = item.part.stretch || 1;
+        item.mesh.position.copy(a).addScaledVector(_dir, -len * 0.06 * st);
+        item.mesh.scale.set(item.part.w || 1, len * 1.12 * st, item.part.d || 1);
     }
+    for (const item of State.blobs) {
+        const p = State.jointWorld[item.blob.at];
+        if (!p) { item.mesh.visible = false; continue; }
+        const ref = item.blob.along ? State.jointWorld[item.blob.along] : null;
+        _v.copy(p);
+        if (ref) {
+            _dir.copy(ref).sub(p);
+            const l = _dir.length();
+            if (l > 1e-4) {
+                _dir.multiplyScalar(1 / l);
+                // along 指向"远端关节"，out=1 时件要落在 at 的外侧（手掌在腕之外）
+                const k = item.blob.out ? -1 : 1;
+                _v.addScaledVector(_dir, k * (item.blob.t || 0));
+                item.mesh.quaternion.setFromUnitVectors(_up, _dir);
+            }
+        }
+        item.mesh.visible = true;
+        item.mesh.position.copy(_v);
+        item.mesh.scale.set(item.blob.r[0], item.blob.r[1], item.blob.r[2]);
+    }
+}
+
+/* 发力部位直接涂在那块肉上（医学图谱的画法），不再飘一颗半透明球。 */
+function paintMuscles(active) {
+    if (!State.parts) return;
+    const lit = new Set((active || []).map(k => String(k).toLowerCase()));
+    const hot = m => (m || []).some(k => lit.has(k));
+    for (const item of State.parts) item.mesh.material = hot(item.part.m) ? State.matHot : State.matSkin;
+    for (const item of State.blobs) item.mesh.material = hot(item.blob.m) ? State.matHot : State.matSkin;
 }
 
 /* ---------- 场景 ---------- */
@@ -266,64 +331,33 @@ function buildScene(canvas) {
     State.scene = new THREE.Scene();
     State.camera = new THREE.PerspectiveCamera(34, 1, 0.05, 30);
 
-    const key = new THREE.DirectionalLight(0xFFFFFF, 2.2);
+    const key = new THREE.DirectionalLight(0xFFF3E4, 2.35);      // 暖主光
     key.position.set(1.8, 2.6, 2.2);
-    const fill = new THREE.DirectionalLight(0x9FB6D9, 0.75);
-    fill.position.set(-2.2, 1.1, -1.0);
-    const rim = new THREE.DirectionalLight(0x34D399, 1.0);
-    rim.position.set(0, 1.4, -2.8);
-    State.scene.add(key, fill, rim, new THREE.HemisphereLight(0xE6F0FF, 0x1B2434, 0.9));
+    const fill = new THREE.DirectionalLight(0xC8D8F0, 0.95);     // 冷补光，压住死黑
+    fill.position.set(-2.4, 1.2, 1.4);
+    const rim = new THREE.DirectionalLight(0xDCE9FF, 1.15);      // 轮廓光：以前是绿的，人像发了霉
+    rim.position.set(-0.6, 1.6, -2.8);
+    State.scene.add(key, fill, rim, new THREE.HemisphereLight(0xEAF2FF, 0x24303F, 0.85));
 
-    // 脚下的接触阴影，让人体"站住"而不是浮在黑背景里
-    const disc = new THREE.Mesh(
-        new THREE.CircleGeometry(0.46, 44),
-        new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.32 })
-    );
-    disc.rotation.x = -Math.PI / 2;
-    disc.position.y = 0.004;
-    State.scene.add(disc);
-}
-
-/* 发力标记：贴在目标肌群所在关节上的半透明球。
-   它是"标记"不是"肌肉网格"，所以文案只说发力部位，不假装解剖精度。 */
-const MUSCLE_JOINTS = {
-    chest: ['sternum', 'r_shoulder', 'l_shoulder'],
-    core: ['pelvis', 'sternum'],
-    glutes: ['pelvis', 'r_hip', 'l_hip'],
-    quads: ['r_knee', 'l_knee'],
-    hamstrings: ['r_hip', 'l_hip', 'r_knee', 'l_knee'],
-    calves: ['r_ankle', 'l_ankle'],
-    shoulders: ['r_shoulder', 'l_shoulder', 'neck'],
-    arms: ['r_elbow', 'l_elbow'],
-    back: ['sternum', 'neck'],
-    full_body: ['sternum', 'pelvis', 'r_knee', 'l_knee', 'r_elbow', 'l_elbow']
-};
-
-function buildMarkers() {
-    const group = new THREE.Group();
-    for (const joint of Object.keys(MUSCLE_JOINTS).reduce((a, k) => a.concat(MUSCLE_JOINTS[k]), [])) {
-        if (group.children.some(m => m.userData.joint === joint)) continue;
-        const m = new THREE.Mesh(
-            new THREE.SphereGeometry(0.055, 16, 12),
-            new THREE.MeshBasicMaterial({ color: 0xF59E0B, transparent: true, opacity: 0, depthWrite: false })
-        );
-        m.userData.joint = joint;
-        group.add(m);
-    }
-    State.scene.add(group);
-    State.markers = group;
-}
-
-function updateMarkers(active) {
-    if (!State.markers) return;
-    const lit = new Set();
-    (active || []).forEach(k => (MUSCLE_JOINTS[String(k).toLowerCase()] || []).forEach(j => lit.add(j)));
-    State.markers.children.forEach(m => {
-        const want = lit.has(m.userData.joint) ? 0.5 : 0;
-        m.material.opacity += (want - m.material.opacity) * 0.18;   // 缓入缓出，不闪
-        const bone = State.bones[JOINT_BONE[m.userData.joint]];
-        if (bone) { bone.getWorldPosition(_v); m.position.copy(_v); }
+    /* 地面：一张软边的椭圆垫子。没有地面参照时，躺姿看着像"斜着飘在太空里"
+       （机主原话：大部分被遮住/看不懂），有了它，臀桥就是臀桥。 */
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 128;
+    const g2 = cv.getContext('2d');
+    const grad = g2.createRadialGradient(64, 64, 6, 64, 64, 62);
+    grad.addColorStop(0, 'rgba(120,150,190,0.42)');
+    grad.addColorStop(0.55, 'rgba(70,96,140,0.24)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g2.fillStyle = grad;
+    g2.fillRect(0, 0, 128, 128);
+    const mat = new THREE.MeshBasicMaterial({
+        map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false
     });
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(1, 40), mat);
+    disc.rotation.x = -Math.PI / 2;
+    disc.scale.set(0.95, 1.5, 1);
+    State.scene.add(disc);
+    State.ground = disc;
 }
 
 /* ---------- 对外接口 ---------- */
@@ -392,7 +426,6 @@ const Body3D = {
                 return State.status;
             }
             buildRig();
-            buildMarkers();
 
             State.status = 'ready';
             Body3D.resize(canvas);
@@ -403,20 +436,23 @@ const Body3D = {
         }
     },
 
-    setPose: function (pose, plane, yawRad, muscles) {
+    setPose: function (pose, plane, yawRad, muscles, pitchRad) {
         if (State.status !== 'ready') return false;
         const t0 = performance.now();
         const target = poseTo3D(pose, plane);
         solve(target);
         if (State.solved === 0) return false;          // 一根都没驱动，宁可退回画块
         State.root.updateMatrixWorld(true);
-        updateMarkers(muscles);
+        paintMuscles(muscles);
         /* 2D 画块法里的 yaw 是"人体自转角"，不是相机环绕角：直接当相机角用，
            默认 24° 会几乎沿着体长轴看过去，什么姿势都会压成一团。矢状面动作要
            从侧面看，所以相机方位 = 自转角 + 90°。 */
         const frontal = (plane === 'frontal');
         if (typeof yawRad === 'number' && isFinite(yawRad))
             State.yaw = frontal ? yawRad : yawRad + Math.PI / 2;
+        // 俯仰也交给上层：上下拖拽要真的能改视角，以前只有 2D 画法在动
+        if (typeof pitchRad === 'number' && isFinite(pitchRad))
+            State.pitch = Math.max(-0.9, Math.min(1.1, pitchRad));
 
         /* 取景跟随"当前这一帧的真实姿态范围"：臀桥是躺着的，整体只有半米高，
            按站姿身高取景就会缩成一小团。必须量解算之后的关节世界坐标——
@@ -468,6 +504,12 @@ const Body3D = {
         const r = State.camR;
         State.camY = cy;
         State.camCenter[0] = cx; State.camCenter[1] = cy; State.camCenter[2] = cz;
+        if (State.ground) {
+            // 垫子跟着身体最低点走：躺姿的"地面"在背下面，不在脚底下
+            State.ground.position.set(cx, minY - 0.012, cz);
+            State.ground.scale.set(Math.max(0.45, (maxX - minX) * 0.62 + 0.35),
+                                   Math.max(0.45, (maxZ - minZ) * 0.62 + 0.35), 1);
+        }
         State.camera.position.set(
             cx + Math.sin(State.yaw) * r * Math.cos(State.pitch),
             cy + Math.sin(State.pitch) * r * 0.35,
@@ -512,19 +554,20 @@ const Body3D = {
 
     /* 同帧渲染并回读像素：WebGL 画布在下一帧之前可能被合成器清空，
        分开两次调用读回来永远是 0，会把"没测到"看成"没画出"。 */
-    selfTest: function (pose, plane, yawRad) {
+    selfTest: function (pose, plane, yawRad, pitchRad) {
         if (State.status !== 'ready') return { ok: false, reason: State.status };
         const p = pose || poseFromTableSelfTest();
         if (!p) return { ok: false, reason: '没有姿态数据' };
         // 允许自动化按"屏幕上当前这个相机"来验，而不是永远验一个参考机位。
         const yaw = (typeof yawRad === 'number' && isFinite(yawRad)) ? yawRad : 0;
-        if (!Body3D.setPose(p, plane || 'sagittal', yaw, [])) return { ok: false, reason: 'setPose 失败' };
+        const pitch = (typeof pitchRad === 'number' && isFinite(pitchRad)) ? pitchRad : State.pitch;
+        if (!Body3D.setPose(p, plane || 'sagittal', yaw, [], pitch)) return { ok: false, reason: 'setPose 失败' };
         /* 取景是逐帧逼近的（0.08/帧），刚换动作时相机还在路上。自测要量"停稳之后"
            的画面：第一遍拿到这一帧的目标距离，把距离钉过去再渲染一遍。
            只钉一次等于拿"上一帧"的距离量"这一帧"的姿势，换动作时必然测歪。 */
         if (State.camWant) {
             State.camR = State.camWant;
-            if (!Body3D.setPose(p, plane || 'sagittal', yaw, [])) return { ok: false, reason: 'setPose 第二遍失败' };
+            if (!Body3D.setPose(p, plane || 'sagittal', yaw, [], pitch)) return { ok: false, reason: 'setPose 第二遍失败' };
         }
         const gl = State.renderer.getContext();
         const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
@@ -548,7 +591,7 @@ const Body3D = {
         /* 两个"看着不对"的量化口径：
            ndcMax>1 ＝ 有肢体被裁到画面外；endOn≈1 ＝ 相机几乎沿体长轴看过去，
            什么姿势都会压成一团。只判 coverage>6 时这两种都能绿。 */
-        let ndcMax = 0, endOn = 0;
+        let ndcMax = 0, endOn = 0, orphan = 0;
         State.camera.updateMatrixWorld(true);
         const jp = Body3D.joints();
         if (jp && jp.head && jp.r_ankle) {
@@ -562,11 +605,50 @@ const Body3D = {
                 _v.set(jp[k][0], jp[k][1], jp[k][2]).project(State.camera);
                 ndcMax = Math.max(ndcMax, Math.abs(_v.x), Math.abs(_v.y));
             }
+            /* 只量关节会漏掉一整类事故：头颅偏移写成 0.52 米时人头飞出去了，
+               关节点全在画面里，判据照样绿。所以按"外壳实际占的地方"再量一遍：
+               每块的两个端点 + 它自己最粗的截面半径。 */
+            const tanV = Math.tan(State.camera.fov * Math.PI / 360);
+            const tanH = tanV * (State.camera.aspect || 1);
+            const probe = (px, py, pz, r) => {
+                _v2.set(px, py, pz).project(State.camera);
+                const d = Math.max(0.15, State.camera.position.distanceTo(_v.set(px, py, pz)));
+                ndcMax = Math.max(ndcMax, Math.abs(_v2.x) + r / (d * tanH), Math.abs(_v2.y) + r / (d * tanV));
+            };
+            for (const item of (State.parts || [])) {
+                if (!item.mesh.visible) continue;
+                const pa = jp[item.part.a], pb = jp[item.part.b];
+                if (!pa || !pb) continue;
+                let mr = 0;
+                for (const pr of item.part.p) mr = Math.max(mr, pr[1]);
+                mr *= Math.max(item.part.w || 1, item.part.d || 1);
+                mr *= (item.part.stretch || 1);
+                probe(pa[0], pa[1], pa[2], mr);
+                probe(pb[0], pb[1], pb[2], mr);
+            }
+            for (const item of (State.blobs || [])) {
+                if (!item.mesh.visible) continue;
+                const q = item.mesh.position;
+                probe(q.x, q.y, q.z, Math.max(item.blob.r[0], item.blob.r[1], item.blob.r[2]));
+            }
+            /* 漂移件检查：哪块肉离所有关节都超过 35cm，就是"飞出去了/装错位置"。
+               头颅偏移被写成 0.52 米时，人头其实画在画面外，而关节点全在框内，
+               上一版判据是绿的——这条就是补那个洞的。 */
+            for (const item of (State.parts || []).concat(State.blobs || [])) {
+                if (!item.mesh.visible) continue;
+                const q = item.mesh.position;
+                let near = 1e9;
+                for (const k in jp) {
+                    const d2 = Math.hypot(q.x - jp[k][0], q.y - jp[k][1], q.z - jp[k][2]);
+                    if (d2 < near) near = d2;
+                }
+                if (near > 0.35) orphan++;
+            }
         }
-        return { ok: coverage > 3 && fill > 45 && ndcMax <= 0.99, coverage: +coverage.toFixed(1),
+        return { ok: coverage > 3 && fill > 45 && ndcMax <= 1.0 && orphan === 0, coverage: +coverage.toFixed(1),
                  fill: +fill.toFixed(1),
                  box: x1 > 0 ? [x1 - x0, y1 - y0] : null, buffer: w + 'x' + h,
-                 ndcMax: +ndcMax.toFixed(3), endOn: +endOn.toFixed(3),
+                 ndcMax: +ndcMax.toFixed(3), endOn: +endOn.toFixed(3), orphan: orphan,
                  alphaAny: alphaAny, centerPx: [buf[ci], buf[ci + 1], buf[ci + 2], buf[ci + 3]],
                  cam: [+State.camera.position.x.toFixed(2), +State.camera.position.y.toFixed(2), +State.camera.position.z.toFixed(2)],
                  aspect: +(State.camera.aspect || 0).toFixed(3), r: +State.camR.toFixed(2),

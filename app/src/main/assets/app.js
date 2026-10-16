@@ -2921,17 +2921,30 @@ function expandMuscleTargets(list) {
     return out;
 }
 
+/* 机位高低按动作所在平面给：矢状面动作一半以上躺在地上做，
+   平着看过去身体会压成一条斜线，看不出是臀桥还是摔倒。抬高一点
+   俯视，垫子、地面和抬起来的髋才同时看得见。 */
+function ex3DIsSagittal() {
+    try { return posePlane(exActivePoseKey) === "sagittal"; } catch (e) { return false; }
+}
+
+function ex3DPitch(base) {
+    let plane = "frontal";
+    try { plane = posePlane(exActivePoseKey) || "frontal"; } catch (e) {}
+    return base + (plane === "sagittal" ? 0.2 : 0.0);
+}
+
 function setEx3DAngle(mode) {
     ex3DCamera.mode = mode;
     if (mode === "3d") {
-        ex3DCamera.targetYaw = 0.42;
-        ex3DCamera.targetPitch = 0.12;
+        ex3DCamera.targetYaw = ex3DIsSagittal() ? 0.20 : 0.42;
+        ex3DCamera.targetPitch = ex3DPitch(0.12);
     } else if (mode === "front") {
         ex3DCamera.targetYaw = 0.0;
-        ex3DCamera.targetPitch = 0.06;
+        ex3DCamera.targetPitch = ex3DPitch(0.06);
     } else if (mode === "side") {
         ex3DCamera.targetYaw = 1.57;
-        ex3DCamera.targetPitch = 0.06;
+        ex3DCamera.targetPitch = ex3DPitch(0.06);
     }
     ["3d", "front", "side"].forEach(function(m) {
         const btn = document.getElementById("cam-btn-" + m);
@@ -3076,7 +3089,7 @@ function drawFrame(g, W, H, pose, arch, t) {
     if (window.Body3D && Body3D.status === "ready") {
         const cfg = ACTIVE_MUSCLES[arch] || { targets: [] };
         let ok = false;
-        try { ok = Body3D.setPose(pose, posePlane(exActivePoseKey), ex3DCamera.yaw, cfg.targets); }
+        try { ok = Body3D.setPose(pose, posePlane(exActivePoseKey), ex3DCamera.yaw, cfg.targets, ex3DCamera.pitch); }
         catch (e) { ok = false; console.warn("[Body3D] 这一帧没画成：" + e); }
         if (ok) {
             if (ex3DMode !== "model") { ex3DMode = "model"; }
