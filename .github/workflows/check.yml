@@ -1,0 +1,33 @@
+name: Integration checks
+on: [push, pull_request]
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: mkdir -p _audit_sandbox
+      - run: python tests/test_integration.py
+      - run: python tests/test_ai_contract.py
+      - run: python tests/legacy-backend.py
+      - run: node --check app/src/main/assets/app.js
+      - run: node --check app/src/main/assets/features.js
+      - run: node --check app/src/main/assets/sw.js
+      - run: node tests/legacy-frontend.mjs
+      - run: node tests/frontend-integration.mjs
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: bash gradlew assembleRelease lintRelease

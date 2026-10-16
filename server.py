@@ -1,4 +1,9 @@
 import csv
+import hmac
+import math
+import uuid
+import logging
+from app_modules.features import share_settings, public_projection, DEFAULT_SCOPE
 import io
 import os
 import sqlite3
@@ -17,24 +22,41 @@ from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, F
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
-DB_DIR = "/opt/qingsu/data"
-UPLOAD_DIR = "/opt/qingsu/uploads"
-WEB_DIR = "/opt/qingsu/web"
+DB_DIR = os.environ.get("QINGSU_DB_DIR", "/opt/qingsu/data")
+UPLOAD_DIR = os.environ.get("QINGSU_UPLOAD_DIR", "/opt/qingsu/uploads")
+WEB_DIR = os.environ.get("QINGSU_WEB_DIR", "/opt/qingsu/web")
 os.makedirs(DB_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(WEB_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(DB_DIR, "qingsu.db")
-SITE_BASE = "http://124.220.54.64"
+SITE_BASE = os.environ.get("QINGSU_SITE_BASE", "https://124.220.54.64").rstrip("/")
 
 app = FastAPI(title="轻塑·减脂塑形严管伴侣 API", version="5.0.0")
+
+@app.middleware("http")
+async def response_policy(request: Request, call_next):
+    request_id=uuid.uuid4().hex
+    started=time.monotonic()
+    try:response=await call_next(request)
+    except Exception as error:
+        logging.getLogger('uvicorn.error').error('application_failure id=%s error=%s',request_id,type(error).__name__)
+        response=JSONResponse({'detail':'服务器暂时无法处理，请稍后重试','request_id':request_id},status_code=500)
+    response.headers["X-Request-ID"]=request_id
+    response.headers["X-Content-Type-Options"]="nosniff"
+    response.headers["Referrer-Policy"]="no-referrer"
+    response.headers["X-Frame-Options"]="DENY"
+    if request.url.path.startswith(("/api/","/u/","/uploads/")):
+        response.headers["Cache-Control"]="private, no-store"
+    logging.getLogger("uvicorn.error").info("request id=%s path=%s status=%s elapsed_ms=%.1f",request_id,request.url.path.split("/")[1:2],response.status_code,(time.monotonic()-started)*1000)
+    return response
 
 app.add_middleware(
     CORSMiddleware,
     # 前端全部走 Authorization 头，不用 cookie，所以不需要也不应该带 credentials
-    allow_origins=["*"],
+    allow_origins=[SITE_BASE, "https://appassets.androidplatform.net"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,6 +65,9 @@ app.add_middleware(
 def get_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 def init_db():
@@ -163,7 +188,7 @@ def init_db():
 init_db()
 
 # Mount uploaded photos
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+# Photos are served by the authenticated/signed media route below.
 
 
 
@@ -195,10 +220,14 @@ def render_index_html():
     pairs = [
         ('href="style.css"', 'href="style.css?v=%s"', "style.css"),
         ('src="app.js"', 'src="app.js?v=%s"', "app.js"),
+        ('src="features.js"', 'src="features.js?v=%s"', "features.js"),
+        ('href="features.css"', 'href="features.css?v=%s"', "features.css"),
         ('href="/qingsu.apk"', 'href="/qingsu.apk?v=%s"', "qingsu.apk"),
     ]
     for old, fmt, name in pairs:
         content = content.replace(old, fmt % _asset_ver(os.path.join(WEB_DIR, name)))
+    api_path=urllib.parse.urlsplit(SITE_BASE).path.rstrip('/')
+    content=content.replace('<head>','<head>\n<script>window.__API_PATH__='+json.dumps(api_path).replace('<','\\u003c')+';</script>',1)
     return content
 
 
@@ -276,6 +305,18 @@ def migrate_db():
         FOREIGN KEY(user_id) REFERENCES users(id)
     )
     """)
+    c.execute("CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL)")
+    c.execute("INSERT OR IGNORE INTO sessions SELECT token_hash,id,? FROM users WHERE token_hash IS NOT NULL AND token_hash != ''", (int(time.time())+2592000,))
+    c.execute("UPDATE users SET token_hash=NULL, token=NULL")
+    c.execute("CREATE TABLE IF NOT EXISTS private_ai_answers (user_id INTEGER NOT NULL, question TEXT NOT NULL, answer TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(user_id,question))")
+    c.execute("CREATE TABLE IF NOT EXISTS daily_modes (user_id INTEGER NOT NULL, log_date TEXT NOT NULL, mode TEXT NOT NULL, PRIMARY KEY(user_id,log_date))")
+    c.execute("CREATE TABLE IF NOT EXISTS request_receipts (user_id INTEGER NOT NULL, request_key TEXT NOT NULL, kind TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(user_id,request_key,kind))")
+    for table in ("food_logs","weight_logs","workout_logs","takeout_events"):
+        c.execute("CREATE INDEX IF NOT EXISTS idx_%s_user_date ON %s(user_id,log_date)" % (table,table))
+    c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
+    c.execute("CREATE TABLE IF NOT EXISTS daily_metrics (user_id INTEGER NOT NULL, log_date TEXT NOT NULL, metrics_json TEXT NOT NULL, origin TEXT NOT NULL, PRIMARY KEY(user_id,log_date))")
+    c.execute("CREATE TABLE IF NOT EXISTS record_changes (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT NOT NULL, record_id INTEGER NOT NULL, previous_json TEXT NOT NULL, operation TEXT NOT NULL, created_at TEXT NOT NULL)")
+    _ensure_columns(c,"food_logs",[("source","TEXT DEFAULT 'legacy_estimate'"),("estimate_reason","TEXT")])
     conn.commit()
     conn.close()
 
@@ -325,6 +366,9 @@ def check_share(conn, username, key):
     user = c.fetchone()
     if not user or not key or key != (user["share_secret"] or ""):
         return None
+    settings=share_settings(conn,user['id'])
+    if not settings['enabled'] or (settings['expires_at'] and settings['expires_at']<time.time()):
+        return None
     return dict(user)
 
 
@@ -373,21 +417,40 @@ def hash_pw(pw: str) -> str:
     return hashlib.sha256(pw.encode()).hexdigest()
 
 def get_current_user(authorization: Optional[str] = Header(None)):
-    if not authorization:
+    if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="请先登录")
-    token = authorization.replace("Bearer ", "").strip()
-    conn = get_db()
-    c = conn.cursor()
-    # 库里只存令牌的 SHA-256，拖库也拿不到可用的登录态
-    c.execute("SELECT * FROM users WHERE token_hash = ?", (hash_token(token),))
-    user = c.fetchone()
+    token_hash = hash_token(authorization[7:].strip())
+    with get_db() as conn:
+        row = conn.execute("SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires_at>?", (token_hash,int(time.time()))).fetchone()
     conn.close()
-    if not user:
+    if not row:
         raise HTTPException(status_code=401, detail="登录已失效，请重新登录")
-    return dict(user)
+    user=dict(row); user["_session_hash"]=token_hash
+    return user
 
 # Models
-class RegisterReq(BaseModel):
+class ValidatedModel(BaseModel):
+    @field_validator('*', mode='after')
+    @classmethod
+    def validate_values(cls, value, info):
+        name=info.field_name
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError("数字必须有限")
+        if isinstance(value,str):
+            if name in ('username','password','food_name','plan_name','question') and not value.strip():
+                raise ValueError("内容不能为空")
+            if len(value)> (2000 if name=='answer' else 500):
+                raise ValueError("内容过长")
+        limits={'weight_jin':(40,600),'target_weight_jin':(40,600),'waist_cm':(0,300),'age':(18,100),'height':(80,250),'cal':(0,10000),'duration_minutes':(1,1440),'cal_burned':(0,10000),'cups_count':(0,80),'cal_avoided':(0,10000)}
+        if value is not None and name in limits and not limits[name][0]<=value<=limits[name][1]:
+            raise ValueError("数值超出允许范围")
+        if name=='gender' and value not in (None,'female','male'):
+            raise ValueError("性别无效")
+        if name=='day_mode' and value not in ('rest','workout'):
+            raise ValueError("日模式无效")
+        return value
+
+class RegisterReq(ValidatedModel):
     username: str
     password: str
     nickname: Optional[str] = None
@@ -398,12 +461,13 @@ class RegisterReq(BaseModel):
     target_weight_jin: Optional[float] = None
     goal_type: Optional[str] = "tone"
     dining_mode: Optional[str] = "takeout"
+    special_population: bool = False
 
-class LoginReq(BaseModel):
+class LoginReq(ValidatedModel):
     username: str
     password: str
 
-class ProfileUpdateReq(BaseModel):
+class ProfileUpdateReq(ValidatedModel):
     gender: Optional[str] = None
     age: Optional[int] = None
     height: Optional[float] = None
@@ -413,87 +477,50 @@ class ProfileUpdateReq(BaseModel):
     dining_mode: Optional[str] = None
     scene: Optional[str] = None
 
-class FoodLogReq(BaseModel):
+class FoodLogReq(ValidatedModel):
     slot: str
     food_name: str
     cal: Optional[int] = None
+    request_id: Optional[str] = None
 
-class WeightLogReq(BaseModel):
+class WeightLogReq(ValidatedModel):
     weight_jin: float
     waist_cm: Optional[float] = None
 
-class WorkoutLogReq(BaseModel):
+class WorkoutLogReq(ValidatedModel):
     duration_minutes: int = 20
     cal_burned: float = 220.0
     plan_name: str = "塑形训练"
+    request_id: Optional[str] = None
 
-class WaterLogReq(BaseModel):
+class WaterLogReq(ValidatedModel):
     cups_count: int
 
-class TakeoutEventReq(BaseModel):
+class TakeoutEventReq(ValidatedModel):
     event_type: str
     cal_avoided: Optional[float] = 0
     dish_name: Optional[str] = None
 
-class ModeReq(BaseModel):
+class ModeReq(ValidatedModel):
     day_mode: str = "rest"
 
-class ChecklistReq(BaseModel):
+class ChecklistReq(ValidatedModel):
     state: Optional[dict] = None
 
-class AskReq(BaseModel):
+class AskReq(ValidatedModel):
     question: str
+    route_only: bool = False
 
 # Helpers
-def compute_metrics(p):
-    wt_kg = p["weight_jin"] / 2.0
-    ht_cm = p["height"]
-    age = p["age"]
-    gender = p.get("gender", "female")
+def snapshot_metrics(c, user_id):
+    row=c.execute("SELECT * FROM profiles WHERE user_id=?",(user_id,)).fetchone()
+    if not row or any(row[k] is None for k in ("age","height","weight_jin","target_weight_jin")):return
+    payload=json.dumps(compute_metrics(dict(row)))
+    dates={r[0] for r in c.execute("SELECT log_date FROM food_logs WHERE user_id=? UNION SELECT log_date FROM workout_logs WHERE user_id=?",(user_id,user_id))}
+    dates.add(date.today().isoformat())
+    c.executemany("INSERT OR IGNORE INTO daily_metrics VALUES (?,?,?,?)",[(user_id,d,payload,"recorded" if d==date.today().isoformat() else "legacy_recalculation") for d in dates])
 
-    if gender == "male":
-        bmr = 10 * wt_kg + 6.25 * ht_cm - 5 * age + 5
-    else:
-        bmr = 10 * wt_kg + 6.25 * ht_cm - 5 * age - 161
-    bmr = round(bmr)
-    tdee = round(bmr * 1.35)
-
-    gt = p.get("goal_type", "female_hourglass")
-    if gt in ["male_v_taper", "tone", "female_hourglass"]:
-        deficit = 420
-        target = max(1300, tdee - deficit)
-        protein_ratio, carbs_ratio, fat_ratio = 0.35, 0.40, 0.25
-    elif gt in ["male_lean", "loss", "female_lean"]:
-        deficit = 500
-        target = max(1200, tdee - deficit)
-        protein_ratio, carbs_ratio, fat_ratio = 0.30, 0.45, 0.25
-    elif gt in ["male_muscular", "muscle", "female_athletic"]:
-        deficit = -250  # 盈余促肌肥大
-        target = tdee + 250
-        protein_ratio, carbs_ratio, fat_ratio = 0.35, 0.45, 0.20
-    elif gt in ["male_steady", "tight", "female_steady"]:
-        deficit = 550  # 大基数/啤酒肚稳健减脂
-        target = max(1300, tdee - deficit)
-        protein_ratio, carbs_ratio, fat_ratio = 0.30, 0.45, 0.25
-    else:
-        deficit = 420
-        target = max(1300, tdee - deficit)
-        protein_ratio, carbs_ratio, fat_ratio = 0.30, 0.40, 0.30
-
-    rest_cal = target - 50
-    workout_cal = target + 120
-
-    return {
-        "bmr": bmr,
-        "tdee": tdee,
-        "target_cal": target,
-        "rest_cal": rest_cal,
-        "workout_cal": workout_cal,
-        "deficit": deficit,
-        "protein_g": round(target * protein_ratio / 4),
-        "carbs_g": round(target * carbs_ratio / 4),
-        "fat_g": round(target * fat_ratio / 9)
-    }
+from app_modules.metrics import compute_metrics
 
 # ==================== Auth Endpoints ====================
 
@@ -512,12 +539,14 @@ def _body_or_400(age, height, weight_jin, target_weight_jin):
         weight_jin = float(weight_jin); target_weight_jin = float(target_weight_jin)
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail=u'\u5e74\u9f84/\u8eab\u9ad8/\u4f53\u91cd\u8981\u586b\u6570\u5b57')
-    if not (10 <= age <= 100):
+    if not (18 <= age <= 100):
         raise HTTPException(status_code=400, detail=u'\u5e74\u9f84\u8981\u5728 10~100 \u5c81\u4e4b\u95f4')
     if not (80 <= height <= 250):
         raise HTTPException(status_code=400, detail=u'\u8eab\u9ad8\u8981\u5728 80~250 \u5398\u7c73\u4e4b\u95f4')
     if not (40 <= weight_jin <= 600):
         raise HTTPException(status_code=400, detail=u'\u5f53\u524d\u4f53\u91cd\u8981\u5728 40~600 \u65a4\u4e4b\u95f4')
+    if target_weight_jin / 2 / ((height / 100) ** 2) < 18.5:
+        raise HTTPException(status_code=400, detail="目标体重对应BMI低于18.5，当前通用预算不适用于该目标，请调整目标或咨询专业人员")
     if not (40 <= target_weight_jin <= 600):
         raise HTTPException(status_code=400, detail=u'\u76ee\u6807\u4f53\u91cd\u8981\u5728 40~600 \u65a4\u4e4b\u95f4')
     return {'age': age, 'height': height,
@@ -526,6 +555,7 @@ def _body_or_400(age, height, weight_jin, target_weight_jin):
 
 @app.post("/api/register")
 def register(req: RegisterReq):
+    if req.special_population:raise HTTPException(400,'本版本只提供一般成人记录预算，不适用于孕哺期或需要个性化营养治疗的情况')
     body = _body_or_400(req.age, req.height, req.weight_jin, req.target_weight_jin)
     conn = get_db()
     c = conn.cursor()
@@ -540,36 +570,43 @@ def register(req: RegisterReq):
     share = secrets.token_urlsafe(9)
     nickname = req.nickname or req.username
 
-    c.execute(
-        "INSERT INTO users (username, password_hash, pw_salt, token_hash, share_secret, nickname, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (req.username.strip(), pw_hash, salt, hash_token(token), share, nickname, now)
-    )
-    user_id = c.lastrowid
+    try:
+        c.execute(
+            "INSERT INTO users (username, password_hash, pw_salt, token_hash, share_secret, nickname, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (req.username.strip(), pw_hash, salt, None, share, nickname, now)
+        )
+        user_id = c.lastrowid
+        c.execute('INSERT INTO share_settings VALUES (?,?,?,?)',(user_id,1,int(time.time())+7*86400,json.dumps(DEFAULT_SCOPE)))
+        c.execute("INSERT INTO sessions VALUES (?,?,?)", (hash_token(token),user_id,int(time.time())+2592000))
 
-    # Create profile
-    c.execute("""
-    INSERT INTO profiles (user_id, gender, age, height, weight_jin, target_weight_jin, goal_type, dining_mode, scene, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'home', ?)
-    """, (user_id, req.gender, body["age"], body["height"], body["weight_jin"],
-           body["target_weight_jin"], req.goal_type, req.dining_mode, now))
+        # Create profile
+        c.execute("""
+        INSERT INTO profiles (user_id, gender, age, height, weight_jin, target_weight_jin, goal_type, dining_mode, scene, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'home', ?)
+        """, (user_id, req.gender, body["age"], body["height"], body["weight_jin"],
+               body["target_weight_jin"], req.goal_type, req.dining_mode, now))
 
-    # Log initial baseline weight
-    today = date.today().isoformat()
-    # 注册不采集围度，这里必须留 0：填任何数字都会被当成"基准腰围"参与后续增减计算
-    c.execute("INSERT INTO weight_logs (user_id, log_date, weight_jin, waist_cm, created_at) VALUES (?, ?, ?, 0, ?)",
-              (user_id, today, req.weight_jin, now))
+        # Log initial baseline weight
+        today = date.today().isoformat()
+        # 注册不采集围度，这里必须留 0：填任何数字都会被当成"基准腰围"参与后续增减计算
+        c.execute("INSERT INTO weight_logs (user_id, log_date, weight_jin, waist_cm, created_at) VALUES (?, ?, ?, 0, ?)",
+                  (user_id, today, req.weight_jin, now))
 
-    # Initial cycle 1 baseline
-    c.execute("""
-    INSERT INTO body_cycles (user_id, cycle_num, cycle_name, photo_url, weight_jin, waist_cm, tone_score, ai_report, created_at)
-    VALUES (?, 1, '第 1 周期 · 减脂启动期 (第1-7天)', '', ?, 0, '待首次打卡', ?, ?)
-    """, (user_id, req.weight_jin,
-          "初始基准档案已建立。今日目标热量按您填写的身高体重年龄算出；食谱与动作库按所选身形从内置方案中取一套，尚未做过任何照片分析。",
-          now))
+        # Initial cycle 1 baseline
+        c.execute("""
+        INSERT INTO body_cycles (user_id, cycle_num, cycle_name, photo_url, weight_jin, waist_cm, tone_score, ai_report, created_at)
+        VALUES (?, 1, '第 1 周期 · 减脂启动期 (第1-7天)', '', ?, 0, '待首次打卡', ?, ?)
+        """, (user_id, req.weight_jin,
+              "初始基准档案已建立。今日目标热量按您填写的身高体重年龄算出；食谱与动作库按所选身形从内置方案中取一套，尚未做过任何照片分析。",
+              now))
 
-    conn.commit()
-    conn.close()
+        c.execute("UPDATE profiles SET cycle_started_at=? WHERE user_id=?", (today,user_id))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback();raise HTTPException(409,"用户名已存在，请登录或换一个用户名")
+    except Exception:conn.rollback();raise
+    finally:conn.close()
 
     return {
         "code": 0,
@@ -597,7 +634,8 @@ def login(req: LoginReq, request: Request):
         raise HTTPException(status_code=400, detail="用户名或密码错误")
 
     token = new_token()
-    c.execute("UPDATE users SET token_hash = ? WHERE id = ?", (hash_token(token), user["id"]))
+    c.execute("DELETE FROM sessions WHERE expires_at<=?", (int(time.time()),))
+    c.execute("INSERT INTO sessions VALUES (?,?,?)", (hash_token(token),user["id"],int(time.time())+2592000))
     if not user["pw_salt"]:
         # 老账号在这次成功登录后透明升级成 scrypt + 随机盐
         salt, pw_hash = make_pw(req.password)
@@ -605,7 +643,7 @@ def login(req: LoginReq, request: Request):
                   (salt, pw_hash, user["id"]))
     conn.commit()
     conn.close()
-    _login_fails.pop(key, None)
+    rate_reset("login:" + key)
     user = dict(user)
 
     return {
@@ -629,36 +667,39 @@ def get_me(user: dict = Depends(get_current_user)):
         "user": {"id": user["id"], "username": user["username"], "nickname": user["nickname"]},
         "profile": p,
         "metrics": metrics,
-        "public_url": f"http://124.220.54.64/u/{user['username']}"
+        "public_url": public_url_for(user)
     }
 
 @app.post("/api/profile/update")
 def update_profile(req: ProfileUpdateReq, user: dict = Depends(get_current_user)):
     conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT * FROM profiles WHERE user_id = ?", (user["id"],))
-    cur = dict(c.fetchone() or {})
+    try:
+        c = conn.cursor()
+        c.execute("SELECT * FROM profiles WHERE user_id = ?", (user["id"],))
+        cur = dict(c.fetchone() or {})
 
-    gender = req.gender if req.gender is not None else cur.get("gender", "female")
-    age = req.age if req.age is not None else cur.get("age")
-    height = req.height if req.height is not None else cur.get("height")
-    weight_jin = req.weight_jin if req.weight_jin is not None else cur.get("weight_jin")
-    target_weight_jin = req.target_weight_jin if req.target_weight_jin is not None else cur.get("target_weight_jin")
-    # 合并完再验一次：库里那行缺什么也要报错，不许拿 26/165/140/120 顶
-    _body_or_400(age, height, weight_jin, target_weight_jin)
-    goal_type = req.goal_type if req.goal_type is not None else cur.get("goal_type", "tone")
-    dining_mode = req.dining_mode if req.dining_mode is not None else cur.get("dining_mode", "takeout")
-    scene = req.scene if req.scene is not None else cur.get("scene", "home")
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        snapshot_metrics(c,user["id"])
+        gender = req.gender if req.gender is not None else cur.get("gender", "female")
+        age = req.age if req.age is not None else cur.get("age")
+        height = req.height if req.height is not None else cur.get("height")
+        weight_jin = req.weight_jin if req.weight_jin is not None else cur.get("weight_jin")
+        target_weight_jin = req.target_weight_jin if req.target_weight_jin is not None else cur.get("target_weight_jin")
+        # 合并完再验一次：库里那行缺什么也要报错，不许拿 26/165/140/120 顶
+        _body_or_400(age, height, weight_jin, target_weight_jin)
+        goal_type = req.goal_type if req.goal_type is not None else cur.get("goal_type", "tone")
+        dining_mode = req.dining_mode if req.dining_mode is not None else cur.get("dining_mode", "takeout")
+        scene = req.scene if req.scene is not None else cur.get("scene", "home")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    c.execute("""
-    UPDATE profiles
-    SET gender=?, age=?, height=?, weight_jin=?, target_weight_jin=?, goal_type=?, dining_mode=?, scene=?, updated_at=?
-    WHERE user_id = ?
-    """, (gender, age, height, weight_jin, target_weight_jin, goal_type, dining_mode, scene, now, user["id"]))
+        c.execute("""
+        UPDATE profiles
+        SET gender=?, age=?, height=?, weight_jin=?, target_weight_jin=?, goal_type=?, dining_mode=?, scene=?, updated_at=?
+        WHERE user_id = ?
+        """, (gender, age, height, weight_jin, target_weight_jin, goal_type, dining_mode, scene, now, user["id"]))
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    except Exception:conn.rollback();raise
+    finally:conn.close()
 
     return {"code": 0, "msg": "个人专属方案更新成功！"}
 
@@ -696,9 +737,9 @@ def compute_dashboard_data(user: dict) -> dict:
     today_meals = [dict(row) for row in c.fetchall()]
 
     # Real latest weight log
-    c.execute("SELECT * FROM weight_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user["id"],))
+    c.execute("SELECT * FROM weight_logs WHERE user_id = ? ORDER BY log_date DESC,id DESC LIMIT 1", (user["id"],))
     latest_wt = c.fetchone()
-    c.execute("SELECT weight_jin FROM weight_logs WHERE user_id = ? ORDER BY id ASC LIMIT 1", (user["id"],))
+    c.execute("SELECT weight_jin FROM weight_logs WHERE user_id = ? ORDER BY log_date ASC,id ASC LIMIT 1", (user["id"],))
     first_wt = c.fetchone()
     q_start = first_wt["weight_jin"] if first_wt else None
     current_weight = latest_wt["weight_jin"] if latest_wt else p.get("weight_jin", 140.0)
@@ -706,15 +747,16 @@ def compute_dashboard_data(user: dict) -> dict:
     # Calculate real remaining calorie budget
     # 运动日比休息日多 170 kcal（workout_cal - rest_cal），切换真的会改额度
     target_cal = metrics["target_cal"]
-    day_mode = (p.get("day_mode") or "rest")
+    mode_row=c.execute("SELECT mode FROM daily_modes WHERE user_id=? AND log_date=?", (user["id"],today)).fetchone()
+    day_mode = mode_row["mode"] if mode_row else "rest"
     budget_cal = metrics["workout_cal"] if day_mode == "workout" else metrics["rest_cal"]
-    remaining_cal = round(budget_cal - today_consumed + today_burned)
+    remaining_cal = round(budget_cal - today_consumed)
 
     # Takeout lock status
     takeout_locked = remaining_cal <= 0
     takeout_warning = ""
     if takeout_locked:
-        takeout_warning = f"🚨 今日热量已超标 {abs(remaining_cal)} kcal！外卖点单已被严格限制！请饮用温开水或冬瓜汤消水肿！"
+        takeout_warning = f"今日已记热量超过估算预算 {abs(remaining_cal)} kcal。请先核对份量与记录；单日预算不用于诊断，也不建议通过断食补偿。"
 
     # Consecutive over-budget check (100% REAL)
     c.execute("""
@@ -736,7 +778,9 @@ def compute_dashboard_data(user: dict) -> dict:
     # Consecutive slacking check (100% REAL)
     consecutive_slacking = 0
     cur_d = date.today() - timedelta(days=1)
+    joined=date.fromisoformat(user["created_at"][:10])
     for _ in range(7):
+        if cur_d < joined: break
         ds = cur_d.isoformat()
         c.execute("SELECT id FROM workout_logs WHERE user_id = ? AND log_date = ?", (user["id"], ds))
         if not c.fetchone():
@@ -799,11 +843,11 @@ def compute_dashboard_data(user: dict) -> dict:
             span = max(1, (d1 - d0).days)
             rate = (wt_rows[-1]["weight_jin"] - wt_rows[0]["weight_jin"]) / span
             left = wt_rows[-1]["weight_jin"] - (p.get("target_weight_jin") or 0)
-            if rate < -0.01 and left > 0:
+            if span >= 7 and rate < -0.01 and left > 0:
                 eta_days = round(left / abs(rate))
         except (ValueError, TypeError, ZeroDivisionError):
             eta_days = None
-    c.execute("SELECT log_date FROM weight_logs WHERE user_id=? ORDER BY id DESC LIMIT 1", (user["id"],))
+    c.execute("SELECT substr(created_at,1,10) AS log_date FROM body_cycles WHERE user_id=? ORDER BY id DESC LIMIT 1", (user["id"],))
     last_meas = c.fetchone()
     days_since_measure = None
     if last_meas:
@@ -827,6 +871,9 @@ def compute_dashboard_data(user: dict) -> dict:
     latest_cycle = c.fetchone()
 
     conn.close()
+    latest_cycle=dict(latest_cycle) if latest_cycle else None
+    if latest_cycle and latest_cycle.get("photo_url"):
+        latest_cycle["photo_url"]=signed_photo(latest_cycle["photo_url"])
 
     return {
         "today_date": today,
@@ -872,7 +919,7 @@ def compute_dashboard_data(user: dict) -> dict:
             "week_launched": (wk["launched"] if wk else 0),
             "week_events": (wk["total"] if wk else 0),
         },
-        "public_url": f"http://124.220.54.64/u/{user['username']}"
+        "public_url": public_url_for(user)
     }
 
 @app.get("/api/dashboard")
@@ -889,18 +936,22 @@ def get_public_dashboard(username: str, k: Optional[str] = None, request: Reques
         conn.close()
         raise HTTPException(status_code=404, detail="链接不完整或已失效")
     data = compute_dashboard_data(user)
+    data.pop("checklist",None)
     cc = conn.cursor()
     cc.execute("SELECT COUNT(*) AS n FROM cheers WHERE user_id = ?", (user["id"],))
     row = cc.fetchone()
     data["cheer_total"] = int(row["n"] or 0) if row else 0
+    settings=share_settings(conn,user['id'])
     conn.close()
-    return data
+    if settings['scope'].get('photos') and data.get('latest_cycle') and data['latest_cycle'].get('photo_url'):
+        data['latest_cycle']['photo_url']=signed_photo(data['latest_cycle']['photo_url'],user)
+    return public_projection(data,settings)
 
 
 CHEER_KINDS = ("稳步减脂", "饮食超干净", "肌肉在生长", "喝水达人")
 
 
-class CheerReq(BaseModel):
+class CheerReq(ValidatedModel):
     username: str
     k: Optional[str] = None
     kind: str
@@ -937,154 +988,20 @@ def post_cheer(req: CheerReq, request: Request = None):
 
 # ==================== Real Food Logging with AI & Nutrition KB ====================
 
-FOOD_KB_ITEMS = [
-    # 早餐与饮品
-    ("茶叶蛋", 75, 6.5, 1.5, 5.0),
-    ("水煮蛋", 70, 6.5, 0.5, 5.0),
-    ("鸡蛋", 75, 6.5, 1.0, 5.0),
-    ("荷包蛋", 120, 6.5, 1.0, 10.0),
-    ("优酸乳", 130, 2.5, 22.0, 2.5),
-    ("酸奶", 135, 4.5, 16.0, 4.5),
-    ("纯牛奶", 130, 6.5, 10.0, 6.5),
-    ("牛奶", 130, 6.5, 10.0, 6.5),
-    ("豆浆", 80, 6.0, 4.0, 3.0),
-    ("油条", 270, 4.5, 30.0, 15.0),
-    ("肉包子", 230, 7.5, 30.0, 9.0),
-    ("包子", 220, 7.0, 32.0, 7.0),
-    ("菜包", 170, 4.0, 32.0, 3.0),
-    ("玉米", 110, 3.5, 23.0, 1.2),
-    ("红薯", 130, 2.0, 30.0, 0.3),
-    ("燕麦", 150, 5.0, 26.0, 3.0),
-    # 荤菜与副食
-    ("猪耳朵", 180, 18.0, 0.5, 11.0),
-    ("肥肠", 320, 14.0, 1.0, 28.0),
-    ("春卷饼", 160, 3.5, 20.0, 7.5),
-    ("春卷", 160, 3.5, 20.0, 7.5),
-    ("干捞粉丝", 360, 4.0, 65.0, 9.0),
-    ("粉丝", 300, 2.0, 65.0, 3.0),
-    ("豆腐", 90, 9.0, 2.5, 4.5),
-    ("豆皮", 140, 12.0, 4.0, 8.0),
-    ("鸡胸肉", 135, 28.0, 0.0, 2.5),
-    ("鸡胸", 135, 28.0, 0.0, 2.5),
-    ("鸡腿", 200, 19.0, 0.0, 13.0),
-    ("大虾", 90, 18.0, 0.5, 1.0),
-    ("虾仁", 85, 18.0, 0.5, 0.8),
-    ("虾", 90, 18.0, 0.5, 1.0),
-    ("鱼肉", 120, 20.0, 0.0, 3.5),
-    ("鱼", 120, 20.0, 0.0, 3.5),
-    ("牛肉片", 160, 24.0, 0.0, 7.0),
-    ("牛肉", 180, 24.0, 0.0, 8.0),
-    ("羊肉", 210, 20.0, 0.0, 14.0),
-    ("猪肉", 250, 17.0, 0.0, 20.0),
-    ("排骨", 280, 18.0, 0.0, 22.0),
-    # 主食与快餐
-    ("牛肉面", 550, 26.0, 68.0, 18.0),
-    ("拉面", 520, 18.0, 72.0, 16.0),
-    ("面条", 280, 8.5, 55.0, 2.0),
-    ("米饭", 230, 4.5, 50.0, 0.5),
-    ("米线", 430, 12.0, 65.0, 12.0),
-    ("螺蛳粉", 580, 14.0, 75.0, 24.0),
-    ("麻辣烫", 460, 18.0, 45.0, 22.0),
-    ("猪脚饭", 850, 28.0, 85.0, 42.0),
-    ("黄焖鸡", 560, 32.0, 48.0, 26.0),
-    ("炒饭", 580, 12.0, 80.0, 22.0),
-    ("水饺", 280, 11.0, 36.0, 9.0),
-    ("饺子", 280, 11.0, 36.0, 9.0),
-    ("馄饨", 260, 9.0, 34.0, 8.0),
-    ("炸鸡", 450, 22.0, 18.0, 30.0),
-    ("汉堡", 460, 18.0, 42.0, 24.0),
-    ("薯条", 280, 3.0, 35.0, 15.0),
-    ("奶茶", 360, 3.0, 55.0, 14.0),
-    ("火锅", 700, 30.0, 35.0, 48.0),
-    # 蔬菜蔬果
-    ("生菜", 25, 1.5, 4.0, 0.3),
-    ("黄瓜", 20, 1.0, 3.5, 0.2),
-    ("番茄", 25, 1.2, 4.5, 0.2),
-    ("西红柿", 25, 1.2, 4.5, 0.2),
-    ("西兰花", 35, 3.0, 5.0, 0.4),
-    ("青菜", 25, 1.5, 4.0, 0.3),
-    ("苹果", 70, 0.5, 17.0, 0.2),
-    ("香蕉", 95, 1.2, 23.0, 0.3),
-]
-
-def parse_food_nutrition(food_name: str) -> dict:
-    """打卡走的必须是确定性路径：能匹配成分表就按表算，匹配不到就按关键词粗估。
-
-    这里刻意不调模型。实测把本机 0.5B 放进写入路径后，一次打卡要等 2.0~2.6 秒，
-    而它给的数字又无法交叉验证——成分表没匹配到时任何 30~3500 的数都会被放行，
-    reason 里写的克数和落库的克数还经常对不上。慢和编造一起发生，比原来的粗估更糟。
-    """
-    name = (food_name or "").strip()
-
-    mult = 1.0
-    if any(k in name for k in ("吃饱", "吃撑", "大份", "加倍", "超大", "两碗", "两个")):
-        mult = 1.2
-    elif any(k in name for k in ("小份", "少许", "几口", "半个", "半份")):
-        mult = 0.75
-
-    parts = re.split(r"[,，、\s;；]+", name)
-    matched_items = []
-    tot_cal = 0
-    tot_pro = 0.0
-    tot_carb = 0.0
-    tot_fat = 0.0
-
-    for part in parts:
-        p_clean = part.strip()
-        if not p_clean:
-            continue
-        best_match = None
-        for item_name, cal, pro, carb, fat in FOOD_KB_ITEMS:
-            if item_name in p_clean:
-                if not best_match or len(item_name) > len(best_match[0]):
-                    best_match = (item_name, cal, pro, carb, fat)
-        if best_match:
-            matched_items.append(best_match[0])
-            tot_cal += best_match[1]
-            tot_pro += best_match[2]
-            tot_carb += best_match[3]
-            tot_fat += best_match[4]
-
-    if tot_cal > 0:
-        # 只匹配到菜名里的一部分食材时，差额必须说出来，不能让它看起来像算全了
-        covered = sum(len(x) for x in set(matched_items))
-        partial = covered < len(name) * 0.6
-        uniq = []
-        for x in matched_items:
-            if x not in uniq:
-                uniq.append(x)
-        reason = "内置成分表匹配到：" + "、".join(uniq)
-        if partial:
-            reason += "（其余字面没认出来，这一餐可能比这个数高）"
-        return {
-            "cal": int(round(tot_cal * mult)),
-            "protein_g": round(tot_pro * mult, 1),
-            "carbs_g": round(tot_carb * mult, 1),
-            "fat_g": round(tot_fat * mult, 1),
-            "source": "nutrition_kb_partial" if partial else "nutrition_kb",
-            "reason": reason,
-        }
-
-    base_cal = 380
-    if any(k in name for k in ["炸", "烤", "红油", "麻酱", "猪脚", "奶茶", "全糖"]): base_cal += 260
-    if any(k in name for k in ["米饭", "面条", "包子", "饺子", "馒头", "粉", "面包"]): base_cal += 150
-    if any(k in name for k in ["肉", "排骨", "牛", "羊", "猪"]): base_cal += 130
-    if any(k in name for k in ["生菜", "黄瓜", "番茄", "西兰花", "冬瓜", "青菜"]): base_cal -= 50
-    base_cal = max(80, int(round(base_cal * mult)))
-
-    return {
-        "cal": base_cal,
-        "protein_g": round(base_cal * 0.25 / 4, 1),
-        "carbs_g": round(base_cal * 0.45 / 4, 1),
-        "fat_g": round(base_cal * 0.30 / 9, 1),
-        "source": "nutrition_heuristic",
-        "reason": "菜名没在成分表里，按烹饪方式关键词粗估（不是称重，误差会大）",
-    }
+from app_modules.nutrition import FOOD_KB_ITEMS, parse_food_nutrition
 
 @app.post("/api/food/log")
 def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
     conn = get_db()
     c = conn.cursor()
+    snapshot_metrics(c,user["id"])
+    request_id=getattr(req,"request_id",None)
+    if request_id:
+        c.execute("INSERT OR IGNORE INTO request_receipts VALUES (?,?,?,?)", (user["id"],request_id,"food",datetime.now().isoformat()))
+        if c.rowcount==0:
+            conn.close()
+            return {"code":0,"duplicate":True,"msg":"这笔记录已保存，无需重复提交"}
+
     today = date.today().isoformat()
     now_time = datetime.now().strftime("%H:%M")
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1097,10 +1014,9 @@ def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
     how_parsed = "direct"
     reason = ""
 
-    if est_cal:
-        protein_g = round(est_cal * 0.25 / 4, 1)
-        carbs_g = round(est_cal * 0.45 / 4, 1)
-        fat_g = round(est_cal * 0.30 / 9, 1)
+    if est_cal is not None:
+        protein_g = carbs_g = fat_g = 0.0
+        reason = "手填热量；宏量未知，不按比例倒推"
     else:
         parsed = parse_food_nutrition(name)
         est_cal = parsed["cal"]
@@ -1115,6 +1031,8 @@ def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (user["id"], today, req.slot, name, est_cal, protein_g, carbs_g, fat_g, now_time, created_at))
 
+    c.execute("UPDATE food_logs SET source=?,estimate_reason=? WHERE id=?",(how_parsed,reason,c.lastrowid))
+    c.execute("DELETE FROM daily_reviews WHERE user_id=? AND log_date=?",(user["id"],today))
     conn.commit()
     conn.close()
 
@@ -1136,6 +1054,7 @@ def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
 def log_weight(req: WeightLogReq, user: dict = Depends(get_current_user)):
     conn = get_db()
     c = conn.cursor()
+    snapshot_metrics(c,user["id"])
     today = date.today().isoformat()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1149,6 +1068,7 @@ def log_weight(req: WeightLogReq, user: dict = Depends(get_current_user)):
     c.execute("UPDATE profiles SET weight_jin = ?, updated_at = ? WHERE user_id = ?",
               (req.weight_jin, now, user["id"]))
 
+    c.execute("DELETE FROM daily_reviews WHERE user_id=? AND log_date=?",(user["id"],today))
     conn.commit()
     conn.close()
 
@@ -1160,6 +1080,14 @@ def log_weight(req: WeightLogReq, user: dict = Depends(get_current_user)):
 def log_workout(req: WorkoutLogReq, user: dict = Depends(get_current_user)):
     conn = get_db()
     c = conn.cursor()
+    snapshot_metrics(c,user["id"])
+    request_id=getattr(req,"request_id",None)
+    if request_id:
+        c.execute("INSERT OR IGNORE INTO request_receipts VALUES (?,?,?,?)", (user["id"],request_id,"workout",datetime.now().isoformat()))
+        if c.rowcount==0:
+            conn.close()
+            return {"code":0,"duplicate":True,"msg":"这笔记录已保存，无需重复提交"}
+
     today = date.today().isoformat()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1168,12 +1096,13 @@ def log_workout(req: WorkoutLogReq, user: dict = Depends(get_current_user)):
     VALUES (?, ?, ?, ?, ?, ?)
     """, (user["id"], today, req.duration_minutes, req.cal_burned, req.plan_name, now))
     # 练了就是运动日：当天额度自动抬到 workout_cal，不用用户再手动切
-    c.execute("UPDATE profiles SET day_mode = 'workout' WHERE user_id = ?", (user["id"],))
+    c.execute("INSERT INTO daily_modes VALUES (?,?,'workout') ON CONFLICT(user_id,log_date) DO UPDATE SET mode='workout'", (user["id"],today))
 
+    c.execute("DELETE FROM daily_reviews WHERE user_id=? AND log_date=?",(user["id"],today))
     conn.commit()
     conn.close()
 
-    return {"code": 0, "msg": f"🏆 今日训练打卡成功！真实消耗 -{req.cal_burned} kcal 已计入！"}
+    return {"code": 0, "msg": f"🏆 今日训练打卡成功！估算消耗 {req.cal_burned} kcal 已记录！"}
 
 # ==================== Real Water Logging ====================
 
@@ -1190,6 +1119,7 @@ def update_water(req: WaterLogReq, user: dict = Depends(get_current_user)):
     ON CONFLICT(user_id, log_date) DO UPDATE SET cups_count = excluded.cups_count, updated_at = excluded.updated_at
     """, (user["id"], today, req.cups_count, now))
 
+    c.execute("DELETE FROM daily_reviews WHERE user_id=? AND log_date=?",(user["id"],today))
     conn.commit()
     conn.close()
 
@@ -1261,47 +1191,71 @@ def _progression(prev_weight, prev_waist, new_weight, new_waist, cycle_num, day,
 
 
 async def _new_cycle(user, weight_jin, waist_cm, photo, label):
+    if not math.isfinite(weight_jin) or not 40<=weight_jin<=600 or not math.isfinite(waist_cm or 0) or not 0<=(waist_cm or 0)<=300:
+        raise HTTPException(status_code=400,detail="体重或围度超出范围")
+    raw=None
+    if photo and getattr(photo,"filename",None):
+        raw=await photo.read(8*1024*1024+1)
+        if len(raw)>8*1024*1024:raise HTTPException(413,"照片请小于8MB")
+    from starlette.concurrency import run_in_threadpool
+    return await run_in_threadpool(_persist_cycle,user,weight_jin,waist_cm,raw,label)
+
+
+def _persist_cycle(user,weight_jin,waist_cm,raw,label):
+    image_bytes=None
+    if raw:
+        try:
+            from PIL import Image, ImageOps
+            with Image.open(io.BytesIO(raw)) as image:
+                if image.format not in ("JPEG","PNG","WEBP") or image.width*image.height>20000000:
+                    raise ValueError("图片格式或尺寸不支持")
+                image=ImageOps.exif_transpose(image).convert("RGB")
+                image.thumbnail((2400,2400)); out=io.BytesIO(); image.save(out,format="JPEG",quality=85)
+                image_bytes=out.getvalue()
+        except Exception:
+            raise HTTPException(status_code=400,detail="请选择有效的JPEG、PNG或WebP图片")
     conn = get_db()
-    c = conn.cursor()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    today = date.today().isoformat()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        c = conn.cursor()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        today = date.today().isoformat()
 
-    c.execute("SELECT * FROM body_cycles WHERE user_id = ? ORDER BY cycle_num DESC LIMIT 1", (user["id"],))
-    last_cycle = c.fetchone()
-    new_cycle_num = (last_cycle["cycle_num"] if last_cycle else 0) + 1
+        c.execute("SELECT * FROM body_cycles WHERE user_id = ? ORDER BY cycle_num DESC LIMIT 1", (user["id"],))
+        last_cycle = c.fetchone()
+        new_cycle_num = (last_cycle["cycle_num"] if last_cycle else 0) + 1
 
-    photo_url = ""
-    if photo and getattr(photo, "filename", None):
-        ext = os.path.splitext(photo.filename)[1] or ".jpg"
-        fname = f"user_{user['id']}_cycle_{new_cycle_num}_{int(time.time())}{ext}"
-        with open(os.path.join(UPLOAD_DIR, fname), "wb") as f:
-            f.write(await photo.read())
-        photo_url = f"/uploads/{fname}"
-    elif last_cycle and last_cycle["photo_url"]:
-        photo_url = last_cycle["photo_url"]
+        photo_url = ""
+        if image_bytes:
+            fname=uuid.uuid4().hex+".jpg"
+            with open(os.path.join(UPLOAD_DIR,fname),"wb") as f: f.write(image_bytes)
+            photo_url=f"/uploads/{fname}"
+        elif last_cycle and last_cycle["photo_url"]:
+            photo_url = last_cycle["photo_url"]
 
-    c.execute("SELECT cycle_started_at FROM profiles WHERE user_id = ?", (user["id"],))
-    pr = c.fetchone()
-    day = _cycle_day(pr["cycle_started_at"] if pr else None)
+        c.execute("SELECT cycle_started_at FROM profiles WHERE user_id = ?", (user["id"],))
+        pr = c.fetchone()
+        day = _cycle_day(pr["cycle_started_at"] if pr else None)
 
-    cycle_name, tone_score, ai_report, _, _ = _progression(
-        last_cycle["weight_jin"] if last_cycle else None,
-        last_cycle["waist_cm"] if last_cycle else None,
-        weight_jin, waist_cm, new_cycle_num, day, bool(photo_url))
+        cycle_name, tone_score, ai_report, _, _ = _progression(
+            last_cycle["weight_jin"] if last_cycle else None,
+            last_cycle["waist_cm"] if last_cycle else None,
+            weight_jin, waist_cm, new_cycle_num, day, bool(photo_url))
 
-    c.execute("""
-    INSERT INTO body_cycles (user_id, cycle_num, cycle_name, photo_url, weight_jin, waist_cm, tone_score, ai_report, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (user["id"], new_cycle_num, cycle_name, photo_url, weight_jin, waist_cm or 0,
-          tone_score, ai_report, now))
-    c.execute("INSERT INTO weight_logs (user_id, log_date, weight_jin, waist_cm, created_at) VALUES (?, ?, ?, ?, ?)",
-              (user["id"], today, weight_jin, waist_cm or 0, now))
-    c.execute("UPDATE profiles SET weight_jin = ?, cycle_started_at = ?, updated_at = ? WHERE user_id = ?",
-              (weight_jin, today, now, user["id"]))
-    conn.commit()
-    conn.close()
+        c.execute("""
+        INSERT INTO body_cycles (user_id, cycle_num, cycle_name, photo_url, weight_jin, waist_cm, tone_score, ai_report, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user["id"], new_cycle_num, cycle_name, photo_url, weight_jin, waist_cm or 0,
+              tone_score, ai_report, now))
+        c.execute("INSERT INTO weight_logs (user_id, log_date, weight_jin, waist_cm, created_at) VALUES (?, ?, ?, ?, ?)",
+                  (user["id"], today, weight_jin, waist_cm or 0, now))
+        c.execute("UPDATE profiles SET weight_jin = ?, cycle_started_at = ?, updated_at = ? WHERE user_id = ?",
+                  (weight_jin, today, now, user["id"]))
+        conn.commit()
+    except Exception:conn.rollback();raise
+    finally:conn.close()
     return {"code": 0, "msg": f"🎉 {label}已记录，第 {new_cycle_num} 周期安排已生成",
-            "cycle_num": new_cycle_num, "photo_url": photo_url,
+            "cycle_num": new_cycle_num, "photo_url": signed_photo(photo_url) if photo_url else "",
             "cycle_day": day, "ai_report": ai_report}
 
 
@@ -1332,7 +1286,7 @@ def set_day_mode(req: ModeReq, user: dict = Depends(get_current_user)):
     """休息日与运动日的差别落在"今天被允许吃多少"上，不只是换个按钮颜色。"""
     mode = req.day_mode if req.day_mode in ("rest", "workout") else "rest"
     conn = get_db()
-    conn.cursor().execute("UPDATE profiles SET day_mode = ? WHERE user_id = ?", (mode, user["id"]))
+    conn.execute("INSERT INTO daily_modes VALUES (?,?,?) ON CONFLICT(user_id,log_date) DO UPDATE SET mode=excluded.mode", (user["id"],date.today().isoformat(),mode))
     conn.commit()
     conn.close()
     return {"code": 0, "day_mode": mode}
@@ -1362,9 +1316,9 @@ def export_csv(user: dict = Depends(get_current_user)):
     w = csv.writer(out)
     w.writerow(["表", "日期", "项目", "数值", "备注"])
     for name, sql, cols in [
-        ("饮食", "SELECT log_date, slot, food_name, cal, protein_g, carbs_g, fat_g, time_str FROM food_logs WHERE user_id=? ORDER BY id",
-         lambda r: [r["log_date"], r["slot"], r["food_name"], r["cal"],
-                    f"蛋白{r['protein_g']}g 碳水{r['carbs_g']}g 脂肪{r['fat_g']}g {r['time_str'] or ''}"]),
+        ("饮食", "SELECT log_date, slot, food_name, cal, protein_g, carbs_g, fat_g, time_str, source, estimate_reason FROM food_logs WHERE user_id=? ORDER BY id",
+         lambda r: [r["log_date"], r["slot"]+" · "+r["food_name"], r["cal"],
+                    (f"蛋白{r['protein_g']}g 碳水{r['carbs_g']}g 脂肪{r['fat_g']}g（估算）" if r['source'] in ('nutrition_kb','nutrition_kb_partial') else "宏量未知")+f"；来源:{r['source']}；{r['estimate_reason'] or ''}"]),
         ("体重", "SELECT log_date, weight_jin, waist_cm FROM weight_logs WHERE user_id=? ORDER BY id",
          lambda r: [r["log_date"], "空腹体重", r["weight_jin"], f"腰围 {r['waist_cm'] or '未填'} cm"]),
         ("训练", "SELECT log_date, duration_minutes, cal_burned, plan_name FROM workout_logs WHERE user_id=? ORDER BY id",
@@ -1379,7 +1333,7 @@ def export_csv(user: dict = Depends(get_current_user)):
     ]:
         for row in c.execute(sql, (user["id"],)):
             vals = cols(dict(row))
-            w.writerow([name] + vals)
+            w.writerow([("\'"+v) if isinstance(v,str) and v.lstrip().startswith(("=","+","-","@","\t","\r")) else v for v in [name]+vals])
     conn.close()
     return Response(content="\ufeff" + out.getvalue(),
                     media_type="text/csv; charset=utf-8",
@@ -1460,6 +1414,9 @@ def web_search(query, limit=4):
 
 
 def answer_from_user_data(q, d):
+    from app_modules.fact_scopes import answer as scoped_answer
+    scoped=scoped_answer(q,d,get_db,_deficit_rows)
+    if scoped:return scoped
     """能用自己的真实流水回答的问题优先在这里答，一句都不编。"""
     m = d["metrics"]
     consumed, burned = d["today_consumed"], d["today_burned"]
@@ -1546,7 +1503,7 @@ def answer_from_user_data(q, d):
                 f"今天{'已经练过' if d.get('today_workout_done') else '还没练'}。")
 
     if any(k in q for k in ("维持代谢", "基础代谢", "TDEE", "tdee", "BMR")):
-        return (f"你的维持代谢（TDEE）是 <strong>{m['tdee']} kcal</strong>，"
+        return (f"公式估算的维持代谢（TDEE）约为 <strong>{m['tdee']} kcal</strong>，"
                 f"基础代谢（BMR）约 {m.get('bmr', '—')} kcal。"
                 f"净缺口按 TDEE + 当日训练消耗 − 当日摄入算，不是按 BMR 算——"
                 f"按 BMR 记账会把每天的活动消耗漏掉。")
@@ -1561,9 +1518,9 @@ def answer_from_user_data(q, d):
 
     if any(k in q for k in ("缺口", "赤字", "净缺")):
         if not consumed and not burned:
-            return "今天还没有任何摄入或训练记录，所以缺口是 0——没有记录就没有缺口，我不猜。"
+            return "今天没有可计算的完整摄入与训练记录，缺口未知；未记录不等于零摄入或零缺口。"
         net = round(m["tdee"] + burned - consumed)
-        return (f"今天净缺口 <strong>{net} kcal</strong>"
+        return (f"按已记内容暂算缺口 <strong>{net} kcal</strong>（未确认完整时不能代表全天）"
                 f"（维持代谢 {m['tdee']} + 训练消耗 {burned} − 摄入 {consumed}），"
                 f"你的身形目标缺口是 {m['deficit']} kcal。")
 
@@ -1603,7 +1560,7 @@ def answer_from_user_data(q, d):
         mc = d["today_macros"]
         return (f"目标：蛋白 {m['protein_g']}g / 慢碳 {m['carbs_g']}g / 脂肪 {m['fat_g']}g。"
                 f"今天记录到的：蛋白 {mc['protein']}g / 碳水 {mc['carbs']}g / 脂肪 {mc['fat']}g。"
-                f"注意实际克数是按估算热量的 25%/45%/30% 固定比例倒推的，不是真实营养数据。")
+                f"这些是匹配食材的估算汇总；手填热量或未匹配食材的宏量未知，不能据此认定全天营养充足。")
 
     lc = d.get("latest_cycle")
     if lc and any(k in q for k in ("计划", "安排", "进阶", "下一步")):
@@ -1613,7 +1570,7 @@ def answer_from_user_data(q, d):
 
 
 # ==================== Redis 与 AI 引擎状态（第五批后续） ====================
-# Redis 用 stdlib 直连 RESP，不引 redis-py：这台机的运行时依赖越少越好装、越好回滚。
+# Redis uses the bounded client in app_modules.cache.
 # 所有 Redis 调用都允许失败并退回进程内实现——缓存挂了不能把整个应用带崩。
 _REDIS_HOST = os.environ.get("QINGSU_REDIS_HOST", "127.0.0.1")
 _REDIS_PORT = int(os.environ.get("QINGSU_REDIS_PORT", "6379"))
@@ -1622,67 +1579,17 @@ _redis_last_err = [""]      # 最近一次 Redis 失败原因，状态接口要�
 _redis_seen = [False]
 
 
-def _redis_read(f):
-    """按 RESP 类型递归读一条完整回复。
-
-    靠数换行符判断读完是不可靠的：空数组、批量回复、空值回复都会读歪，
-    所以这里严格按首字节分支走。
-    """
-    line = f.readline()
-    if not line:
-        raise OSError("redis closed")
-    head = line[:1]
-    rest = line[1:].rstrip(b"\r\n")
-    if head == b"+":
-        return rest.decode("utf-8", "replace")
-    if head == b":":
-        return int(rest or b"0")
-    if head == b"-":
-        raise OSError(rest.decode("utf-8", "replace"))
-    if head == b"$":
-        n = int(rest)
-        if n < 0:
-            return None
-        data = f.read(n)
-        f.read(2)
-        return data.decode("utf-8", "replace")
-    if head == b"*":
-        n = int(rest)
-        if n < 0:
-            return None
-        return [_redis_read(f) for _ in range(n)]
-    raise OSError("bad RESP head")
-
-
 def _redis_cmd(args, timeout=0.35):
-    """发一条 RESP 命令，返回 (ok, value)。不可用返回 (False, None)，调用方自己兜底。"""
-    import socket
-    if time.time() < _redis_fail_until[0]:
-        return False, None
-    sock = None
+    if time.time() < _redis_fail_until[0]:return False,None
     try:
-        sock = socket.create_connection((_REDIS_HOST, _REDIS_PORT), timeout=timeout)
-        buf = bytearray(("*%d\r\n" % len(args)).encode("ascii"))
-        for a in args:
-            b = str(a).encode("utf-8")
-            buf += b"$%d\r\n" % len(b)
-            buf += b
-            buf += b"\r\n"
-        sock.sendall(bytes(buf))
-        val = _redis_read(sock.makefile("rb"))
-        _redis_seen[0] = True
-        _redis_last_err[0] = ""
-        return True, val
+        from app_modules.cache import command
+        value=command(args);_redis_seen[0]=True;_redis_last_err[0]=""
+        return True,value
     except Exception as e:
-        _redis_fail_until[0] = time.time() + 30
-        _redis_last_err[0] = "%s: %s" % (type(e).__name__, str(e)[:90])
-        return False, None
-    finally:
-        if sock is not None:
-            try:
-                sock.close()
-            except Exception:
-                pass
+        _redis_fail_until[0]=time.time()+30
+        _redis_last_err[0]=type(e).__name__
+        logging.getLogger("uvicorn.error").warning("cache_degraded error=%s",type(e).__name__)
+        return False,None
 
 
 def redis_up():
@@ -1699,12 +1606,15 @@ def rate_hit(key, limit, window_sec):
     这条是"失败要看得见"的落点：返回值第二个元素说明计数存在哪，
     状态接口会把它显示出来，免得 Redis 挂了很久而没人知道限流口径已经变了。
     """
-    ok, val = _redis_cmd(["INCR", "qs:rl:" + key])
+    from app_modules.cache import LIMIT_SCRIPT
+    ok, val = _redis_cmd(["EVAL", LIMIT_SCRIPT, 1, "qs:rl:" + key, window_sec])
     if ok and isinstance(val, int):
-        if val == 1:
-            _redis_cmd(["EXPIRE", "qs:rl:" + key, window_sec])
         return val <= limit, "redis", val
     now = time.time()
+    if len(_mem_buckets)>10000:
+        for stale in list(_mem_buckets):
+            if not _mem_buckets[stale] or now-_mem_buckets[stale][-1]>900:_mem_buckets.pop(stale,None)
+        if len(_mem_buckets)>10000:return False,"memory-capacity",limit+1
     bucket = _mem_buckets.setdefault(key, [])
     bucket[:] = [t for t in bucket if now - t < window_sec]
     bucket.append(now)
@@ -1776,7 +1686,7 @@ def ai_status(user: dict = Depends(get_current_user)):
             "model_name": "qwen2.5-0.5b-instruct-q8_0",
             "redis": "up" if r_ok else "down",
             "redis_why": "" if r_ok else (_redis_last_err[0] or "冷却中或从未连上"),
-            "kb_backend": "redis+sqlite" if r_ok else "sqlite"}
+            "kb_backend": "private-sqlite"}
 
 
 @app.get("/api/ai/context")
@@ -1790,11 +1700,8 @@ def ai_context(user: dict = Depends(get_current_user)):
     mem = memory_list(user["id"])
     conn = get_db()
     c = conn.cursor()
-    rows = c.execute("SELECT answer, fetched_at FROM kb_entries "
-                     "ORDER BY fetched_at DESC LIMIT 6").fetchall()
     conn.close()
-    kb = [{"answer": html_escape((r["answer"] or "")[:160]), "at": (r["fetched_at"] or "")[:10]}
-          for r in rows]
+    kb = []  # No unaudited global answers in personal prompts.
     digest = {
         "weight_jin": d["current_weight_jin"],
         "target_jin": (d.get("profile") or {}).get("target_weight_jin"),
@@ -1810,7 +1717,7 @@ def ai_context(user: dict = Depends(get_current_user)):
     return {"code": 0, "digest": digest, "memory": mem, "kb": kb}
 
 
-class AiRecordReq(BaseModel):
+class AiRecordReq(ValidatedModel):
     question: str
     answer: str
     sources: Optional[List[dict]] = None
@@ -1818,29 +1725,17 @@ class AiRecordReq(BaseModel):
 
 @app.post("/api/ai/record")
 def ai_record(req: AiRecordReq, user: dict = Depends(get_current_user)):
-    """本机引擎查到的东西也写回同一个知识库——用户说的"共用线上知识库"就是这条通道。"""
-    q = (req.question or "").strip()[:120]
-    a = (req.answer or "").strip()[:1200]
-    if not q or not a:
-        raise HTTPException(status_code=400, detail="问题和答案都不能为空")
-    ok, where, _ = rate_hit("rec:" + str(user["id"]), 20, 60)
-    if not ok:
-        return {"code": 0, "stored": False,
-                "msg": "回写太快了（每分钟 20 条），这条没存进知识库；计数存在 %s" % where}
-    srcs = []
-    for it in (req.sources or [])[:5]:
-        if not isinstance(it, dict):
-            continue
-        url = str(it.get("url") or "")
-        if not url.startswith("http"):
-            continue
-        srcs.append({"title": str(it.get("title") or "")[:120], "url": url[:500],
-                     "host": str(it.get("host") or urllib.parse.urlparse(url).netloc)[:80]})
-    kb_store(q, html_escape(_plain(a)), srcs, "local")
-    return {"code": 0, "stored": True, "kb_backend": "redis" if cache_get(_qkey(q)) else "sqlite"}
+    q=(req.question or "").strip()[:120]; a=(req.answer or "").strip()[:1200]
+    if not q or not a: raise HTTPException(status_code=400,detail="问题和答案不能为空")
+    conn=get_db()
+    try:
+        conn.execute("INSERT OR REPLACE INTO private_ai_answers VALUES (?,?,?,?)",(user["id"],q,_plain(a),datetime.now().isoformat()))
+        conn.commit()
+    finally: conn.close()
+    return {"code":0,"stored":True,"scope":"private"}
 
 
-class MemoryReq(BaseModel):
+class MemoryReq(ValidatedModel):
     text: Optional[str] = None
     forget_all: Optional[bool] = False
 
@@ -1992,44 +1887,17 @@ def _rewrite_query(q):
 
 
 def _qkey(q):
-    return hashlib.sha1(_rewrite_query(q).encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(("v2:"+re.sub(r"\s+"," ",q.strip().lower())).encode("utf-8")).hexdigest()
 
 
 def kb_lookup(q):
-    """知识库只收联网查证过的内容，7 天内复用；过期就重查，不拿旧答案冒充实时。"""
-    conn = get_db()
-    c = conn.cursor()
-    row = c.execute("SELECT * FROM kb_entries WHERE qkey = ?", (_qkey(q),)).fetchone()
-    if not row:
-        conn.close()
-        return None
-    row = dict(row)
-    try:
-        fetched = datetime.strptime(row["fetched_at"][:19], "%Y-%m-%d %H:%M:%S")
-    except Exception:
-        fetched = datetime.min
-    if datetime.now() - fetched > timedelta(days=7):
-        conn.close()
-        return None
-    c.execute("UPDATE kb_entries SET hits = hits + 1 WHERE qkey = ?", (_qkey(q),))
-    conn.commit()
-    conn.close()
-    return row
+    # Historical entries may contain personal model output. Quarantined until reviewed.
+    return None
 
 
 def kb_store(q, answer, items, how):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-    INSERT OR REPLACE INTO kb_entries (qkey, answer, sources, fetched_at, hits)
-    VALUES (?, ?, ?, ?, 0)
-    """, (_qkey(q), answer,
-          json.dumps([{"title": it["title"], "url": it["url"], "host": it["host"]}
-                      for it in items], ensure_ascii=False),
-          datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-    conn.commit()
-    conn.close()
-    return {"how": how}
+    # A generated answer is not a reviewed public knowledge source.
+    return {"how":how,"stored":False}
 
 
 def memory_put(user_id, q):
@@ -2118,14 +1986,15 @@ def synthesize(q, items, mem, terms=None):
               "【资料】\n%s\n【问题】%s\n【回答】" % (ctx, q))
     # 这是"照着资料归纳"，不是创作：温度压到 0.1，模型越自由越容易补出资料里没有的数字
     txt = llm_chat(prompt, temperature=0.1)
-    if txt and "不够" not in txt[:6]:
+    from app_modules.ai_policy import grounded_summary
+    if txt and "不够" not in txt[:6] and grounded_summary(txt,ranked):
         clean = html_escape(_plain(txt)[:600])
         return clean, "model"
     best = _plain(ranked[0]["snippet"])[:220]
     # 模型说"不够"和模型根本没跑是两回事，兜底文案必须分开——
     # 把前者写成后者就是把原因赖到一个没发生的事实上
     if txt:
-        return html_escape(best), "insufficient"
+        return html_escape(best), "insufficient" if "不够" in txt[:6] else "filtered"
     return html_escape(best), "extract"
 
 
@@ -2144,183 +2013,16 @@ def version_json():
 
 # 内置场景库：这些是软件自己该知道的答案，不该拿去问搜索引擎。
 # 文字与 app.js 的本地场景层逐条对应，判据核对两边关键词集合一致。
-SCENE_RULES = [
-    (('吃多', '中午吃', '补救'),
-     '✨ <strong>中午吃多/未按计划吃应急自适应方案：</strong><br>\n完全不用焦虑自责！偶尔一餐吃多绝对不会立刻长肉：<br>\n1. <strong>晚餐智能自适应：</strong>今晚不吃米面主食，换成【冬瓜清汤虾滑丸】或【老豆腐炖菌菇蔬菜】，热量直接压到 250-300 kcal！<br>\n2. <strong>喝水排钠：</strong>多喝 500ml 温水，加速排泄重油重盐！<br>\n3. <strong>晚间轻运动：</strong>饭后 45 分钟去散步快走 25-30 分钟，轻松把多余能量拉平，今日缺口依旧稳健！'),
-    (('外卖', '做饭', '做菜', '点餐'),
-     '🛵 <strong>上班族打工人外卖吃瘦核心心法：</strong><br>\n上班没时间做菜完全没关系！请在底部【食谱/外卖】中切换至【上班族外卖】模式：<br>\n1. <strong>认准两素一荤：</strong>去老乡鸡/大米先生选手撕鸡+蒸蛋+绿叶菜，米饭只吃半碗；<br>\n2. <strong>过水涮油大法：</strong>拿个纸杯装温开水，吃前肉菜过水涮一下，甩掉 15g 浮油（立省 135 kcal）；<br>\n3. <strong>一键备注模板：</strong>在食谱页点击一键复制【外卖减脂备注】，商家师傅会帮你少油少盐酱汁分装！'),
-    (('身材', '形体', '马甲线', '周期', '照片'),
-     '📷 <strong>形体周期更新与身材照追踪指南：</strong><br>\n1. <strong>多图挑选心仪身材：</strong>在【形体照】或顶部【👤档案】中，点击图示即可在【S型沙漏马甲线 / 修长轻盈 / 健美微肌 / 大基数脱脂】间自由切换，规划会自动联动！<br>\n2. <strong>周期拍照对比：</strong>每 7 天在【形体照】上传或拍摄空腹身材照，记录腰围变化；<br>\n3. <strong>更新下一周期规划：</strong>提交后点击【更新规划】，系统会根据你的蜕变数据，自动把下一周期的训练动作与饮食方案进阶升级！'),
-    (('平台期', '不掉了', '不掉', '卡住'),
-     '🛑 <strong>体重平台期先别加练饿肚子，按这三步查因：</strong><br>\n1. <strong>先分清真假平台期：</strong>连续 3 天晨起空腹同条件称重，波动在 ±0.6 斤内且围度仍在降，是水分波动不是平台；<br>\n2. <strong>查记录而不是查代谢：</strong>翻看【图表】的赤字柱，连续 2 天以上缺口归零多半是漏记的酱料、油、饮品，身体不会骗人，记录会；<br>\n3. <strong>真到平台期再动两件事：</strong>把主食按现有量减 1/4（不砍蛋白质），并把运动日改成 2 次短时快走替代长时间同强度有氧；连着两周不动且腰围也不降，再来找我调整身形目标。'),
-    (('很饿', '饿了', '能吃什么', '练完', '运动完'),
-     '🍽️ <strong>练后饿的正确吃法（不是忍着）：</strong><br>\n1. <strong>练后 1 小时内补：</strong>蛋白质 20-30g + 少量慢碳，例：无糖希腊酸奶 100g + 半根玉米，约 180-220 kcal；<br>\n2. <strong>怕睡前长肉就选高 Volume 低热量：</strong>冬瓜虾滑汤、菌菇豆腐汤、焯拌黄瓜鸡蛋，胃填满而热量不到 200 kcal；<br>\n3. <strong>别用"练过了"当加餐理由：</strong>今日打卡的训练消耗只按 220 kcal 记账，喝一杯奶茶就抵光了；<br>\n4. 真饿得难受，先喝 300ml 温水等 10 分钟，仍饿就按上面第 2 条吃，不要跳过头餐。'),
-    (('火锅', '聚餐'),
-     '🍲 <strong>在外吃火锅必胜避坑守则（国内适用）：</strong><br>\n1. <strong>锅底：</strong>坚决选清汤/菌菇锅，杜绝牛油红油！<br>\n2. <strong>蘸料：</strong>薄盐生抽+香醋+蒜泥+小米辣（不要麻酱与香油，立省300kcal）！<br>\n3. <strong>点菜：</strong>多点精瘦牛肉、大虾仁、鲜毛肚、冬瓜、萝卜；炸响铃与冻豆腐千万别下辣汤！<br>\n4. <strong>顺序：</strong>先喝清汤 ➔ 蔬菜 ➔ 肉蛋 ➔ 最后吃少许玉米土豆！'),
-]
 
 
-SCENE_RULES += [
-    (("生理期", "月经", "大姨妈", "姨妈期", "经期"),
-     "🩸 <strong>生理期不是停练的理由，但这两件事要改：</strong><br>\n"
-     "1. <strong>强度降一档就行，别停：</strong>把深蹲/硬拉这类大重量换成中等重量、组数减 1/3，"
-     "或改成快走与拉伸；经期第 1-3 天如果腹痛，休息也是按计划，不是偷懒。<br>\n"
-     "2. <strong>体重涨 1-3 斤是水分，不是脂肪：</strong>这段时间不要称重，"
-     "也别因为数字上涨去砍额度——按 7700 kcal 折脂肪，几天内根本造不出那 1 斤。<br>\n"
-     "3. <strong>食欲变强就加蛋白质和慢碳，不是忍着：</strong>鸡蛋、无糖酸奶、玉米、红薯排在前面，"
-     "巧克力奶茶换成热牛奶加少量黑巧；铁和维 C 从瘦牛肉、菠菜、橙子拿。<br>\n"
-     "4. 本系统不做诊断。经量骤增、痛到影响日常、周期突然紊乱，请去医院，不要在这里找答案。"),
-    (("代餐", "蛋白粉", "增肌粉", "补剂", "左旋肉碱", "酵素", "白芸豆", "阻断",
-      "燃脂丸", "肌酸", "维生素"),
-     "💊 <strong>补剂的实话，按值不值得花钱排：</strong><br>\n"
-     "1. <strong>可以买：</strong>蛋白粉（只是方便凑蛋白，食物够就不需要）、肌酸（最便宜、证据最足的力量补剂）、"
-     "维生素 D（少见日照的人）。<br>\n"
-     "2. <strong>别指望：</strong>左旋肉碱、酵素、白芸豆提取物、各类\"燃脂丸\"——它们改变的是账单，不是体脂。<br>\n"
-     "3. <strong>代餐能顶一时不能替你吃饭：</strong>一餐代餐通常 150-250 kcal，长期当正餐会掉肌肉、"
-     "反弹更快；应急一次可以，天天用就是给自己埋坑。<br>\n"
-     "4. 任何写着\"不运动、不忌口、一个月掉十斤\"的产品，直接跳过。涉及用药必须问医生。"),
-    (("便秘", "拉不出", "排便"),
-     "🚽 <strong>减脂期便秘是四件事凑出来的，按顺序补：</strong><br>\n"
-     "1. <strong>吃太少：</strong>残渣不够就没有便意。先把蔬菜加到每餐一拳头以上（西兰花、菠菜、冬瓜）。<br>\n"
-     "2. <strong>水不够：</strong>目标按体重算，每公斤 35 ml。你现在这个体量大约要 2500-3000 ml，"
-     "分次喝，别一次灌。<br>\n"
-     "3. <strong>油太狠：</strong>完全无油会滑不动肠道。每天留 20-30 g 真油（做菜用的，不是油炸）。<br>\n"
-     "4. <strong>动起来：</strong>每天 20 分钟快走 + 腹部按摩，比任何\"清肠茶\"都可靠。"
-     "超过一周不排便伴腹痛、带血，去医院，别在这里问。"),
-    (("睡眠", "失眠", "熬夜", "睡不够", "睡不好", "睡不着", "入睡"),
-     "😴 <strong>睡不够会让减脂更难，机制很实在：</strong><br>\n"
-     "1. <strong>饿素升、瘦素降：</strong>熬夜后第二天食欲明显变强，尤其想吃甜的油的，"
-     "这不是你意志力差，是激素在推你。<br>\n"
-     "2. <strong>掉的多是肌肉：</strong>同样减重，睡 5.5 小时比 7.5 小时掉的有效瘦体重更多，"
-     "基础代谢跟着降。<br>\n"
-     "3. <strong>能做的三件：</strong>固定起床时间（比固定睡觉更有用）、睡前 1 小时离开手机、"
-     "下午 3 点后不再摄入咖啡因。<br>\n"
-     "4. 长期失眠请就医，本系统不诊断。"),
-    (("波动", "早上重", "晚上重", "一天", "忽高忽低", "重了", "轻了"),
-     "⚖️ <strong>一天之内体重差 1-3 斤是正常的，别被它牵着走：</strong><br>\n"
-     "1. <strong>差的是水和食物残渣，不是脂肪：</strong>一顿咸的、一杯奶茶、一次没排便，"
-     "都能让秤上浮两斤；反过来出身汗就掉一斤。<br>\n"
-     "2. <strong>只看一个数：</strong>每天早晨、上完厕所、穿同样衣服称，取<strong>连续 7 天的平均值</strong>"
-     "去比上一周的平均值，单天数字没有意义。<br>\n"
-     "3. <strong>本系统的曲线也是这么画的：</strong>一天只留一个点（第一次记的那条），"
-     "重复记会覆盖不了历史，但趋势仍按天算。<br>\n"
-     "4. 一周平均不动，才轮到看缺口是不是被漏记的酱料油饮品吃掉了。"),
-    (("只运动", "不控制", "管不住", "忌口", "光练", "只练"),
-     "🏃 <strong>只运动不管嘴，多数人是练不瘦的，原因在数字上：</strong><br>\n"
-     "1. <strong>消耗有多小：</strong>本系统按训练日 +220 kcal 记账，这已经是一节认真练的量级；"
-     "一杯奶茶 360、一份薯条 280，练完喝一口就白练。<br>\n"
-     "2. <strong>摄入有多大：</strong>手一抖多 300 kcal 很容易，多 300 天就是 90000 kcal，"
-     "折合约 11.7 斤脂肪。<br>\n"
-     "3. <strong>正确顺序：</strong>先把每天吃了的记下来（不用精确，先记），"
-     "再把额度稳定在缺口 300-500，最后才谈加练。<br>\n"
-     "4. 运动真正的价值是保住肌肉、稳住情绪和睡眠，不是那 220 kcal。"
-     "别把它当赎罪券，也别把它当唯一变量。"),
-    (("主食", "碳水", "生酮", "不吃饭", "辟谷", "断碳"),
-     "🍚 <strong>主食一刀切掉，通常撑不过两周：</strong><br>\n"
-     "1. <strong>掉的是水和肌肉：</strong>糖原带着水，头三天掉两斤很好看，第七天开始平台，"
-     "同时开始掉力量。<br>\n"
-     "2. <strong>要减的是量不是类：</strong>把当前主食减 1/4，蛋白质不动，"
-     "把一部分白米面换成糙米、燕麦、玉米、红薯（同热量下更顶饿）。<br>\n"
-     "3. <strong>什么时候该认真控碳水：</strong>只有连续两周记录显示缺口被主食吃掉时才有必要，"
-     "凭感觉减碳基本都是白饿。<br>\n"
-     "4. 生酮等极端方案需要医生或营养师跟着，本系统不推荐也不跟踪。"),
-    (("大基数", "基数大", "很胖", "太胖", "一开始", "从哪开始", "新手"),
-     "🐘 <strong>基数大反而最好起步，抓这四件就够：</strong><br>\n"
-     "1. <strong>先只记两件事：</strong>每天早晨空腹体重 + 每天吃了什么。不用算得准，先记满 7 天。<br>\n"
-     "2. <strong>缺口别贪大：</strong>一天 500 kcal 就够（一周约 1 斤脂肪）。"
-     "开 1000 的缺口，两周内一定崩，还掉肌肉。<br>\n"
-     "3. <strong>护住膝盖：</strong>前期用快走、椭圆机、游泳、靠墙静蹲替代跑步；"
-     "体重降到接近目标再谈跑。<br>\n"
-     "4. <strong>蛋白质优先：</strong>每餐一掌心瘦肉/蛋/豆制品，"
-     "它决定你掉的是脂肪还是肌肉。BMI 超过 32 或有基础疾病，先去医院营养科。"),
-    (("奶茶", "饮料", "果汁", "可乐", "吃糖", "甜食", "咖啡加糖", "全糖"),
-     "🧋 <strong>想喝甜的不用忍到爆发，按替代来：</strong><br>\n"
-     "1. <strong>先看差多少：</strong>全糖奶茶约 360 kcal，无糖茶/气泡水接近 0，"
-     "一周三杯全糖就是约 3 斤脂肪的量级。<br>\n"
-     "2. <strong>降档而不是戒掉：</strong>三分糖 + 去奶盖 + 小杯，一杯能省 150-200 kcal，"
-     "比\"这周不喝了\"更能坚持。<br>\n"
-     "3. <strong>真想要口感：</strong>无糖酸奶 + 少量蓝莓、气泡水加柠檬、热牛奶加半勺蜂蜜。<br>\n"
-     "4. 果汁不等于水果：榨完糖还在、纤维没了，两杯起下不封顶。"
-     "本系统的记账按你填的菜名粗估，奶茶记进去才会有这个数。"),
-    (("烧烤", "撸串", "喝酒", "酒精", "聚餐", "应酬", "啤酒", "白酒", "红酒"),
-     "🍢 <strong>烧烤局和酒局怎么把损失压到最小：</strong><br>\n"
-     "1. <strong>点单顺序：</strong>先要一份烤蔬菜/凉拌菜垫底，再点瘦牛肉、鸡胸、大虾、生蚝；"
-     "五花、鸡翅尖、烤面包片是热量陷阱。<br>\n"
-     "2. <strong>酱是隐形热量：</strong>刷酱和干碟差别很大，能选干碟、少酱、多柠檬/醋。<br>\n"
-     "3. <strong>酒：</strong>酒精 7 kcal/g 且优先被烧掉，脂肪氧化当场暂停。"
-     "啤酒一杯半就够意思了，中间夹一杯水。<br>\n"
-     "4. <strong>第二天照常记账：</strong>不催吐、不断食补偿，"
-     "把当天额度按正常餐吃完，一顿毁不掉一周。"),
-    (("反弹", "复食", "恢复饮食", "会反弹", "维持期", "达标之后", "减到目标之后"),
-     "📉 <strong>减完会不会反弹，取决于减脂最后两周你怎么做：</strong><br>\n"
-     "1. <strong>别一步回到原样：</strong>达标后每周把额度加回 100-150 kcal，"
-     "用 3-4 周爬到维持热量，身体和行为都有适应时间。<br>\n"
-     "2. <strong>蛋白质保持高位：</strong>这是最不容易掉肌肉、最不容易饿的一项。<br>\n"
-     "3. <strong>秤继续称，但看周平均：</strong>一周涨超过 1.5 斤就回到上一个额度档，"
-     "不要等涨 5 斤才发现。<br>\n"
-     "4. <strong>训练不要停：</strong>维持期把目标改成\"每周两次力量\"，"
-     "比\"每天有氧\"更容易长期执行。"),
-    (("能不能吃", "一顿吃完", "一整个", "明天吃", "后天会胖", "会不会胖"),
-     "🍰 <strong>\"明天能不能吃一整个蛋糕\"这种预测我做不了，能做的是把账算给你看：</strong><br>\n"
-     "1. <strong>一顿的量级：</strong>一整个 6 寸奶油蛋糕约 1800-2400 kcal，"
-     "相当于你 1-2 天的全部预算。<br>\n"
-     "2. <strong>会不会当场长脂肪：</strong>7700 kcal 才折 1 kg 纯脂肪，"
-     "所以一顿超 1500 kcal ≈ 折算 0.4 斤，是折算不是实测——秤上第二天的涨幅多半是水。"
-     "<br>\n"
-     "3. <strong>真要吃怎么吃：</strong>当天把主食和油减半、蛋白质保住，"
-     "分两餐吃、别空腹一次吃完，第二天照常记账不断食补偿。<br>\n"
-     "4. 我不预测\"明天能不能\"，因为那取决于你明天实际吃了多少——"
-     "记进【食谱/外卖】之后，我按真实数字告你超了多少。"),
-    (("删掉", "删除", "删记录", "改记录", "重置", "撤销"),
-     "🗑️ <strong>我不会替你改或删记录，这一点说清楚：</strong><br>\n"
-     "1. <strong>为什么：</strong>流水的价值就在于它是你真实发生过的行为。"
-     "能随手删掉的记录，之后所有报告、周期对比和达标预估都不可信。<br>\n"
-     "2. <strong>记错了怎么办：</strong>饮食和体重按天累计，多记的那一笔请在下一餐的额度里扣掉，"
-     "并在心里把它当成一次修正，不是造假。<br>\n"
-     "3. <strong>要清空重来：</strong>可以注册一个新账号，从那天起重新开始，"
-     "旧数据保留着，以后还能对比。<br>\n"
-     "4. 需要真正删除整账号数据（合规要求），告诉我，我加一个带确认的接口，"
-     "但不会做成\"一键抹掉今天\"。"),
-]
 
-SCENE_RULES += [
-    (("早餐", "来不及", "早上没时间", "不起床"),
-     "🌅 <strong>早餐来不及，按「能拿到什么」排三档：</strong><br>\n"
-     "1. <strong>最好：</strong>两个茶叶蛋 + 一盒纯牛奶，约 205 kcal，路上就能吃完，蛋白质够顶饿。<br>\n"
-     "2. <strong>次选：</strong>无糖酸奶 100g + 一小把坚果（10 g），约 200 kcal，别买风味酸奶（糖多）。<br>\n"
-     "3. <strong>实在不行：</strong>便利店无糖豆浆 + 一根玉米，约 190 kcal；"
-     "别用面包加甜饮料顶，那组合升糖快、饿得也快。<br>\n"
-     "4. 不吃早餐不会帮你省热量——多数人中午会多吃回来。真没胃口，把第一餐推到 10 点前，"
-     "别一路拖到午饭。"),
-    (("不吃晚饭", "晚饭", "晚餐", "几点吃", "睡前吃", "晚上吃"),
-     "🌙 <strong>晚饭几点吃、要不要省掉：</strong><br>\n"
-     "1. <strong>省掉晚饭不划算：</strong>晚上饿到睡不着，第二天早餐和上午容易失控；"
-     "全天总热量才是决定因素，不是几点吃的。<br>\n"
-     "2. <strong>时间安排：</strong>能的话睡前 3 小时吃完；做不到就把晚餐分量减到平时的 2/3，"
-     "蛋白质保住、主食减半，别整盘不吃。<br>\n"
-     "3. <strong>真饿了：</strong>选高体积低热量的——冬瓜汤、菌菇豆腐汤、焯拌黄瓜鸡蛋、"
-     "无糖酸奶 100 g，都在 200 kcal 以内。<br>\n"
-     "4. 记进【食谱/外卖】之后，我按你今天的真实额度告你还剩多少，不用猜。"),
-    (("酸痛", "膝盖", "受伤", "拉伤", "腰痛", "关节痛"),
-     "🩹 <strong>酸痛要不要继续练，分两种情况：</strong><br>\n"
-     "1. <strong>延迟性酸痛（练后 24-72 小时、按压发酸、活动后减轻）：</strong>可以练，"
-     "但把强度降一半、避开同一块肌肉，改成上肢或快走。<br>\n"
-     "2. <strong>刺痛、关节痛、活动受限、越练越痛：</strong>停这一侧，别硬撑。"
-     "肿胀或持续超过一周，去医院，我这里不判断伤情。<br>\n"
-     "3. <strong>膝盖不适的替代：</strong>把跑步换成快走、椭圆机、游泳、靠墙静蹲；"
-     "大基数前期本来就不该靠跑。<br>\n"
-     "4. 酸痛不是「练到位」的证明，第二天的表现才是记账依据。"),
-    (("拉伸", "热身", "一万步", "壮汉", "力量训练会", "跑步", "有氧", "练几次"),
-     "🏋️ <strong>几个常被说反的训练常识：</strong><br>\n"
-     "1. <strong>先热身再练，练后拉伸：</strong>热身在练前 5-10 分钟（快走+动态摆腿），"
-     "拉伸放在练后，练前长时间静态拉伸反而会掉力量。<br>\n"
-     "2. <strong>力量训练不会让女生「变壮汉」：</strong>增肌需要长期大重量 + 热量盈余，"
-     "在缺口状态下练只会保住肌肉、线条更清楚。<br>\n"
-     "3. <strong>一万步不是减脂指标：</strong>步数主要影响日常活动消耗，"
-     "决定体重的是缺口。走够当然好，但别用它换掉两餐的记录。<br>\n"
-     "4. <strong>频率：</strong>力量每周 2-3 次就够，有氧每次 20-30 分钟；"
-     "本系统按每次训练 220 kcal 记账，练得再多也不按实际心率折算。"),
-]
+
+def load_guidance():
+    path=os.path.join(WEB_DIR,"guidance.json")
+    if not os.path.isfile(path):path=os.path.join(os.path.dirname(__file__),"app","src","main","assets","guidance.json")
+    with open(path,encoding="utf-8") as f:rows=json.load(f)
+    return [(tuple(row["keywords"]),html_escape(row["text"])) for row in rows]
+SCENE_RULES=load_guidance()
 
 def answer_from_scenes(q):
     """命中场景就给成体系的建议；这是答案，不是"参考链接"。
@@ -2373,6 +2075,9 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
     scene = answer_from_scenes(q)
     if scene:
         return {"code": 0, "source": "scene", "answer": scene, "items": []}
+
+    if req.route_only:
+        return {"code":0,"source":"none","answer":"当前问题需要模型或外部参考","items":[]}
 
     # 认不出领域词就直接拒，这条判断不碰网络，所以不能算进每分钟配额——
     # 否则连问几个"量子计算是什么"会把真正需要联网的问题挤到限流后面
@@ -2428,6 +2133,8 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
         tail = "（本机模型未运行，以下是原文摘录。原因：%s）" % (_llm_last_error[0] or "未知")
     elif how == "insufficient":
         tail = "（本机模型认为这些资料不足以回答，以下是原文摘录）"
+    elif how == "filtered":
+        tail = "（模型回答未通过资料一致性校验，以下改用原文摘录）"
     else:
         tail = ""
     tail += ("以上内容由第三方网站提供，不是本系统的减脂建议；"             "涉及用药与疾病请咨询医生。")
@@ -2445,29 +2152,20 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
 # ==================== 100% REAL Chart Data API ====================
 
 def _deficit_rows(c, user_id: int, metrics: dict, days: int) -> list:
-    """近 days 天的真实净缺口。7 天柱图和 30 天热力矩阵都从这里取，避免两处口径漂移。"""
-    weekdays_zh = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-    rows = []
-    for i in range(days - 1, -1, -1):
-        target_d = date.today() - timedelta(days=i)
-        ds = target_d.isoformat()
-        day_label = "今天" if i == 0 else weekdays_zh[target_d.weekday()]
-
-        c.execute("SELECT SUM(cal) as c_sum FROM food_logs WHERE user_id = ? AND log_date = ?", (user_id, ds))
-        c_res = c.fetchone()["c_sum"] or 0
-
-        c.execute("SELECT SUM(cal_burned) as b_sum FROM workout_logs WHERE user_id = ? AND log_date = ?", (user_id, ds))
-        b_res = c.fetchone()["b_sum"] or 0
-
-        # 真实净缺口 = 维持代谢(TDEE) + 当日真实训练消耗 - 当日真实摄入
-        # 用 target_cal 当基准会少算一个 deficit：吃满预算时缺口显示 0，而实际仍有 420 的缺口
-        if c_res == 0 and b_res == 0:
-            # 这一天一笔未记，缺口为 0，不拿目标值冒充"已创造赤字"（旧写法漏了今天）
-            day_def = 0
-        else:
-            day_def = round(metrics["tdee"] + b_res - c_res)
-
-        rows.append({"day": day_label, "date": ds, "deficit": day_def, "consumed": c_res, "burned": b_res})
+    start=(date.today()-timedelta(days=days-1)).isoformat()
+    food={r["log_date"]:dict(r) for r in c.execute("SELECT log_date,SUM(cal) AS total,COUNT(*) AS n FROM food_logs WHERE user_id=? AND log_date>=? GROUP BY log_date",(user_id,start))}
+    workout={r["log_date"]:dict(r) for r in c.execute("SELECT log_date,SUM(cal_burned) AS total,COUNT(*) AS n FROM workout_logs WHERE user_id=? AND log_date>=? GROUP BY log_date",(user_id,start))}
+    saved={r["log_date"]:dict(r) for r in c.execute("SELECT * FROM daily_metrics WHERE user_id=? AND log_date>=?",(user_id,start))}
+    completed={r["log_date"] for r in c.execute("SELECT log_date FROM daily_reviews WHERE user_id=? AND complete=1 AND log_date>=?",(user_id,start))}
+    other_days={r[0] for r in c.execute("SELECT log_date FROM weight_logs WHERE user_id=? AND log_date>=? UNION SELECT log_date FROM water_logs WHERE user_id=? AND log_date>=?",(user_id,start,user_id,start))}
+    rows=[]
+    for i in range(days-1,-1,-1):
+        d=date.today()-timedelta(days=i); ds=d.isoformat()
+        consumed=(food.get(ds) or {}).get("total",0); burned=(workout.get(ds) or {}).get("total",0)
+        nutrition=ds in food or ds in workout
+        has=nutrition or ds in other_days or ds in completed
+        historical=json.loads(saved[ds]["metrics_json"]) if ds in saved else metrics
+        rows.append({"day":"今天" if i==0 else ["周一","周二","周三","周四","周五","周六","周日"][d.weekday()],"date":ds,"deficit":round(historical["tdee"]+burned-consumed) if nutrition or ds in completed else 0,"consumed":consumed,"burned":burned,"has_records":has,"record_status":"complete" if ds in completed else ("partial" if has else "missing"),"estimate_origin":saved[ds]["origin"] if ds in saved else "current_recalculation"})
     return rows
 
 
@@ -2495,7 +2193,7 @@ def compute_charts_data(user: dict) -> dict:
     c.execute("""
     SELECT log_date, weight_jin FROM weight_logs
     WHERE user_id = ?
-    ORDER BY log_date ASC
+    ORDER BY log_date ASC, id DESC
     """, (user["id"],))
     wt_rows = c.fetchall()
     weight_data = []
@@ -2506,7 +2204,7 @@ def compute_charts_data(user: dict) -> dict:
             seen_dates.add(d)
             # format MM-DD
             label = d[5:] if len(d) >= 10 else d
-            weight_data.append({"date": label, "val": round(row["weight_jin"] / 2.0, 1), "jin": row["weight_jin"]})
+            weight_data.append({"full_date": d, "date": label, "val": round(row["weight_jin"] / 2.0, 1), "jin": row["weight_jin"]})
 
     # If user has no weight logs yet, fall back to profile baseline
     if not weight_data:
@@ -2520,6 +2218,7 @@ def compute_charts_data(user: dict) -> dict:
     today = date.today().isoformat()
     c.execute("SELECT SUM(protein_g) as p, SUM(carbs_g) as c, SUM(fat_g) as f, SUM(cal) as total FROM food_logs WHERE user_id = ? AND log_date = ?", (user["id"], today))
     m_row = c.fetchone()
+    unknown_macros=c.execute("SELECT COUNT(*) FROM food_logs WHERE user_id=? AND log_date=? AND COALESCE(source,'') <> 'nutrition_kb'",(user["id"],today)).fetchone()[0]
     total_cal = m_row["total"] or 0
     real_p = round(m_row["p"] or 0, 1)
     real_c = round(m_row["c"] or 0, 1)
@@ -2532,6 +2231,7 @@ def compute_charts_data(user: dict) -> dict:
         "deficit_history": deficit_data,
         "macros_today": {
             "total_cal": total_cal,
+            "unknown_records": unknown_macros,
             "protein_g": real_p,
             "carbs_g": real_c,
             "fat_g": real_f,
@@ -2552,10 +2252,19 @@ def get_public_charts(username: str, k: Optional[str] = None, request: Request =
         raise HTTPException(status_code=429, detail="访问过于频繁")
     conn = get_db()
     user = check_share(conn, username, k)
+    settings=share_settings(conn,user['id']) if user else None
     conn.close()
     if not user:
         raise HTTPException(status_code=404, detail="链接不完整或已失效")
-    return compute_charts_data(user)
+    result=compute_charts_data(user)
+    if not settings['scope'].get('weight'):result['weight_history']=[]
+    if not settings['scope'].get('meals'):
+        result['deficit_history']=[];result['macros_today']={}
+    if not settings['scope'].get('workout') or not settings['scope'].get('profile'):result['deficit_history']=[]
+    if not settings['scope'].get('profile'):
+        result.pop('target_deficit',None)
+        result['macros_today']={k:v for k,v in result.get('macros_today',{}).items() if not k.startswith('target_')}
+    return result
 
 # ==================== Public Web Dashboard & Static Delivery ====================
 
@@ -2622,7 +2331,147 @@ def public_user_dashboard(username: str, k: Optional[str] = None, request: Reque
     if content is not None:
         # json.dumps 出合法 JS 字符串，再把 < 转义掉，防用户名里的 </script> 提前闭合标签
         safe_js_name = json.dumps(username).replace("<", "\\u003c")
-        injected = f"<base href=\"/\">\n<script>window.__PUBLIC_USER__ = {safe_js_name};</script>\n"
+        base_path=urllib.parse.urlsplit(SITE_BASE).path.rstrip('/')+'/'
+        injected = f"<base href=\"{html_escape(base_path,quote=True)}\">\n<script>window.__PUBLIC_USER__ = {safe_js_name};</script>\n"
         content = content.replace("<head>", "<head>\n" + injected)
         return HTMLResponse(content, headers=_no_cache())
     return HTMLResponse("<h3>轻塑系统正在启动中...</h3>")
+
+
+@app.post("/api/logout")
+def logout(user: dict = Depends(get_current_user)):
+    conn=get_db()
+    try:
+        conn.execute("DELETE FROM sessions WHERE token_hash=?",(user["_session_hash"],));conn.commit()
+    finally: conn.close()
+    return {"code":0}
+
+def media_key():
+    path=os.path.join(DB_DIR,"media-signing.key")
+    try:
+        fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+        with os.fdopen(fd,"wb") as f: f.write(secrets.token_bytes(32))
+    except FileExistsError: pass
+    with open(path,"rb") as f: return f.read()
+
+def signed_photo(url,share_user=None):
+    name=os.path.basename(url.split("?",1)[0]); expiry=int(time.time())+900
+    payload=f"{name}:{expiry}";audience=''
+    if share_user:
+        payload+=f":{share_user['id']}:{share_user['share_secret']}";audience=f"&audience={share_user['id']}"
+    sig=hmac.new(media_key(),payload.encode(),hashlib.sha256).hexdigest()
+    return f"/uploads/{name}?expires={expiry}&signature={sig}{audience}"
+
+@app.get("/uploads/{name}")
+def private_photo(name: str, expires: int=0, signature: str="",audience:int=0):
+    payload=f"{name}:{expires}"
+    if audience:
+        c=get_db()
+        try:
+            user=c.execute('SELECT * FROM users WHERE id=?',(audience,)).fetchone()
+            settings=share_settings(c,audience)
+            owned=c.execute('SELECT 1 FROM body_cycles WHERE user_id=? AND photo_url=?',(audience,'/uploads/'+name)).fetchone()
+        finally:c.close()
+        if not user or not owned or not settings['enabled'] or not settings['scope'].get('photos') or (settings['expires_at'] and settings['expires_at']<time.time()):
+            raise HTTPException(404,'照片授权已失效')
+        payload+=f":{audience}:{user['share_secret']}"
+    expected=hmac.new(media_key(),payload.encode(),hashlib.sha256).hexdigest()
+    if expires<int(time.time()) or expires>time.time()+901 or not secrets.compare_digest(signature,expected):
+        raise HTTPException(status_code=404,detail="照片不存在或授权已失效")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp)",name,re.I):
+        raise HTTPException(status_code=404,detail="照片不存在")
+    path=os.path.join(UPLOAD_DIR,name)
+    if not os.path.isfile(path):raise HTTPException(status_code=404,detail="照片不存在")
+    return FileResponse(path,headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
+
+@app.post('/api/photo/delete')
+def delete_latest_photo(user:dict=Depends(get_current_user)):
+    c=get_db();url=''
+    try:
+        row=c.execute("SELECT photo_url FROM body_cycles WHERE user_id=? AND photo_url<>'' ORDER BY cycle_num DESC LIMIT 1",(user['id'],)).fetchone()
+        if row:
+            url=row['photo_url'];c.execute("UPDATE body_cycles SET photo_url='' WHERE user_id=? AND photo_url=?",(user['id'],url))
+        c.commit()
+    finally:c.close()
+    name=os.path.basename(url)
+    if re.fullmatch(r'[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp)',name,re.I):
+        try:os.unlink(os.path.join(UPLOAD_DIR,name))
+        except FileNotFoundError:pass
+    return {'code':0,'msg':'当前照片已删除；加密备份中的历史副本按保留期轮换'}
+
+@app.get("/health/live")
+def liveness():
+    return {"status":"ok"}
+
+@app.get("/health")
+@app.get("/health/ready")
+def health():
+    conn=get_db()
+    try: conn.execute("SELECT 1").fetchone()
+    finally: conn.close()
+    return {"status":"ok","release":"r131"}
+
+
+class RecordChangeReq(ValidatedModel):
+    food_name: Optional[str]=None
+    slot: Optional[str]=None
+    cal: Optional[int]=None
+    weight_jin: Optional[float]=None
+    waist_cm: Optional[float]=None
+    duration_minutes: Optional[int]=None
+    cal_burned: Optional[float]=None
+    plan_name: Optional[str]=None
+
+def change_record(kind, record_id, req, user, deleting=False):
+    tables={"food":"food_logs","weight":"weight_logs","workout":"workout_logs"}
+    fields={"food":("food_name","slot","cal"),"weight":("weight_jin","waist_cm"),"workout":("duration_minutes","cal_burned","plan_name")}
+    if kind not in tables:raise HTTPException(status_code=400,detail="记录类型无效")
+    conn=get_db()
+    try:
+        table=tables[kind]
+        row=conn.execute(f"SELECT * FROM {table} WHERE id=? AND user_id=?",(record_id,user["id"])).fetchone()
+        if not row:raise HTTPException(status_code=404,detail="记录不存在")
+        snapshot_metrics(conn,user["id"])
+        conn.execute("INSERT INTO record_changes(user_id,kind,record_id,previous_json,operation,created_at) VALUES (?,?,?,?,?,?)",(user["id"],kind,record_id,json.dumps(dict(row),ensure_ascii=False),"delete" if deleting else "update",datetime.now().isoformat()))
+        if deleting:conn.execute(f"DELETE FROM {table} WHERE id=? AND user_id=?",(record_id,user["id"]))
+        else:
+            updates={k:getattr(req,k) for k in fields[kind] if getattr(req,k) is not None}
+            if not updates:raise HTTPException(status_code=400,detail="没有要修改的字段")
+            if kind=="food" and ("cal" in updates or "food_name" in updates):
+                if "cal" not in updates:
+                    parsed=parse_food_nutrition(updates["food_name"]);updates.update(cal=parsed["cal"],protein_g=parsed["protein_g"],carbs_g=parsed["carbs_g"],fat_g=parsed["fat_g"],source=parsed["source"],estimate_reason=parsed.get("reason",""))
+                else:updates.update(protein_g=0,carbs_g=0,fat_g=0,source="manual",estimate_reason="手动修正热量，宏量未知")
+            conn.execute(f"UPDATE {table} SET "+",".join(k+"=?" for k in updates)+" WHERE id=? AND user_id=?",(*updates.values(),record_id,user["id"]))
+        if kind=="weight":
+            latest=conn.execute("SELECT weight_jin FROM weight_logs WHERE user_id=? ORDER BY log_date DESC,id DESC LIMIT 1",(user["id"],)).fetchone()
+            if latest:conn.execute("UPDATE profiles SET weight_jin=? WHERE user_id=?",(latest[0],user["id"]))
+        conn.execute("DELETE FROM daily_reviews WHERE user_id=? AND log_date=?",(user["id"],row["log_date"]))
+        conn.commit()
+    except Exception:conn.rollback();raise
+    finally:conn.close()
+    return {"code":0,"msg":"记录已删除" if deleting else "记录已更新"}
+
+@app.post("/api/records/{kind}/{record_id}/update")
+def update_record(kind:str,record_id:int,req:RecordChangeReq,user:dict=Depends(get_current_user)):
+    return change_record(kind,record_id,req,user)
+
+@app.post("/api/records/{kind}/{record_id}/delete")
+def delete_record(kind:str,record_id:int,user:dict=Depends(get_current_user)):
+    return change_record(kind,record_id,None,user,True)
+
+from app_modules.features import install as install_features
+install_features(app,globals())
+
+
+def extension_asset(name):
+    def serve():
+        if name == "sw.js":
+            headers={"Cache-Control":"no-store","Service-Worker-Allowed":"/"}
+        else:headers=_no_cache()
+        path=os.path.join(WEB_DIR,name)
+        if not os.path.isfile(path):raise HTTPException(404,"资源未部署")
+        media={"js":"application/javascript","css":"text/css","svg":"image/svg+xml","webmanifest":"application/manifest+json","json":"application/json"}[name.rsplit(".",1)[-1]]
+        return FileResponse(path,media_type=media,headers=headers)
+    return serve
+for asset in ("features.js","features.css","sw.js","manifest.webmanifest","app-icon.svg","guidance.json"):
+    app.get("/"+asset)(extension_asset(asset))

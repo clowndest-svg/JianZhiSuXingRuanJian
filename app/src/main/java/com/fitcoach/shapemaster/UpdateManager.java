@@ -26,7 +26,7 @@ import java.net.URL;
  */
 public final class UpdateManager {
 
-    private static final String MANIFEST_URL = "http://124.220.54.64/version.json";
+    private static final String MANIFEST_URL = BuildConfig.API_BASE_URL + "/version.json";
     private static final String PREFS = "update_prompt";
     private static final Handler UI = new Handler(Looper.getMainLooper());
 
@@ -81,6 +81,7 @@ public final class UpdateManager {
     }
 
     private static void decide(Activity act, String json, boolean manual) {
+        if (act.isFinishing() || act.isDestroyed()) return;
         if (json == null) {
             if (manual) {
                 Toast.makeText(act, "没连上更新服务器，检查不了新版本", Toast.LENGTH_LONG).show();
@@ -114,7 +115,10 @@ public final class UpdateManager {
         if (!manual && sp.getInt("skipped", 0) == remote) {
             return;                     // 这一版用户刚点过"这次不更新"
         }
-        final String url = apk.startsWith("http") ? apk : "http://124.220.54.64" + apk;
+        final String url = apk.startsWith("http") ? apk : "https://124.220.54.64" + apk;
+        Uri downloadUri = Uri.parse(url);
+        if (!("https".equals(downloadUri.getScheme()) || "http".equals(downloadUri.getScheme()))
+                || !"124.220.54.64".equals(downloadUri.getHost())) return;
         String mb = size > 0 ? String.format(java.util.Locale.CHINA, "%.1f MB", size / 1048576.0) : "未知大小";
         final int r = remote;
         new android.app.AlertDialog.Builder(act)

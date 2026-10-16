@@ -2,9 +2,11 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>轻塑 · 智能减脂塑形严管伴侣</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="features.css">
+    <link rel="manifest" href="/manifest.webmanifest">
 </head>
 <body>
 
@@ -180,7 +182,7 @@
                         <div class="macro-val" id="burned-cal-val" style="color: var(--primary-dark);">-0 kcal</div>
                     </div>
                     <div class="macro-item">
-                        <div class="macro-name">当前净缺口</div>
+                        <div class="macro-name">记录估算缺口</div>
                         <div class="macro-val" id="net-deficit-val" style="color: var(--accent);">—</div>
                     </div>
                 </div>
@@ -278,7 +280,7 @@
             </div>
 
             <div class="wb-block">
-                <div class="wb-h">① 目标日倒推：这个日期现不现实</div>
+                <div class="wb-h">① 目标日期与体重差</div>
                 <div class="wb-row">
                     <label>目标日期<input type="date" id="wb-target-date" class="input-control"></label>
                     <label>目标（斤）<input type="number" step="0.1" id="wb-target-jin" class="input-control"></label>
@@ -313,7 +315,7 @@
             <div class="wb-block">
                 <div class="wb-h">④ 30天自律习惯热力矩阵：打卡轨迹可视化复盘</div>
                 <div class="wb-row" style="margin-bottom: 6px;">
-                    <span style="font-size: 11px; color: var(--text-muted);">一格看一天：记了吃、记了练、净缺口到 300，各算一分，绿越深分越高</span>
+                    <span style="font-size: 11px; color: var(--text-muted);">一格看一天：记了吃、记了练、净缺口到 300，各算一分；未确认完整的日子不按缺口加分</span>
                     <button type="button" class="btn-secondary" onclick="renderHabitMatrix()">刷新打卡矩阵</button>
                 </div>
                 <div id="wb-habit-matrix" class="wb-habit-grid"></div>
@@ -335,7 +337,7 @@
             <div class="pub-tools-row">
                 <button type="button" class="btn-secondary" onclick="makeProgressPoster()">生成进度海报（PNG）</button>
                 <button type="button" class="btn-secondary" onclick="toggleKioskMode()">📺 全景沉浸大屏模式</button>
-                <button type="button" class="btn-secondary" onclick="startPublicPolling(); stampPublicRefresh()">立刻刷新一次</button>
+                <button type="button" class="btn-secondary" onclick="refreshPublicNow()">立刻刷新一次</button>
             </div>
             <div class="pub-tools-note">海报上的数字全部来自这次真实拉到的打卡流水；一条记录都没有时不会生成空海报。</div>
 
@@ -647,7 +649,7 @@
             </div>
 
             <div class="callout" id="workout-summary-callout">
-                <strong>训练结构建议：</strong> 20分钟抗阻塑形（先力量消耗糖原） ➔ 25分钟快走/慢跑有氧（塑形紧致效率翻倍）。练后晚餐补足蛋白质抓住修复窗口！
+                <strong>训练结构建议：</strong> 20分钟抗阻塑形（先力量消耗糖原） ➔ 25分钟快走/慢跑有氧（根据体感调整强度）。练后晚餐补足蛋白质支持恢复！
             </div>
 
             <!-- 动态动作库容器 (由JS根据用户选定的目标生成) -->
@@ -1147,6 +1149,10 @@
                             <input type="number" step="0.1" id="reg-weight" placeholder="如：130" class="input-control">
                         </div>
                     </div>
+                    <div class="form-group"><label class="form-label" for="reg-target-weight">目标体重（斤，请自行确认）</label><input type="number" step="0.1" min="40" max="600" id="reg-target-weight" class="input-control" placeholder="不会自动替你设置目标"></div>
+                    <p class="field-hint">本版本预算仅供一般成人记录参考，不是个人营养处方。</p>
+                    <label><input type="checkbox" id="reg-special-population">孕哺期或需要个性化营养治疗（此版本预算不适用）</label>
+                    <p class="field-hint">目前仅为18岁及以上成年人提供一般记录与预算估算；孕哺期或有特殊健康需求请先咨询专业人员。</p>
                     <button class="btn-primary" style="margin-top: 10px;" onclick="submitRegister()">
                         ✨ 注册并开通专属公网网页
                     </button>
@@ -1214,7 +1220,7 @@
                 <!-- 复制链接与公网地址 -->
                 <div class="download-link-box">
                     <div style="font-size: 10.5px; color: var(--text-muted); margin-bottom: 4px;">公网直接下载网址 (可直接复制发到手机或微信)：</div>
-                    <div class="download-url-code" id="modal-download-url">http://124.220.54.64/qingsu.apk</div>
+                    <div class="download-url-code" id="modal-download-url">https://124.220.54.64/qingsu.apk</div>
                     <button class="btn-copy-url" onclick="copyApkDownloadUrl()">📋 复制下载网址</button>
                 </div>
 
@@ -1338,5 +1344,6 @@
     </div>
 
     <script src="app.js"></script>
+    <script src="features.js"></script>
 </body>
 </html>

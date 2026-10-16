@@ -15,6 +15,7 @@ import android.widget.Toast;
 import androidx.core.app.NotificationCompat;
 
 public class WebAppInterface {
+    private static final java.util.concurrent.ExecutorService LOCAL_AI = java.util.concurrent.Executors.newFixedThreadPool(2);
     private final Context context;
     private final WebView webView;
     private static final String CHANNEL_ID = "shapemaster_reminders";
@@ -105,6 +106,8 @@ public class WebAppInterface {
     @JavascriptInterface
     public void openBrowser(String url) {
         try {
+            android.net.Uri parsed = android.net.Uri.parse(url);
+            if (!"https".equals(parsed.getScheme()) && !"http".equals(parsed.getScheme())) return;
             Intent intent = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url));
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             context.startActivity(intent);
@@ -115,6 +118,7 @@ public class WebAppInterface {
 
     @JavascriptInterface
     public boolean launchApp(String packageName) {
+        if (!"com.sankuai.meituan".equals(packageName) && !"me.ele".equals(packageName)) return false;
         try {
             Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(packageName);
             if (launchIntent != null) {
@@ -338,5 +342,42 @@ public class WebAppInterface {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    @JavascriptInterface public String reminderStatus() {
+        android.content.SharedPreferences p=context.getSharedPreferences("reminders",Context.MODE_PRIVATE);
+        return "{\"enabled\":"+p.getBoolean("enabled",false)+",\"hour\":"+p.getInt("hour",20)+",\"minute\":"+p.getInt("minute",0)+"}";
+    }
+    @JavascriptInterface public void saveCsv(String content) {
+        if(context instanceof MainActivity)((MainActivity)context).saveCsv(content);
+    }
+    @JavascriptInterface public String getApiBase() {return BuildConfig.API_BASE_URL;}
+    @JavascriptInterface public void localAiRequest(String id,int port,String endpoint,String body) {
+        if(webView==null || id==null || id.length()>100 || port<1024 || port>65535
+                || !("/health".equals(endpoint)||"/v1/chat/completions".equals(endpoint)) || (body!=null && body.length()>30000))return;
+        LOCAL_AI.submit(()->{
+            org.json.JSONObject result=new org.json.JSONObject();java.net.HttpURLConnection connection=null;
+            try{
+                connection=(java.net.HttpURLConnection)new java.net.URL("http://127.0.0.1:"+port+endpoint).openConnection();
+                connection.setConnectTimeout(1500);connection.setReadTimeout(25000);connection.setInstanceFollowRedirects(false);
+                if(body!=null && !body.isEmpty()){
+                    connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Content-Type","application/json");
+                    try(java.io.OutputStream out=connection.getOutputStream()){out.write(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+                }
+                int status=connection.getResponseCode();result.put("status",status);
+                java.io.InputStream source=status>=400?connection.getErrorStream():connection.getInputStream();
+                java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream();
+                if(source!=null)try(java.io.InputStream in=source){byte[] buffer=new byte[4096];int n;while((n=in.read(buffer))!=-1){if(output.size()+n>256*1024)throw new java.io.IOException("Response too large");output.write(buffer,0,n);}}
+                result.put("body",output.toString("UTF-8"));
+            }catch(Exception e){try{result.put("error",e.getClass().getSimpleName());}catch(Exception ignored){}}
+            finally{if(connection!=null)connection.disconnect();}
+            String script="if(window.onLocalAiResponse)window.onLocalAiResponse("+org.json.JSONObject.quote(id)+","+result.toString()+");";
+            webView.post(()->{if(context instanceof android.app.Activity && ((android.app.Activity)context).isDestroyed())return;webView.evaluateJavascript(script,null);});
+        });
+    }
+    @JavascriptInterface public boolean configureReminder(boolean enabled,int hour,int minute) {
+        if(hour<0||hour>23||minute<0||minute>59)return false;
+        context.getSharedPreferences("reminders",Context.MODE_PRIVATE).edit().putBoolean("enabled",enabled).putInt("hour",hour).putInt("minute",minute).apply();
+        ReminderReceiver.schedule(context);return true;
     }
 }

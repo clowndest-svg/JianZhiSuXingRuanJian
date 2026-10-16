@@ -1,0 +1,17 @@
+D:\RuanJian\JiaZhiSuXianApk\_audit_sandbox\review-20261016\deps\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_historical_metrics_and_day_mode (__main__.Integration.test_historical_metrics_and_day_mode) ... ok
+test_idempotency (__main__.Integration.test_idempotency) ... ok
+test_images (__main__.Integration.test_images) ... ok
+test_initial_state_and_share (__main__.Integration.test_initial_state_and_share) ... ok
+test_latest_weight_and_checklist (__main__.Integration.test_latest_weight_and_checklist) ... ok
+test_login_counter (__main__.Integration.test_login_counter) ... ok
+test_private_knowledge (__main__.Integration.test_private_knowledge) ... ok
+test_record_correction_and_isolation (__main__.Integration.test_record_correction_and_isolation) ... ok
+test_sessions_and_logout (__main__.Integration.test_sessions_and_logout) ... ok
+test_validation (__main__.Integration.test_validation) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 9.749s
+
+OK

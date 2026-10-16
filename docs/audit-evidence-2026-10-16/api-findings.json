@@ -1,0 +1,82 @@
+{
+  "scope": "real FastAPI/Pydantic/Starlette/SQLite; external Redis/model/search disabled",
+  "fixture": "D:\\RuanJian\\JiaZhiSuXianApk\\_audit_sandbox\\review-20261016\\real-1792157512230011200",
+  "multi_device": {
+    "first_session_status": 401,
+    "second_session_status": 200
+  },
+  "fresh_account": {
+    "cycle_day": null,
+    "slacking_days": 7,
+    "dashboard_share_has_key": false,
+    "registration_share_has_key": true,
+    "water_target_ml": 2800
+  },
+  "same_day_weight": {
+    "dashboard_jin": 150.0,
+    "chart_jin": 160.0
+  },
+  "duplicate_workout": {
+    "burned": 440.0,
+    "done": true
+  },
+  "day_mode_carryover": {
+    "today_workout_done": false,
+    "day_mode": "workout"
+  },
+  "upload_boundary": {
+    "upload_status": 200,
+    "anonymous_get_status": 200,
+    "content_type": "text/html; charset=utf-8"
+  },
+  "global_knowledge": {
+    "other_context_contains_marker": true,
+    "other_answer_contains_marker": true,
+    "source": "kb"
+  },
+  "knowledge_key_collision": {
+    "queries": [
+      "黑咖啡有什么优点",
+      "黑咖啡有什么风险"
+    ],
+    "same_key": true
+  },
+  "historical_metric_drift": {
+    "yesterday_before": 1968,
+    "yesterday_after_height_change": 2135
+  },
+  "input_validation": {
+    "negative_food": 200,
+    "negative_weight": 200,
+    "negative_workout": 200,
+    "empty_credentials": 200
+  },
+  "login_counter_reset": {
+    "four_wrong": [
+      400,
+      400,
+      400,
+      400
+    ],
+    "good": 200,
+    "good_after_one_more_wrong": 429
+  },
+  "sqlite": {
+    "journal_mode": "delete",
+    "foreign_keys": 0,
+    "food_indexes": []
+  },
+  "apk_assets": {
+    "app.js": true,
+    "index.html": true,
+    "style.css": true,
+    "exercise_poses.json": true
+  },
+  "packages": {
+    "fastapi": "0.143.2",
+    "starlette": "1.8.0",
+    "pydantic": "2.14.1",
+    "httpx": "0.28.1",
+    "uvicorn": "0.54.0"
+  }
+}

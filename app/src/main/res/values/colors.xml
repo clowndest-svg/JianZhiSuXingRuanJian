@@ -2,8 +2,6 @@
     <color name="primary">#10B981</color>
     <color name="primary_variant">#059669</color>
     <color name="secondary">#065F46</color>
-    <color name="background">#F8FAFC</color>
-    <color name="surface">#FFFFFF</color>
     <color name="status_bar">#F8FAFC</color>
     <!-- 与位图图标底色一致，深色底让绿色度量环在浅色桌面上跳出来 -->
     <color name="ic_launcher_background">#0F172A</color>

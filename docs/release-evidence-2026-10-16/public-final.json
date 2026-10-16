@@ -1,0 +1,24 @@
+{
+  "/health": {
+    "status": 200,
+    "bytes": 32,
+    "sha256": "4f571147afaec705a7ec1fe4d2485642ba17f900024a0ebb60f840df6b8092fd"
+  },
+  "/version.json": {
+    "status": 200,
+    "bytes": 554,
+    "sha256": "87aaddc554edff092c3e9d9dd454dd144c387dc69d4218ebe731844be8dd3807",
+    "version": 12
+  },
+  "/app.js": {
+    "status": 200,
+    "bytes": 208803,
+    "sha256": "ac50d5395927bc5ef8eda32c98d4db94fbf2c5f31ddb478244ea7a3aed65e91a"
+  },
+  "/qingsu.apk": {
+    "status": 200,
+    "bytes": 4639039,
+    "sha256": "16d9c8ead9999a813246f602de6988a05a03701c920fb565eb9727b1d71712c2",
+    "matches_local": true
+  }
+}

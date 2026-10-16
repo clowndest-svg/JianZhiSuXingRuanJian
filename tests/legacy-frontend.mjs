@@ -1,13 +1,13 @@
 // 轻塑前端回归台：用 vm + DOM stub 直接跑仓库里那份 app.js（不是手搓参考实现）
-// 用法:  node _audit_harness.mjs            → 当前源码，应全绿
-//        node _audit_harness.mjs --mutant   → git HEAD 那版，应大面积红
+// 用法:  node tests/legacy-frontend.mjs            → 当前源码，应全绿
+//        node tests/legacy-frontend.mjs --mutant   → git HEAD 那版，应大面积红
 import fs from "node:fs";
 import vm from "node:vm";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const JS_REL = "app/src/main/assets/app.js";
 const MUTANT = process.argv.includes("--mutant");
 
@@ -111,7 +111,7 @@ function makeCtx() {
   }
 
   const win = {
-    location: { protocol: "http:", hostname: "127.0.0.1", origin: "http://127.0.0.1", hash: "", search: "" },
+    location: { protocol: "http:", hostname: "app.test", origin: "http://app.test", hash: "", search: "" },
     addEventListener(ev, fn) { (listeners[ev] = listeners[ev] || []).push(fn); },
     AndroidBridge: {
       showToast(m) { log.toasts.push(String(m)); },
@@ -180,6 +180,7 @@ function loadJs(context) {
     ? execFileSync("git", ["show", "HEAD:" + JS_REL], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
     : fs.readFileSync(path.join(ROOT, JS_REL), "utf8");
   vm.runInContext(src, context, { filename: JS_REL });
+  vm.runInContext("var localGuidanceRows="+fs.readFileSync(path.join(ROOT,"app/src/main/assets/guidance.json"),"utf8"),context);
 }
 
 // ------------------------------------------------------------------ 判据
@@ -213,7 +214,7 @@ const writes = [
       "prof-target-jin","prof-scene","prof-dining-mode"].forEach(i=>document.getElementById(i).value=
       i==="prof-age"?"26":i==="prof-height"?"165":i==="prof-weight-jin"?"140":i==="prof-target-jin"?"120":"takeout");
       saveCustomProfile();`],
-  ["周期", "upgradeCyclePlan", `document.getElementById("cycle-input-weight").value="133";
+  ["周期", "upgradeCyclePlan", `state.token="tk";document.getElementById("cycle-input-weight").value="133";
                                document.getElementById("cycle-input-waist").value="80";
                                upgradeCyclePlan();`],
 ];
@@ -331,10 +332,10 @@ check("有记录时净赤字=940", d2.includes("940"), d2);
 
 // ===== 7. 两颗快捷 chip 必须有真专答 =====
 const chips = [
-  ["平台期", "感觉体重在平台期不掉了怎么办？", ["平台期", "真假"]],
-  ["练后饿", "运动完晚上很饿能吃什么？", ["练后", "饿"]],
-  ["补救", "今天不小心暴食了一顿怎么补救？", ["自适应", "晚餐"]],
-  ["火锅", "在外聚餐吃火锅该怎么点？", ["锅底", "蘸料"]],
+  ["平台期", "感觉体重在平台期不掉了怎么办？", ["平台期", "趋势"]],
+  ["练后饿", "运动完晚上很饿能吃什么？", ["饿", "记录"]],
+  ["补救", "今天不小心暴食了一顿怎么补救？", ["惩罚", "规律"]],
+  ["火锅", "在外聚餐吃火锅该怎么点？", ["份量", "记录"]],
 ];
 for (const [label, q, keys] of chips) {
   const ans = String(run(h.context, `generateAiResponse(${JSON.stringify(q)})`));
@@ -345,7 +346,7 @@ for (const [label, q, keys] of chips) {
 
 // ===== 8. 公网大屏用户名不再当 HTML 插 =====
 sandbox.__fetchHandler = () => Promise.resolve(failJson(404, "no"));
-run(h.context, `loadPublicUserData("<img src=x onerror=alert(1)>");`);
+run(h.context, `loadPublicUserData("<img src=x onerror=alert(1)>").catch(()=>{});`);
 await new Promise(r => setImmediate(r));
 await new Promise(r => setImmediate(r));
 const bannerHtml = String(run(h.context, `document.getElementById("user-web-link-card").innerHTML`));
@@ -575,14 +576,14 @@ check("没数据时预估显示暂无足够数据", txt("eta-days").includes("�
 // 原来 stub 的是 showNotification，代码换成 tryNotify 后这条读到 0，测的是旧接口）
 let noteCount = 0;
 sandbox.window.AndroidBridge.tryNotify = (a, b) => { noteCount++; return true; };
-run(h.context, `state.token="tk"; try{localStorage.removeItem("QINGSU_NOTED_"+new Date().toISOString().slice(0,10))}catch(e){}`);
+run(h.context, `state.token="tk"; try{localStorage.removeItem("QINGSU_NOTED_"+(state.user?state.user.username:"guest")+"_"+new Date().getFullYear()+"-"+(new Date().getMonth()+1)+"-"+new Date().getDate())}catch(e){}`);
 run(h.context, `notifyOnceToday("测试","内容")`);
 run(h.context, `notifyOnceToday("测试","内容")`);
 check("同一天只提醒一次", noteCount === 1, noteCount);
 
 // 通知发不出去（没权限）时必须改成页面内提醒，不能静默丢掉
 sandbox.window.AndroidBridge.tryNotify = (a, b) => { return false; };
-run(h.context, `try{localStorage.removeItem("QINGSU_NOTED_"+new Date().toISOString().slice(0,10))}catch(e){}`);
+run(h.context, `try{localStorage.removeItem("QINGSU_NOTED_"+(state.user?state.user.username:"guest")+"_"+new Date().getFullYear()+"-"+(new Date().getMonth()+1)+"-"+new Date().getDate())}catch(e){}`);
 run(h.context, `notifyOnceToday("该称重了","今天还没记录体重")`);
 const inpage = txt("inpage-remind");
 check("通知发不出时转为页面内提醒", inpage.includes("该称重了"), inpage.slice(0, 60));
@@ -619,7 +620,7 @@ check("未登录导出会提示先登录", log.toasts.some(t => t.includes("请�
 // 无照片走测量通道
 log.fetches.length = 0;
 sandbox.__fetchHandler = () => Promise.resolve(okJson({ code: 0, msg: "ok" }));
-run(h.context, `document.getElementById("cycle-input-weight").value="133";
+run(h.context, `state.token="tk";document.getElementById("cycle-input-weight").value="133";
                 document.getElementById("cycle-input-waist").value="82";
                 const fe=document.getElementById("file-cycle-photo-input"); fe.files=null;
                 upgradeCyclePlan();`);
@@ -705,6 +706,7 @@ function needSymbols(list, names) {
             }
             if (String(url).indexOf("/api/ask") >= 0) {
                 if (mode === "server_down") return Promise.reject(new TypeError("server unreachable"));
+                if(JSON.parse(opts.body).route_only)return Promise.resolve(okJson({code:0,source:"none",answer:""}));
                 return Promise.resolve(OK_SRV);
             }
             return Promise.reject(new Error("unexpected " + url));
@@ -712,12 +714,13 @@ function needSymbols(list, names) {
     }
 
     function resetPref(p) {
+        run(h.context, `state.token="engine-fixture";`);
         run(h.context, `try{localStorage.setItem("QINGSU_AI_ENGINE", ${JSON.stringify(p)})}catch(e){}`);
         run(h.context, `localAiCache.ok=null; localAiCache.at=0;`);
     }
 
     const ENGINE_NAMES = [
-        "自动模式本地在线时走本地", "本地答案回写共享知识库", "本地引擎读服务器上下文（记忆共用）",
+        "自动模式本地在线时走本地", "本地答案保存到本人私有记录", "本地引擎读服务器上下文（记忆共用）",
         "本地提示词带本人真实体重", "本地不通时降级到服务器", "本地返回 500 时降级到服务器",
         "本地返回空内容时降级到服务器", "只选本地时不偷偷走服务器", "报错要说清是本地不行",
         "只选服务器时不探本地端口", "只选服务器时走 /api/ask", "两引擎全挂时报错含本地原因",
@@ -732,7 +735,7 @@ function needSymbols(list, names) {
         let r = await run(h.context, `askAnyEngine("我多重")`).then(d => d, e => ({ err: String(e && e.message) }));
         await drain();
         check("自动模式本地在线时走本地", r.engine === "local" && r.source === "local_model", r);
-        check("本地答案回写共享知识库", calls.some(c => c.indexOf("/api/ai/record") >= 0), calls);
+        check("本地答案保存到本人私有记录", calls.some(c => c.indexOf("/api/ai/record") >= 0), calls);
         check("本地引擎读服务器上下文（记忆共用）", calls.some(c => c.indexOf("/api/ai/context") >= 0), calls);
         check("本地提示词带本人真实体重",
               String(r.answer || "").length > 0 && calls.length >= 3, calls.length);
@@ -823,7 +826,7 @@ check("海报按钮说明数据来自真实流水", pubHtml.includes("真实拉�
 let pollTimers = 0;
 sandbox.setInterval = (fn, ms) => { pollTimers++; return 1; };
 sandbox.clearInterval = () => {};
-run(h.context, `window.__PUBLIC_USER__="someone"; startPublicPolling();`);
+run(h.context, `window.__PUBLIC_USER__="someone"; startPublicPolling();stampPublicRefresh();`);
 check("大屏开启自动刷新定时器", pollTimers >= 1, pollTimers);
 const stampTxt = txt("public-refresh-stamp");
 check("刷新戳写明周期与时刻", stampTxt.includes("30") && stampTxt.includes("上次"), stampTxt.slice(0, 60));
@@ -973,9 +976,9 @@ run(h.context, `state.currentWeightJin=151; state.profile={targetWeightJin:132, 
     + ` document.getElementById("wb-target-date").value=d.toISOString().slice(0,10);`
     + ` planByTargetDate();`);
 const planTxt = txt("wb-plan-out").replace(/<[^>]+>/g, "");
-check("目标日倒推算得出真数字", /还剩\s*\d+\s*天/.test(planTxt) && /日均缺口/.test(planTxt) && /\d{3,}/.test(planTxt), planTxt.slice(0, 150));
-check("倒推不安全时判做不到",
-      /做不到|可行|偏大/.test(planTxt), planTxt.slice(0, 90));
+check("目标日倒推算得出真数字", /还剩\s*\d+\s*天/.test(planTxt) && /周变化/.test(planTxt) && /\d+/.test(planTxt), planTxt.slice(0, 150));
+check("日期算术不承诺可行性或进食量",
+      /不能据此判断目标可行性/.test(planTxt), planTxt.slice(0, 90));
 
 // 身体数据缺失时必须拒绝，不能拿默认值凑
 run(h.context, `state.currentWeightJin=0; state.profile={}; state.calculated={};`
@@ -1153,7 +1156,7 @@ check("打印样式只留复盘页",
       const iso = dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0")
         + "-" + String(dt.getDate()).padStart(2, "0");
       rows.push({ day: "d", date: iso, consumed: i === 0 ? 1200 : 0,
-                  burned: i === 0 ? 220 : 0, deficit: i === 0 ? 300 : 0 });
+                  burned: i === 0 ? 220 : 0, deficit: i === 0 ? 300 : 0,record_status:i===0?"complete":"missing",has_records:i===0 });
     }
     sandbox.__fetchHandler = (u) => String(u).indexOf("/api/habits") >= 0
       ? Promise.resolve(okJson({ days: rows, window: 30 }))

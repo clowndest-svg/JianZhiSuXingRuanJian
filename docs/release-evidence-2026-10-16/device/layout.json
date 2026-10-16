@@ -1,0 +1,31 @@
+{
+  "engine": "Android WebView",
+  "measurements": [
+    {
+      "requested": 320,
+      "width": 382,
+      "scroll": 382
+    },
+    {
+      "requested": 360,
+      "width": 382,
+      "scroll": 382
+    },
+    {
+      "requested": 390,
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "requested": 768,
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "requested": 1440,
+      "width": 1440,
+      "scroll": 1440
+    }
+  ],
+  "note": "Requested 320/360 did not yield those actual widths; these are not passes for 320/360."
+}

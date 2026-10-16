@@ -16,6 +16,9 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import androidx.webkit.WebViewAssetLoader;
 import android.widget.Toast;
 
 public class MainActivity extends Activity {
@@ -24,6 +27,20 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> filePathCallback;
     private WebView webView;
     private long backPressedTime = 0;
+    private Uri cameraUri;
+    private String pendingExport;
+    private static final int SAVE_CSV_REQUEST = 1002;
+
+    public void saveCsv(String content) {
+        if(content==null || content.length()>5*1024*1024) return;
+        runOnUiThread(() -> {
+            pendingExport=content;
+            Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("text/csv").putExtra(Intent.EXTRA_TITLE,"轻塑记录.csv");
+            try {startActivityForResult(intent,SAVE_CSV_REQUEST);}
+            catch(Exception e){pendingExport=null;Toast.makeText(this,"无法打开保存位置",Toast.LENGTH_LONG).show();}
+        });
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -32,12 +49,12 @@ public class MainActivity extends Activity {
 
         // Customize status bar color to fresh light background with dark icons
         Window window = getWindow();
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        {
             window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
             window.setStatusBarColor(Color.parseColor("#F8FAFC"));
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        {
             window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         }
 
@@ -48,7 +65,7 @@ public class MainActivity extends Activity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
-        settings.setAllowFileAccess(true);
+        settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(true);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
@@ -58,7 +75,24 @@ public class MainActivity extends Activity {
         // Bridge interface for native notifications, vibration and audio cues
         webView.addJavascriptInterface(new WebAppInterface(this, webView), "AndroidBridge");
 
-        webView.setWebViewClient(new WebViewClient());
+        // HTTPS assets and API share the secure transport policy.
+        final WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
+                .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                return assets.shouldInterceptRequest(request.getUrl());
+            }
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                Uri uri = request.getUrl();
+                if ("https".equals(uri.getScheme()) && "appassets.androidplatform.net".equals(uri.getHost())) return false;
+                if ("https".equals(uri.getScheme()) || "http".equals(uri.getScheme())) {
+                    try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); } catch (Exception ignored) { }
+                }
+                return true;
+            }
+        });
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
@@ -68,6 +102,16 @@ public class MainActivity extends Activity {
                 MainActivity.this.filePathCallback = filePathCallback;
 
                 Intent intent = fileChooserParams.createIntent();
+                cameraUri=null;
+                try {
+                    java.io.File dir=new java.io.File(getCacheDir(),"capture");dir.mkdirs();
+                    java.io.File target=java.io.File.createTempFile("photo-",".jpg",dir);
+                    cameraUri=androidx.core.content.FileProvider.getUriForFile(MainActivity.this,getPackageName()+".files",target);
+                    Intent camera=new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
+                    camera.putExtra(android.provider.MediaStore.EXTRA_OUTPUT,cameraUri);
+                    camera.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    intent=Intent.createChooser(intent,"选择照片或拍照").putExtra(Intent.EXTRA_INITIAL_INTENTS,new Intent[]{camera});
+                } catch(Exception ignored) {cameraUri=null;}
                 try {
                     startActivityForResult(intent, FILE_CHOOSER_REQUEST_CODE);
                 } catch (ActivityNotFoundException e) {
@@ -80,49 +124,18 @@ public class MainActivity extends Activity {
         });
 
         // Load the main web dashboard
-        webView.loadUrl("file:///android_asset/index.html");
+        webView.loadUrl("https://appassets.androidplatform.net/assets/index.html");
 
-        // 开 App 先查通知权限：没授权就弹说明并送到系统设置
-        checkNotificationPermissionOnLaunch();
+        // Notification permission is requested when the user enables reminders.
 
         // 启动即在原生层查一次线上版本：页面自己加载失败时更要能提醒更新
         UpdateManager.check(this, false);
+        ReminderReceiver.schedule(this);
     }
 
     // ================= 第五批：开 App 先查通知权限 =================
     private static final int NOTIF_PERM_REQUEST = 2025;
-    private boolean notifPromptShown = false;
-
-    private void checkNotificationPermissionOnLaunch() {
-        if (notifPromptShown) {
-            return;
-        }
-        boolean ok;
-        try {
-            ok = androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled();
-        } catch (Exception e) {
-            return;
-        }
-        if (ok) {
-            return;
-        }
-        notifPromptShown = true;
-        new android.app.AlertDialog.Builder(this)
-                .setTitle("通知权限还没开")
-                .setMessage("这款应用要用通知提醒你：该称重了、该更新身材照了、外卖额度已经超了、水喝得不够。\n\n"
-                        + "不开也行，但那些提醒只会在你正好打开应用时才出现——"
-                        + "而对减脂来说，最没用的提醒就是恰好已经在看屏幕时才响的那一种。")
-                .setPositiveButton("去开启", new android.content.DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(android.content.DialogInterface d, int w) {
-                        askNotificationPermission();
-                    }
-                })
-                .setNegativeButton("这次先不开", null)
-                .show();
-    }
-
-    private void askNotificationPermission() {
+    public void askNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33) {
             try {
                 requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},
@@ -153,7 +166,7 @@ public class MainActivity extends Activity {
         }
         boolean granted = grantResults.length > 0 && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
         Toast.makeText(this, granted
-                ? "通知已开启，到点的提醒会真的弹出来"
+                ? "通知已开启，使用应用期间可以接收提醒"
                 : "通知还是关着的，提醒只会在应用内出现", Toast.LENGTH_LONG).show();
         if (webView != null) {
             webView.post(new Runnable() {
@@ -182,6 +195,16 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if(requestCode==SAVE_CSV_REQUEST){
+            if(resultCode==RESULT_OK && data!=null && data.getData()!=null && pendingExport!=null){
+                try(java.io.OutputStream out=getContentResolver().openOutputStream(data.getData())){
+                    if(out==null)throw new java.io.IOException("No output stream");
+                    out.write(pendingExport.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    Toast.makeText(this,"记录文件已保存",Toast.LENGTH_LONG).show();
+                }catch(Exception e){Toast.makeText(this,"文件未保存，请重试",Toast.LENGTH_LONG).show();}
+            }
+            pendingExport=null;return;
+        }
         if (requestCode == FILE_CHOOSER_REQUEST_CODE) {
             if (filePathCallback != null) {
                 Uri[] results = null;
@@ -196,14 +219,20 @@ public class MainActivity extends Activity {
                         }
                     }
                 }
+                if(resultCode==RESULT_OK && results==null && cameraUri!=null)results=new Uri[]{cameraUri};
                 filePathCallback.onReceiveValue(results);
                 filePathCallback = null;
+                cameraUri=null;
             }
         }
     }
 
     @Override
     public void onBackPressed() {
+        if(webView!=null){webView.evaluateJavascript("(function(){if(window.handleNativeBack)return window.handleNativeBack();return false;})()",value->{if(!"true".equals(value))exitOrNavigate();});return;}
+        exitOrNavigate();
+    }
+    private void exitOrNavigate() {
         if (webView != null && webView.canGoBack()) {
             webView.goBack();
         } else {
@@ -218,6 +247,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if(filePathCallback!=null){filePathCallback.onReceiveValue(null);filePathCallback=null;}
         if (webView != null) {
             webView.destroy();
         }

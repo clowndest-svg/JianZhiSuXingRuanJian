@@ -1,0 +1,100 @@
+{
+  "version": {
+    "version_code": 13,
+    "version_name": "1.5.0",
+    "apk_url": "https://124.220.54.64/qingsu.apk",
+    "size": 4703789,
+    "md5": "2344be4864ec84fb6e976ef606496779",
+    "sha256": "c7d0cd212f3b02cd8c975398b4f9597dcb96112d29e6647ef75b15b84c089a7f",
+    "notes": "r131：全链路可信 HTTPS、正式签名轮换；分享字段权限/到期/撤销；完整日确认、历史纠错与补录；餐食份量核对；离线草稿与网页离线外壳；Android 每日提醒、拍照入口和 CSV 保存；统一问答路由及场景规则。"
+  },
+  "tampered_apk_rejected": true,
+  "qa_endpoint_absent": true,
+  "apk_assets_match_source": true,
+  "files": {
+    "server.py": {
+      "size": 116296,
+      "sha256": "e41243289746b5a082bf8a90324036078ebac25a7901b2dff8ba73d1ebcb7ada"
+    },
+    "qingsu.apk": {
+      "size": 4703789,
+      "sha256": "c7d0cd212f3b02cd8c975398b4f9597dcb96112d29e6647ef75b15b84c089a7f"
+    },
+    "app/src/main/web_version.json": {
+      "size": 526,
+      "sha256": "7386c0a656080f6484e41ce03b3a5cecbb3ba61aefacbaae8fdf59762caa3ccc"
+    },
+    "app/src/main/assets/app-icon.svg": {
+      "size": 294,
+      "sha256": "2575e5f233034e4c569d2a361de5967913028880facf70b46c4016f4aca591f6"
+    },
+    "app/src/main/assets/app.js": {
+      "size": 202331,
+      "sha256": "707a36024f56368b9cb26f338286afaa317dabf40a799b36c2512836e088c128"
+    },
+    "app/src/main/assets/exercise_poses.json": {
+      "size": 83084,
+      "sha256": "d7a38fe37b8ded8a0a67a684ed4ea96998275f21f6d3268d71c065d003ec6174"
+    },
+    "app/src/main/assets/features.css": {
+      "size": 2079,
+      "sha256": "af3bf6dc3ec2d50fad5cea36e98e40e63fd2128d8d902c10dc835093e8743abf"
+    },
+    "app/src/main/assets/features.js": {
+      "size": 20831,
+      "sha256": "a554730ae0604a88280e5784ce69e8c9fc8108fff87f384e762e049151229443"
+    },
+    "app/src/main/assets/guidance.json": {
+      "size": 8132,
+      "sha256": "435d95291c0aac389851777bcf5637889526a9bb00b6d61ef0ca1d1a6cfaa84d"
+    },
+    "app/src/main/assets/index.html": {
+      "size": 86176,
+      "sha256": "36ca3a58e0ae73ecd65af73dcf0fdac5680da65000e11a546e32cad070e78646"
+    },
+    "app/src/main/assets/manifest.webmanifest": {
+      "size": 237,
+      "sha256": "6f32ad5adb69c667e358d0afa2d80bf22effdc68051763f826a503b14591c184"
+    },
+    "app/src/main/assets/qr.svg": {
+      "size": 6681,
+      "sha256": "ca28265c618a4a1958db1d3700483baf374ba9e6af2c213d9e6e287174cb79a7"
+    },
+    "app/src/main/assets/style.css": {
+      "size": 71672,
+      "sha256": "f919a8959f786128f0c45eb5a0d85f9be2934d8bff7d3073064eda585dfa3773"
+    },
+    "app/src/main/assets/sw.js": {
+      "size": 854,
+      "sha256": "438f6063b540999900f9905b77ca52a1036ae6d2dca12c6404d8b1fa932ca27b"
+    },
+    "app_modules/ai_policy.py": {
+      "size": 462,
+      "sha256": "e66b861560ef60a60fe85103149a068e73497c9aa44a91aa1fa27b6ade4cdcf6"
+    },
+    "app_modules/cache.py": {
+      "size": 863,
+      "sha256": "c630d14135a245093972a38399db840c0c8354cc2ec1677f9f3baac75521eabb"
+    },
+    "app_modules/fact_scopes.py": {
+      "size": 2068,
+      "sha256": "7edd9e04dac4694c16503327cf680a81220d20a3c5f89ac4a8b4636fefa9fd93"
+    },
+    "app_modules/features.py": {
+      "size": 8383,
+      "sha256": "dca0ae40d848f0841c5a911fab4b4dbcc91f7a3f3c7a7b35fa5938a92d27a8de"
+    },
+    "app_modules/metrics.py": {
+      "size": 1801,
+      "sha256": "a75a1f8ae8a3032ba0ce765c8b0d6ee874de528503391e170589a2767e5c97aa"
+    },
+    "app_modules/nutrition.py": {
+      "size": 5846,
+      "sha256": "7a3d28475670363bd42a2ec413549e4ff0a26e9f3d8d8f1de996458d8244de30"
+    },
+    "app_modules/__init__.py": {
+      "size": 65,
+      "sha256": "06ae3f08a9c7e977d7ea159a8367504c039cac1ed2e997d399c0e16ee211b3c6"
+    }
+  }
+}

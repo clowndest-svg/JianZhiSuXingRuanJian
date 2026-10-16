@@ -20,3 +20,14 @@ _build.log
 
 # 待推送的提交包（一次性备份，不入库）
 *.bundle
+
+# Private recovery artifacts and release credentials never belong in Git.
+.private-backups/
+.signing/
+*.p12
+*.jks
+*.keystore
+*.p7m
+*.idsig
+
+.venv/

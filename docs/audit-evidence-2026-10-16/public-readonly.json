@@ -1,0 +1,42 @@
+{
+  "/": {
+    "status": 200,
+    "url": "http://124.220.54.64/",
+    "bytes": 85384,
+    "headers": {
+      "Cache-Control": "no-cache, must-revalidate",
+      "Content-Type": "text/html; charset=utf-8"
+    }
+  },
+  "/version.json": {
+    "status": 200,
+    "url": "http://124.220.54.64/version.json",
+    "bytes": 1325,
+    "headers": {
+      "Cache-Control": "no-cache, must-revalidate",
+      "Content-Type": "application/json"
+    },
+    "matches_local": true,
+    "version_code": 10
+  },
+  "/app.js": {
+    "status": 200,
+    "url": "http://124.220.54.64/app.js",
+    "bytes": 200346,
+    "headers": {
+      "Cache-Control": "no-cache, must-revalidate",
+      "Content-Type": "application/javascript"
+    },
+    "matches_local": true
+  },
+  "/style.css": {
+    "status": 200,
+    "url": "http://124.220.54.64/style.css",
+    "bytes": 71672,
+    "headers": {
+      "Cache-Control": "no-cache, must-revalidate",
+      "Content-Type": "text/css; charset=utf-8"
+    },
+    "matches_local": true
+  }
+}

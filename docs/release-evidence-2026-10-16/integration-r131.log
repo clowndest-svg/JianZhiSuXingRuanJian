@@ -1,0 +1,29 @@
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_backdated_weight_does_not_replace_latest (__main__.Integration.test_backdated_weight_does_not_replace_latest) ... ok
+test_completion_and_backfill (__main__.Integration.test_completion_and_backfill) ... ok
+test_concurrent_registration_and_cycle_numbers (__main__.Integration.test_concurrent_registration_and_cycle_numbers) ... ok
+test_corrupt_profile_is_validation_error (__main__.Integration.test_corrupt_profile_is_validation_error) ... ok
+test_csv_schema_unknown_macros_and_formula_escape (__main__.Integration.test_csv_schema_unknown_macros_and_formula_escape) ... ok
+test_daily_zero_is_not_missing (__main__.Integration.test_daily_zero_is_not_missing) ... ok
+test_historical_metrics_and_day_mode (__main__.Integration.test_historical_metrics_and_day_mode) ... ok
+test_history_pagination_owner (__main__.Integration.test_history_pagination_owner) ... ok
+test_idempotency (__main__.Integration.test_idempotency) ... ok
+test_images (__main__.Integration.test_images) ... ok
+test_initial_state_and_share (__main__.Integration.test_initial_state_and_share) ... ok
+test_latest_weight_and_checklist (__main__.Integration.test_latest_weight_and_checklist) ... ok
+test_login_counter (__main__.Integration.test_login_counter) ... ok
+test_private_knowledge (__main__.Integration.test_private_knowledge) ... ok
+test_public_photo_revocation_and_delete (__main__.Integration.test_public_photo_revocation_and_delete) ... ok
+test_record_correction_and_isolation (__main__.Integration.test_record_correction_and_isolation) ... ok
+test_sessions_and_logout (__main__.Integration.test_sessions_and_logout) ... ok
+test_share_allowlist_excludes_indirect_private_fields (__main__.Integration.test_share_allowlist_excludes_indirect_private_fields) ... ok
+test_share_scope_expiry_and_rotation (__main__.Integration.test_share_scope_expiry_and_rotation) ... ok
+test_sources_macros_and_portions (__main__.Integration.test_sources_macros_and_portions) ... ok
+test_special_population_budget_boundary (__main__.Integration.test_special_population_budget_boundary) ... ok
+test_validation (__main__.Integration.test_validation) ... ok
+
+----------------------------------------------------------------------
+Ran 22 tests in 15.597s
+
+OK
