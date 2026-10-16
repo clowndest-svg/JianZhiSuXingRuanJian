@@ -192,7 +192,7 @@
 
                 <!-- 自然语言记录输入框 -->
                 <div style="display: flex; gap: 8px;">
-                    <input type="text" id="input-meal-text" placeholder="直接打字，如：小碗牛肉面加水煮蛋一个" class="input-control" style="flex: 1;" onkeydown="if(event.key==='Enter') logNaturalMeal()">
+                    <input type="text" id="input-meal-text" placeholder="如：小碗牛肉面" class="input-control" style="flex: 1;" onkeydown="if(event.key==='Enter') logNaturalMeal()">
                     <button class="btn-primary" style="width: auto; padding: 8px 14px; flex-shrink: 0;" onclick="logNaturalMeal()">记一笔</button>
                 </div>
 
@@ -243,7 +243,7 @@
                     <span style="font-size: 11px; color: var(--text-muted);" id="current-weight-summary">当前 — 斤 / 目标 — 斤</span>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center;">
-                    <input type="number" step="0.1" id="input-weight" placeholder="输入晨起体重，如 69.2" class="input-control" style="flex: 1;">
+                    <input type="number" step="0.1" id="input-weight" placeholder="体重（斤）" class="input-control" style="flex: 1;">
                     <select id="weight-unit" class="input-control" style="width: 75px; flex-shrink: 0;">
                         <option value="jin">斤</option>
                         <option value="kg">kg</option>
@@ -519,6 +519,15 @@
 
 
         <!-- 网页独占：只有拿到这条大屏链接的人看得到，装在手机里的 App 不出现这块 -->
+        <!-- 旧版注册/保存会用 26/165/140/120 兜底，存量档案可能仍是那组数；
+             这里只提醒核对，不替用户改任何数字 -->
+        <div class="card body-suspect" id="body-suspect-card" style="display:none;">
+            <div class="bs-title">⚠️ 你的身高体重年龄可能还是系统早期的默认值</div>
+            <div class="bs-body">这几项直接决定每日热量额度。若不是你本人填的，
+                现在看到的「控卡 / 充能」就是按一个没问过的身体算出来的。</div>
+            <button type="button" class="btn-primary" onclick="openProfileModal()">去核对并改成真实值</button>
+        </div>
+
         <div class="card" id="public-tools" style="display:none;">
             <div class="pub-tools-head">
                 <span class="pub-tools-title">这块大屏独有的功能（App 里没有）</span>
@@ -626,7 +635,7 @@
             <div class="card">
                 <div class="card-title">
                     <span class="title-left">📸 周期身材照进化对比 (Before & After)</span>
-                    <span style="font-size: 10px; color: var(--text-light);">手机本地存储 · 绝对隐私</span>
+                    <span style="font-size: 10px; color: var(--text-light);">本 App 本地不存业务数据，打卡全部上传腾讯云；公网大屏须带密钥才可查看</span>
                 </div>
 
                 <div class="photo-compare-container">
@@ -667,11 +676,12 @@
                     <div class="form-row-2">
                         <div>
                             <label style="font-size: 10.5px; color: var(--text-light);">最新体重 (斤)</label>
-<input type="number" step="0.1" id="cycle-input-weight" placeholder="最近一次晨起体重（斤）" class="input-control">
+<input type="number" step="0.1" id="cycle-input-weight" placeholder="体重（斤）" class="input-control">
                         </div>
                         <div>
                             <label style="font-size: 10.5px; color: var(--text-light);">肚脐腰围 (cm)</label>
-<input type="number" step="0.5" id="cycle-input-waist" placeholder="肚脐腰围实测（cm），要卷尺量" class="input-control">
+<input type="number" step="0.5" id="cycle-input-waist" placeholder="腰围（cm）" class="input-control">
+                    <div class="field-hint">体重填晨起空腹值；腰围用卷尺水平绕肚脐实测</div>
                         </div>
                     </div>
                 </div>
@@ -791,12 +801,12 @@
         <section id="panel-gemini" class="view-panel">
             <div class="card-title" style="margin-bottom: 8px;">
                 <span class="title-left">🤖 专属塑形顾问 AI 伴侣</span>
-                <span class="tag-offline-free">🟢 永久免费 · 国内极速 · 零外网</span>
+                <span class="tag-offline-free">🟢 免费使用 · 需联网 · 数据存腾讯云</span>
             </div>
 
             <!-- 针对用户提问的免费与网络说明卡片 -->
             <div class="callout" style="margin-bottom: 10px;">
-                <strong>💡 顾问服务说明：</strong> 本顾问基于内置超大轻量化减脂营养模型驱动，<strong>100%永久免费，完全不需要连接外网节点/VPN</strong>，在无网络或国内普通蜂窝网络下均可毫秒级极速响应！
+                <strong>💡 顾问服务说明：</strong> 数字类问题查的是你自己的打卡流水（不联网也能答）；查不到的才联网搜，搜到的内容由服务器上的小模型整理。全部免费，但<strong>需要联网</strong>——本机没有内置模型，也不存在断网秒答。
             </div>
 
             <div class="card chat-container">
@@ -808,15 +818,15 @@
                 <div class="ai-engine-row">
                     <label class="eng-lab" for="ai-engine-sel">回答引擎</label>
                     <select id="ai-engine-sel" class="eng-sel" onchange="setAiEnginePref(this.value)">
-                        <option value="auto">自动（本地优先，服务器兜底）</option>
-                        <option value="local">只用手机本地模型</option>
-                        <option value="server">只用服务器</option>
+                        <option value="server">只用服务器（默认）</option>
+                        <option value="auto">自动：本机有端点就用，没有走服务器</option>
+                        <option value="local">只用本机端点（高级，需你自己手机上跑兼容服务）</option>
                     </select>
                     <button type="button" class="eng-test" onclick="reprobeLocalAi()">测本地</button>
                     <span id="ai-engine-bar" class="ai-engine-bar"><span>未探测</span></span>
                 </div>
                 <div class="chat-input-bar">
-                    <input type="text" id="chat-input" placeholder="问点什么，如：吃超了怎么补救" onkeydown="if(event.key==='Enter') sendChatMessage()">
+                    <input type="text" id="chat-input" placeholder="问点什么…" onkeydown="if(event.key==='Enter') sendChatMessage()">
                     <button onclick="sendChatMessage()">发送</button>
                 </div>
             </div>
@@ -856,7 +866,7 @@
                     </div>
                     <div>
                         <label class="form-label">年龄 (岁)</label>
-<input type="number" id="prof-age" placeholder="实际年龄（岁）" class="input-control">
+<input type="number" id="prof-age" placeholder="年龄（岁）" class="input-control">
                     </div>
                 </div>
 
@@ -864,18 +874,18 @@
                 <div class="form-row-2 form-group">
                     <div>
                         <label class="form-label">身高 (cm)</label>
-<input type="number" id="prof-height" placeholder="实际身高（cm）" class="input-control">
+<input type="number" id="prof-height" placeholder="身高（cm）" class="input-control">
                     </div>
                     <div>
                         <label class="form-label">当前体重 (斤)</label>
-<input type="number" step="0.1" id="prof-weight-jin" placeholder="当前体重（斤）" class="input-control" oninput="syncTargetWeightPlaceholder()">
+<input type="number" step="0.1" id="prof-weight-jin" placeholder="体重（斤）" class="input-control" oninput="syncTargetWeightPlaceholder()">
                     </div>
                 </div>
 
                 <!-- 目标体重 -->
                 <div class="form-group">
                     <label class="form-label">目标体重 (斤)</label>
-<input type="number" step="0.1" id="prof-target-jin" placeholder="目标体重（斤）" class="input-control">
+<input type="number" step="0.1" id="prof-target-jin" placeholder="目标（斤）" class="input-control">
                 </div>
 
                 <!-- 管理目标类型 (根据性别动态渲染男女身材形态卡片，带生动图示) -->
@@ -1026,7 +1036,7 @@
                         </div>
                         <div>
                             <label class="form-label">年龄</label>
-<input type="number" id="reg-age" placeholder="实际年龄（岁）" class="input-control">
+<input type="number" id="reg-age" placeholder="年龄（岁）" class="input-control">
                         </div>
                     </div>
                     <div class="form-row-2 form-group">

@@ -831,6 +831,7 @@ def compute_dashboard_data(user: dict) -> dict:
         "consecutive_over_days": consecutive_over,
         "consecutive_slacking_days": consecutive_slacking,
         "latest_cycle": dict(latest_cycle) if latest_cycle else None,
+        "body_suspect": body_looks_invented(p),
         "over_cal_total": over_cal_total,
         "start_weight_jin": q_start,
         "takeout_stats": {
@@ -1484,6 +1485,21 @@ def cache_set(k, val, ttl):
 
 
 # ---------- 给本机（手机上的）AI 用的共享上下文与回写 ----------
+
+# 2026-10-16 之前，注册与档案保存会用 26/165/140/120 这组字面量兜底，
+# 于是有人从没填过年龄身高体重，额度却按这具没问过的身体算。代码已经修了，
+# 库里存量的行还在——这里只负责认出来并提醒核对，绝不替用户编一组新数。
+LEGACY_DEFAULT_BODY = (26, 165.0, 140.0, 120.0)
+
+
+def body_looks_invented(p):
+    try:
+        got = (int(p.get("age") or 0), float(p.get("height") or 0),
+               float(p.get("weight_jin") or 0), float(p.get("target_weight_jin") or 0))
+    except (TypeError, ValueError):
+        return False
+    return got == LEGACY_DEFAULT_BODY
+
 
 @app.get("/api/ai/status")
 def ai_status(user: dict = Depends(get_current_user)):

@@ -501,8 +501,51 @@ def main():
                  "110g (30%)", "145g (40%)", "45g (30%)", "优+ (89分)", "-1.6 斤", "-2.0 cm",
                  "69.2 kg", "680 kcal", "-220 kcal", "1400 - 1500", "165cm · 70kg", "下行稳健",
                  "已累计记录 7 次", "当前 140 斤", "今日训练已完成"]
+    # 第六批补：这一类不是"数字没接数据"，而是没量过的承诺。
+    # 上一轮只搜了"无需外网/纯本地"，同一句假话换个写法（内置超大…模型、毫秒级极速响应）
+    # 就躲过去了——用户实拍才揪出来。黑名单要按"说过的话"钉，不是按"我想到的那几个词"。
+    CLAIM_BLACKLIST = ["内置超大", "轻量化减脂营养模型", "毫秒级", "极速响应",
+                       "完全不需要连接外网", "100%永久免费", "永久免费", "绝对",
+                       "专业医师", "医学认证", "零误差"]
+    claims = [b for b in CLAIM_BLACKLIST if b in html_txt]
+    check("界面没有未量过的承诺用语", not claims, claims)
+    check("顾问说明承认需要联网", "需要联网" in html_txt, "")
+    check("引擎选项说明本地端点需自备", "需你自己手机上跑兼容服务" in html_txt, "")
+    check("默认引擎选项是服务器",
+          html_txt.index('value="server"') < html_txt.index('value="auto"'), "")
+    check("疑似旧默认身体数据有核对横幅", "body-suspect-card" in html_txt, "")
+    check("核对横幅只提醒不改数", "去核对并改成真实值" in html_txt, "")
+
+    # 服务端识别函数：命中旧默认组、正常值不误报
+    check("能认出旧默认身体数据",
+          m.body_looks_invented({"age": 26, "height": 165.0, "weight_jin": 140.0,
+                                 "target_weight_jin": 120.0}) is True, "")
+    check("真实填写的身体数据不被误报",
+          m.body_looks_invented({"age": 29, "height": 168.0, "weight_jin": 151.0,
+                                 "target_weight_jin": 132.0}) is False, "")
+    check("缺字段时不崩也不误报",
+          m.body_looks_invented({}) is False and m.body_looks_invented(
+              {"age": None, "height": "x"}) is False, "")
+
     back = [b for b in BLACKLIST if b in html_txt]
     check("已清除的假数据没回来", not back, back)
+
+    # 排版实测修复的静态护栏：窄屏下这些文案必须短到放得下
+    phs = dict(re.findall(r'id="([^"]+)"[^>]*placeholder="([^"]*)"', html_txt))
+    TOO_LONG = {"input-meal-text": 10, "input-weight": 10, "cycle-input-weight": 8,
+                "cycle-input-waist": 8, "chat-input": 10, "prof-age": 8,
+                "prof-height": 8, "prof-weight-jin": 8, "prof-target-jin": 8}
+    too = [(i, phs[i], len(phs[i])) for i, lim in TOO_LONG.items()
+           if i in phs and len(phs[i]) > lim]
+    check("输入框提示语短到窄屏放得下", not too, too)
+    check("长说明改为字段小注而非塞进提示语", "field-hint" in html_txt and "卷尺水平绕肚脐" in html_txt, "")
+    check("每日状态条允许折行不裁字",
+          ".daily-strip .dc-val" in css_txt and "white-space: normal" in css_txt, "")
+    check("引擎状态行允许折行",
+          ".ai-engine-bar .eng-why" in css_txt and "white-space: normal" in css_txt, "")
+    # 实测根因是账号胶囊被 flex 收缩到 16px，不是子元素缺 min-width
+    check("顶栏账号胶囊不参与收缩",
+          ".user-account-badge" in css_txt and "flex: 0 0 auto" in css_txt, "")
 
     check("遮挡覆盖规则已追加", "遮挡与溢出修复" in css_txt and "has-floating-dl" in css_txt, "")
     check("顶栏允许换行不挤标题", "flex-wrap: wrap" in css_txt, "")

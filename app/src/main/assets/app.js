@@ -329,6 +329,10 @@ function applyDashboardData(data) {
     state.streakDays = data.streak_days || 0;
     state.etaDays = data.eta_days || null;
     state.photoDue = !!data.photo_due;
+    // 疑似旧默认身体数据：提示核对，不改数、不猜数
+    state.bodySuspect = !!data.body_suspect;
+    const bsCard = document.getElementById("body-suspect-card");
+    if (bsCard) bsCard.style.display = state.bodySuspect ? "block" : "none";
     state.cycleDay = data.cycle_day || null;
     state.calculated = {
         bmr: data.metrics.bmr,

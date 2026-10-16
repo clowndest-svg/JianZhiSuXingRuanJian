@@ -2192,3 +2192,70 @@ header *, .header-tools, .header-row-1 {
 .exd-note { flex: 1 1 160px; font-size: 10.5px; color: #94A3B8; line-height: 1.5; }
 .exd-steps { margin: 0 0 8px 18px; padding: 0; font-size: 12.5px; color: #334155; line-height: 1.7; }
 .ex-btn.ghost { background: #F1F5F9; color: #475569; }
+
+/* 疑似旧默认身体数据的核对横幅 */
+.body-suspect {
+    border: 1px solid #FCD34D;
+    background: #FFFBEB;
+}
+.bs-title { font-size: 13px; font-weight: 800; color: #92400E; margin-bottom: 4px; }
+.bs-body { font-size: 11.5px; color: #A16207; line-height: 1.6; margin-bottom: 8px; }
+
+/* 第六批补：排版实测修复（320/360/414 三档量出来的溢出）
+   判法：把每个面板克隆进固定宽度容器，读 clientWidth/scrollWidth。
+   隐藏态页面 viewport 是 [0,0]，所有宽度都是 0，直接量线上页得到的是假数。 */
+
+/* 每日状态条：值单元格原来 43~74px 而文字要 65~78px，四个宽度全被裁 */
+.daily-strip .dc-val {
+    min-width: 0;
+    font-size: 11.5px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+}
+.daily-strip .dc-cell { min-width: 0; flex: 1 1 0; }
+
+/* 引擎状态行：原来一句 258px 的话塞进 117px 的槽，必须允许折行 */
+.ai-engine-bar .eng-why {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.35;
+    flex: 1 1 100%;
+}
+
+/* 顶栏用户名：克隆测量里 clientWidth 为 0，说明它在 flex 里被挤没，给最小可读宽度 */
+/* 实测根因：账号胶囊作为 flex 子项默认允许收缩，被长标题挤到只剩 padding 的 16px，
+   里面"登录/注册"要 49px 自然放不下。让它不参与收缩，超长的那一侧交给标题去省略。 */
+.user-account-badge {
+    flex: 0 0 auto;
+    max-width: 100%;
+    min-width: 0;
+}
+
+#header-username-display {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 9em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 字段小注：把长说明从 placeholder 搬出来，placeholder 只留放得下的短词 */
+.field-hint {
+    font-size: 10.5px;
+    color: #94A3B8;
+    line-height: 1.5;
+    margin-top: 4px;
+    overflow-wrap: anywhere;
+}
+
+/* 320px 一档实测只剩副标题被省略号截断（65<88）。那颗 logo 已经写着「塑」，
+   副标题在这个宽度没有信息量，直接隐藏比留半行字干净。 */
+@media (max-width: 340px) {
+    .header-subtitle,
+    header p:not([id]) {
+        display: none;
+    }
+}
