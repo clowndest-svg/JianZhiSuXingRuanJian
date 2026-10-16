@@ -1,0 +1,76 @@
+{
+  "/": {
+    "status": 200,
+    "size": 86282,
+    "sha256": "b38b9356e017ff4e223f5186afabb7bf6c2241c7b807e407ab64bcbed1e7fbd9",
+    "match": "exact source after expected API-path/cache-version rendering"
+  },
+  "/app.js": {
+    "status": 200,
+    "size": 202357,
+    "sha256": "4baa5aba04900248796706f2716b390ad9bd9d95f4bd9cc5372ad9a9dc5ec309",
+    "match": "byte-for-byte"
+  },
+  "/features.js": {
+    "status": 200,
+    "size": 20831,
+    "sha256": "a554730ae0604a88280e5784ce69e8c9fc8108fff87f384e762e049151229443",
+    "match": "byte-for-byte"
+  },
+  "/style.css": {
+    "status": 200,
+    "size": 71672,
+    "sha256": "f919a8959f786128f0c45eb5a0d85f9be2934d8bff7d3073064eda585dfa3773",
+    "match": "byte-for-byte"
+  },
+  "/features.css": {
+    "status": 200,
+    "size": 2295,
+    "sha256": "07c47be9d77a083afeeb9f6c22ce69e8ffc52ccd938e23a75309b577bd824e7b",
+    "match": "byte-for-byte"
+  },
+  "/guidance.json": {
+    "status": 200,
+    "size": 8132,
+    "sha256": "435d95291c0aac389851777bcf5637889526a9bb00b6d61ef0ca1d1a6cfaa84d",
+    "match": "byte-for-byte"
+  },
+  "/sw.js": {
+    "status": 200,
+    "size": 856,
+    "sha256": "d8ea8160422bd878f115708905842209462eab375880136fb3f7dab1acbdb175",
+    "match": "byte-for-byte"
+  },
+  "/manifest.webmanifest": {
+    "status": 200,
+    "size": 237,
+    "sha256": "6f32ad5adb69c667e358d0afa2d80bf22effdc68051763f826a503b14591c184",
+    "match": "byte-for-byte"
+  },
+  "/qr.svg": {
+    "status": 200,
+    "size": 6321,
+    "sha256": "d20964b309728c2f958f9b235c14c36ac7e50151b240ae27a8f4a0e352bbbae1",
+    "match": "byte-for-byte"
+  },
+  "/qingsu.apk": {
+    "status": 200,
+    "size": 4703789,
+    "sha256": "3d44d41cad30b68056d1401b0f1adc78e1fb8b24d59372ab96da5acdbd564dd3",
+    "match": "byte-for-byte"
+  },
+  "/version.json": {
+    "status": 200,
+    "size": 589,
+    "sha256": "802951f31a85842c327d59033a9092713b01fde8c51dad50f82ca8327180ef21",
+    "match": "byte-for-byte"
+  },
+  "/health/ready": {
+    "status": "ok",
+    "release": "r131"
+  },
+  "/health": {
+    "status": "ok",
+    "release": "r131"
+  }
+}

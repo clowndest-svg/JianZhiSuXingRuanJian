@@ -1,0 +1,3 @@
+{"passed": ["two simultaneous sessions", "fresh account and share URL", "share access boundary", "latest daily weight", "idempotent workout", "checklist persistence", "session revocation"]}
+remaining_users=2
+{"checked_at": 1792168793, "qingsu": "active", "qingsu-llama": "active", "qingsu-backup.timer": "active", "qingsu-cert-renew.timer": "active", "ready": 200, "free_disk_mb": 32877, "backup_age_hours": 0.0, "certificate_hours_left": 156.6, "requests": 76, "errors_5xx": 0, "p95_ms": 52.8, "sqlite_lock_errors": 0, "cache_degraded": 0, "problems": []}

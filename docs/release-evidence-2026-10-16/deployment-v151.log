@@ -1,0 +1,2 @@
+{"production_users": 2, "foreign_key_violations": 0, "service_cannot_write_code": true, "qa_service_removed": true, "qa_route": 404, "ready": 200, "historical_diagnostics_archived": 28, "release_staging_removed": true}
+{"release": "r131", "source_revision": "338e8a1b0bf7462b4dd791bd04abaa52a6a5f92e", "backup": "/opt/qingsu/backups/release-20261017-003930", "android_version": "1.5.1", "android_version_code": 14, "apk_sha256": "3d44d41cad30b68056d1401b0f1adc78e1fb8b24d59372ab96da5acdbd564dd3"}
