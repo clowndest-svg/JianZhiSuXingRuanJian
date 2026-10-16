@@ -1,0 +1,72 @@
+{
+  "/": {
+    "status": 200,
+    "bytes": 86282,
+    "sha256": "77a16bb5729ec5fc6d0ea1f51d5b526b96bfab43b14faf2f07f7f8e2a567691e"
+  },
+  "/health": {
+    "status": 200,
+    "bytes": 32,
+    "sha256": "96c08d4e7495d897e64741308f15ef5e1aed34e442c07c44ecafb83960a9f1a7"
+  },
+  "/health/ready": {
+    "status": 200,
+    "bytes": 32,
+    "sha256": "96c08d4e7495d897e64741308f15ef5e1aed34e442c07c44ecafb83960a9f1a7"
+  },
+  "/version.json": {
+    "status": 200,
+    "bytes": 526,
+    "sha256": "85b830d7648f4ded61e3f940fb01206aea3b90e7b89e230fa221d0766ceab97e",
+    "version": 13
+  },
+  "/app.js": {
+    "status": 200,
+    "bytes": 202357,
+    "sha256": "4baa5aba04900248796706f2716b390ad9bd9d95f4bd9cc5372ad9a9dc5ec309",
+    "matches_source": true
+  },
+  "/features.js": {
+    "status": 200,
+    "bytes": 20831,
+    "sha256": "a554730ae0604a88280e5784ce69e8c9fc8108fff87f384e762e049151229443",
+    "matches_source": true
+  },
+  "/features.css": {
+    "status": 200,
+    "bytes": 2079,
+    "sha256": "af3bf6dc3ec2d50fad5cea36e98e40e63fd2128d8d902c10dc835093e8743abf",
+    "matches_source": true
+  },
+  "/guidance.json": {
+    "status": 200,
+    "bytes": 8132,
+    "sha256": "435d95291c0aac389851777bcf5637889526a9bb00b6d61ef0ca1d1a6cfaa84d",
+    "matches_source": true
+  },
+  "/sw.js": {
+    "status": 200,
+    "bytes": 854,
+    "sha256": "438f6063b540999900f9905b77ca52a1036ae6d2dca12c6404d8b1fa932ca27b",
+    "matches_source": true
+  },
+  "/manifest.webmanifest": {
+    "status": 200,
+    "bytes": 237,
+    "sha256": "6f32ad5adb69c667e358d0afa2d80bf22effdc68051763f826a503b14591c184",
+    "matches_source": true
+  },
+  "/qingsu.apk": {
+    "status": 200,
+    "bytes": 4703789,
+    "sha256": "16a3ea36d344133405ebd66592ccdacde6d8a4fc35bd5e2ff12878fb84b11d64",
+    "matches_local": true
+  },
+  "http_root": {
+    "final_url": "https://124.220.54.64/"
+  },
+  "legacy_update_bootstrap": {
+    "status": 200,
+    "https_download": true
+  }
+}

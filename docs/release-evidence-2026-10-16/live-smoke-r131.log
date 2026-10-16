@@ -1,0 +1,10 @@
+{"passed": ["two simultaneous sessions", "fresh account and share URL", "share access boundary", "latest daily weight", "idempotent workout", "checklist persistence", "session revocation"]}
+remaining_users=2
+{"checked_at": 1792167624, "qingsu": "active", "qingsu-llama": "active", "qingsu-backup.timer": "active", "qingsu-cert-renew.timer": "active", "ready": 200, "free_disk_mb": 32784, "backup_age_hours": 0.0, "certificate_hours_left": 156.9, "requests": 20, "errors_5xx": 0, "p95_ms": 76.0, "sqlite_lock_errors": 0, "cache_degraded": 0, "problems": []}
+NEXT                            LEFT LAST                             PASSED UNIT                    ACTIVATES
+Sat 2026-10-17 00:24:20 CST 3min 56s Sat 2026-10-17 00:19:20 CST 1min 3s ago qingsu-monitor.timer    qingsu-monitor.service
+Sat 2026-10-17 03:13:07 CST 2h 52min -                                     - qingsu-backup.timer     qingsu-backup.service
+Sat 2026-10-17 12:00:36 CST      11h Sat 2026-10-17 00:04:49 CST   15min ago qingsu-cert-renew.timer qingsu-cert-renew.service
+
+3 timers listed.
+Pass --all to see loaded but inactive timers, too.

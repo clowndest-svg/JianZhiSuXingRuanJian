@@ -41,13 +41,16 @@ public class DeviceSmokeTest {
         try(FileOutputStream out=new FileOutputStream(new File(dir,name+".png"))){image.compress(Bitmap.CompressFormat.PNG,100,out);}
         image.recycle();
     }
-    @Test public void releaseUserJourney() throws Exception {
+    @Test(timeout=240000) public void releaseUserJourney() throws Exception {
         String user="usbqa"+System.currentTimeMillis();String password="UsbQaOnly!123";
         JSONObject body=new JSONObject().put("username",user).put("password",password).put("age",30).put("height",170).put("weight_jin",160).put("target_weight_jin",140);
         HttpsURLConnection request=(HttpsURLConnection)new URL(BuildConfig.API_BASE_URL+"/api/register").openConnection();
         request.setRequestMethod("POST");request.setConnectTimeout(15000);request.setReadTimeout(15000);request.setDoOutput(true);request.setRequestProperty("Content-Type","application/json");
         try(java.io.OutputStream output=request.getOutputStream()){output.write(body.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
         assertEquals("Fixture registration",200,request.getResponseCode());request.disconnect();
+        File fixtureDir=new File(instrumentation.getTargetContext().getExternalFilesDir(null),"qa");fixtureDir.mkdirs();
+        File fixture=new File(instrumentation.getTargetContext().getExternalFilesDir(null),"qa/fixture.txt");
+        try(FileOutputStream out=new FileOutputStream(fixture)){out.write(user.getBytes(java.nio.charset.StandardCharsets.UTF_8));}
         Intent intent=new Intent(instrumentation.getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK);
         instrumentation.getTargetContext().startActivity(intent);
         AtomicReference<MainActivity> resumed=new AtomicReference<>();
@@ -60,6 +63,7 @@ public class DeviceSmokeTest {
         MainActivity activity=resumed.get();assertNotNull("App activity did not resume",activity);
         instrumentation.runOnMainSync(()->activity.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT));
         instrumentation.runOnMainSync(()->web=(WebView)((ViewGroup)activity.findViewById(android.R.id.content)).getChildAt(0));
+        try {
         waitFor("document.readyState==='complete' && typeof submitLogin==='function'");
         js("document.getElementById('login-username').value="+JSONObject.quote(user)+";document.getElementById('login-password').value="+JSONObject.quote(password)+";submitLogin();");
         waitFor("state.dashboardLoaded===true");
@@ -132,8 +136,6 @@ public class DeviceSmokeTest {
         assertTrue(new JSONObject(bridge.reminderStatus()).getBoolean("enabled"));
         new ReminderReceiver().onReceive(activity,new Intent(Intent.ACTION_TIMEZONE_CHANGED));
         assertTrue(bridge.configureReminder(enabled,hour,minute));
-        File fixture=new File(instrumentation.getTargetContext().getExternalFilesDir(null),"qa/fixture.txt");
-        try(FileOutputStream out=new FileOutputStream(fixture)){out.write(user.getBytes(java.nio.charset.StandardCharsets.UTF_8));}
         String publicUrl=new org.json.JSONArray("["+js("state.publicUrl")+"]").getString(0);
         js("logoutUser()");waitFor("state.token===null");
         // The web visitor page runs in a second WebView with no native bridge or login state.
@@ -146,6 +148,9 @@ public class DeviceSmokeTest {
         assertEquals("true",js("getComputedStyle(document.getElementById('app-main')).display==='none'"));
         assertEquals("true",js("typeof window.AndroidBridge==='undefined'"));
         screenshot("web-public");
-        instrumentation.runOnMainSync(()->activity.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED));
+        } finally {
+            try {js("localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(USER_KEY);if(typeof logoutUser==='function')logoutUser();");} catch(Exception ignored){}
+            instrumentation.runOnMainSync(()->activity.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED));
+        }
     }
 }
