@@ -132,7 +132,7 @@ public class DeviceSmokeTest {
                 "[...document.querySelectorAll('.nav-item>span:not(.nav-icon)')].every(e=>parseFloat(getComputedStyle(e).fontSize)>=11)"));
         assertEquals("主按钮触控高度不小于 44px", "true", js(
                 "[...document.querySelectorAll('.btn-primary')].every(e=>!e.offsetParent||e.getBoundingClientRect().height>=44)"));
-        assertEquals("回车能激活 role=button 的餐别切换", "dinner", js(
+        assertEquals("回车能激活 role=button 的餐别切换", "\"dinner\"", js(
                 "(function(){const el=document.getElementById('slot-chip-dinner');"
                 + "el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));return state.selectedMealSlot;})()"));
         assertEquals("切换后 pressed 跟着走", "true", js(

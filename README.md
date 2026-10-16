@@ -48,7 +48,7 @@ python scripts/package-release.py --output release.tar
 - 服务器使用专用账号、SQLite WAL、原子限流和有界 Redis 降级；8000不对公网提供服务。
 - IP 可信证书采用短有效期证书，每日两次检查续期。数据库/媒体每日备份，服务器保留14天；本机每日拉取加密副本并恢复验证，保留30天。
 
-详细操作见 [运维手册](docs/operations.md)；变更与验收见 [本轮执行记录](docs/optimization-execution-2026-10-16.md) 和 [原始审查方案](docs/optimization-plan-2026-10-16.md)。原审查证据与 r130 记录属于历史快照，不能当作 r131 当前状态。
+详细操作见 [运维手册](docs/operations.md)；变更与验收见 [r132 执行记录](docs/optimization-execution-r132.md)、[r131 执行记录](docs/optimization-execution-2026-10-16.md) 和 [原始审查方案](docs/optimization-plan-2026-10-16.md)。原审查证据与 r130/r131 记录属于历史快照，不能当作 r132 当前状态。
 
 ## 验证边界
 

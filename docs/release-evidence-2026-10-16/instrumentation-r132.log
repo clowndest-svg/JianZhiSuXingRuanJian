@@ -1,0 +1,10 @@
+
+com.fitcoach.shapemaster.DeviceSmokeTest:.
+
+Time: 21.228
+
+OK (1 test)
+
+
+INSTR_EXIT=0
+["{\"requested\":320,\"width\":320,\"scroll\":320}","{\"requested\":360,\"width\":360,\"scroll\":360}","{\"requested\":390,\"width\":390,\"scroll\":390}","{\"requested\":768,\"width\":768,\"scroll\":768}","{\"requested\":1440,\"width\":1440,\"scroll\":1440}"]INSTRDONE

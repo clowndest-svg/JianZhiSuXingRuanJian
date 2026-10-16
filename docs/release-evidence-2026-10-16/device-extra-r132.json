@@ -1,0 +1,177 @@
+[
+ {
+  "name": "adb 只看到一台设备",
+  "pass": true,
+  "detail": "['10AE1F1RQE003N3']",
+  "kind": "auto",
+  "at": "2026-10-17T02:41:11"
+ },
+ {
+  "name": "手机上装的是本轮正式包 15",
+  "pass": true,
+  "detail": "versionCode=15 minSdk=24 targetSdk=34",
+  "kind": "auto",
+  "at": "2026-10-17T02:41:13"
+ },
+ {
+  "name": "正式包不是 debuggable",
+  "pass": true,
+  "detail": "flags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ]",
+  "kind": "auto",
+  "at": "2026-10-17T02:41:13"
+ },
+ {
+  "name": "签名带轮换历史（旧包可覆盖升级）",
+  "pass": true,
+  "detail": "signatures=PackageSignatures{b13e3b9 version:3, signatures:[c0dacb5a], past signatures:[a3473d4e flags: 17, c0dacb5a fla",
+  "kind": "auto",
+  "at": "2026-10-17T02:41:13"
+ },
+ {
+  "name": "冷启动后 App 在前台",
+  "pass": true,
+  "detail": "mCurrentFocus=Window{4574a91 u0 com.fitcoach.shapemaster/com.fitcoach.shapemaster.MainActivity type=1 }",
+  "kind": "auto",
+  "at": "2026-10-17T02:41:24"
+ },
+ {
+  "name": "全新安装首屏（未登录态）",
+  "pass": null,
+  "detail": "要验真正的首次安装必须清数据，而清数据会连带删掉机主本机未同步的离线草稿；已改为只测冷启动，首屏观感请人工确认。",
+  "kind": "need_human",
+  "at": "2026-10-17T02:41:24"
+ },
+ {
+  "name": "font_scale=1.15 下 App 仍能启动到前台",
+  "pass": true,
+  "detail": "font_scale=1.15 | mCurrentFocus=Window{481c04c u0 com.fitcoach.shapemaster/com.fitcoach.shapemaste",
+  "kind": "auto",
+  "at": "2026-10-17T02:41:29"
+ },
+ {
+  "name": "font_scale=1.15 时是否出现文字截断/换行挤压",
+  "pass": null,
+  "detail": "字号放大后的可读性需要看画面；横向溢出由 instrumentation 的宽度矩阵断言。",
+  "kind": "need_human",
+  "at": "2026-10-17T02:41:29"
+ },
+ {
+  "name": "font_scale=2.0 下 App 仍能启动到前台",
+  "pass": true,
+  "detail": "font_scale=2.0 | mCurrentFocus=Window{6af1631 u0 com.fitcoach.shapemaster/com.fitcoach.shapemaste",
+  "kind": "auto",
+  "at": "2026-10-17T02:41:35"
+ },
+ {
+  "name": "font_scale=2.0 时是否出现文字截断/换行挤压",
+  "pass": null,
+  "detail": "字号放大后的可读性需要看画面；横向溢出由 instrumentation 的宽度矩阵断言。",
+  "kind": "need_human",
+  "at": "2026-10-17T02:41:35"
+ },
+ {
+  "name": "输入法服务状态可读",
+  "pass": true,
+  "detail": "mInputShown=false",
+  "kind": "auto",
+  "at": "2026-10-17T02:41:40"
+ },
+ {
+  "name": "键盘弹起是否遮住输入框",
+  "pass": null,
+  "detail": "自动化能确认 IME 可查询，但遮挡与否必须看画面；本轮未替机主做真实输入。",
+  "kind": "need_human",
+  "at": "2026-10-17T02:41:40"
+ },
+ {
+  "name": "读得到通知权限当前位",
+  "pass": true,
+  "detail": "android.permission.POST_NOTIFICATIONS\n        android.permission.POST_NOTIFICATIONS: granted=false, flags=[ USER_SENSITI",
+  "kind": "auto",
+  "at": "2026-10-17T02:41:41"
+ },
+ {
+  "name": "授予后权限位变 true",
+  "pass": true,
+  "detail": "android.permission.POST_NOTIFICATIONS\n        android.permission.POST_NOTIFICATIONS: granted=true, f",
+  "kind": "auto",
+  "at": "2026-10-17T02:41:41"
+ },
+ {
+  "name": "撤销后权限位回 false",
+  "pass": true,
+  "detail": "android.permission.POST_NOTIFICATIONS\n        android.permission.POST_NOTIFICATIONS: granted=false, ",
+  "kind": "auto",
+  "at": "2026-10-17T02:41:41"
+ },
+ {
+  "name": "拒绝通知后 App 是否给出可读说明",
+  "pass": null,
+  "detail": "权限位变化已验证；提醒设置页在拒权后的文案是否讲清楚，需要人看画面。",
+  "kind": "need_human",
+  "at": "2026-10-17T02:41:41"
+ },
+ {
+  "name": "横竖屏切换后 Activity 仍存活",
+  "pass": true,
+  "detail": "mCurrentFocus=Window{99eb064 u0 com.fitcoach.shapemaster/com.fitcoach.shapemaster.MainActivity type=1 }",
+  "kind": "auto",
+  "at": "2026-10-17T02:41:52"
+ },
+ {
+  "name": "相册选择器 能被系统拉起",
+  "pass": true,
+  "detail": "mCurrentFocus=Window{16df61d u0 com.android.photopicker/com.android.photopicker.PhotopickerGetContentActivity type=1 }",
+  "kind": "auto",
+  "at": "2026-10-17T02:42:01"
+ },
+ {
+  "name": "相机 能被系统拉起",
+  "pass": true,
+  "detail": "mCurrentFocus=Window{ddb36fb u0 com.android.camera/com.android.camera.CameraActivity type=1 }",
+  "kind": "auto",
+  "at": "2026-10-17T02:42:11"
+ },
+ {
+  "name": "真实拍一张并上传",
+  "pass": null,
+  "detail": "取景、按快门、确认上传需要人操作；这里只证明了系统选择器/相机的 Intent 通道可用。",
+  "kind": "need_human",
+  "at": "2026-10-17T02:42:13"
+ },
+ {
+  "name": "锁屏 20 秒后能唤醒",
+  "pass": true,
+  "detail": "mWakefulness=Asleep | mWakefulness=Awake",
+  "kind": "auto",
+  "at": "2026-10-17T02:42:44"
+ },
+ {
+  "name": "锁屏期间进程未被回收",
+  "pass": true,
+  "detail": "pidof=27066",
+  "kind": "auto",
+  "at": "2026-10-17T02:42:45"
+ },
+ {
+  "name": "解锁后 App 是否回到前台",
+  "pass": null,
+  "detail": "唤醒后前台是 mCurrentFocus=Window{com.android.systemui:dd87213 u0 NotificationShade；本机若设了密码/指纹，自动化解不开锁，需人工确认解锁后是否还停在原来的页面。",
+  "kind": "need_human",
+  "at": "2026-10-17T02:42:45"
+ },
+ {
+  "name": "整夜锁屏后的提醒送达",
+  "pass": null,
+  "detail": "需要跨夜观察厂商省电策略对非精确闹钟的延迟；本轮只验到闹钟登记与时区重排。",
+  "kind": "need_human",
+  "at": "2026-10-17T02:42:45"
+ },
+ {
+  "name": "设备设置已还原到测前状态",
+  "pass": true,
+  "detail": "font_scale=1.0 rotation=0 stayon=2",
+  "kind": "auto",
+  "at": "2026-10-17T02:42:45"
+ }
+]
