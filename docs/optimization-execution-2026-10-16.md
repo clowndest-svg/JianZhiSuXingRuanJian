@@ -40,7 +40,7 @@
 ## 发布产物
 
 - versionCode：13；versionName：1.5.0；大小：4703789字节。
-- APK SHA-256：`c7d0cd212f3b02cd8c975398b4f9597dcb96112d29e6647ef75b15b84c089a7f`。
+- APK SHA-256：`16a3ea36d344133405ebd66592ccdacde6d8a4fc35bd5e2ff12878fb84b11d64`。
 - Android9+正式证书：`c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f`。
 - 密钥在仓库外受限目录，未上传GitHub；低版本兼容签名仍保留历史证书，不写成全系统迁移完毕。
 

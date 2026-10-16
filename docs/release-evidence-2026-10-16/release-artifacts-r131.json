@@ -4,11 +4,10 @@
     "version_name": "1.5.0",
     "apk_url": "https://124.220.54.64/qingsu.apk",
     "size": 4703789,
-    "md5": "2344be4864ec84fb6e976ef606496779",
-    "sha256": "c7d0cd212f3b02cd8c975398b4f9597dcb96112d29e6647ef75b15b84c089a7f",
+    "md5": "32b326e435b4d0e05fa6eb6c4082d8eb",
+    "sha256": "16a3ea36d344133405ebd66592ccdacde6d8a4fc35bd5e2ff12878fb84b11d64",
     "notes": "r131：全链路可信 HTTPS、正式签名轮换；分享字段权限/到期/撤销；完整日确认、历史纠错与补录；餐食份量核对；离线草稿与网页离线外壳；Android 每日提醒、拍照入口和 CSV 保存；统一问答路由及场景规则。"
   },
-  "tampered_apk_rejected": true,
   "qa_endpoint_absent": true,
   "apk_assets_match_source": true,
   "files": {
@@ -18,19 +17,19 @@
     },
     "qingsu.apk": {
       "size": 4703789,
-      "sha256": "c7d0cd212f3b02cd8c975398b4f9597dcb96112d29e6647ef75b15b84c089a7f"
+      "sha256": "16a3ea36d344133405ebd66592ccdacde6d8a4fc35bd5e2ff12878fb84b11d64"
     },
     "app/src/main/web_version.json": {
       "size": 526,
-      "sha256": "7386c0a656080f6484e41ce03b3a5cecbb3ba61aefacbaae8fdf59762caa3ccc"
+      "sha256": "85b830d7648f4ded61e3f940fb01206aea3b90e7b89e230fa221d0766ceab97e"
     },
     "app/src/main/assets/app-icon.svg": {
       "size": 294,
       "sha256": "2575e5f233034e4c569d2a361de5967913028880facf70b46c4016f4aca591f6"
     },
     "app/src/main/assets/app.js": {
-      "size": 202331,
-      "sha256": "707a36024f56368b9cb26f338286afaa317dabf40a799b36c2512836e088c128"
+      "size": 202357,
+      "sha256": "4baa5aba04900248796706f2716b390ad9bd9d95f4bd9cc5372ad9a9dc5ec309"
     },
     "app/src/main/assets/exercise_poses.json": {
       "size": 83084,

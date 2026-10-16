@@ -296,7 +296,7 @@ function postApi(path, body, opts) {
     if (!state.token) return Promise.reject(new Error("请先登录"));
     const isRecord = path === "/api/food/log" || path === "/api/workout/complete";
     const signature = JSON.stringify(body instanceof FormData ? {} : Object.fromEntries(Object.entries(body || {}).filter(([key])=>key!=="request_id")));
-    const key = path + ":" + signature;
+    const key = sessionGeneration + ":" + path + ":" + signature;
     if (pendingWrites.has(key)) return pendingWrites.get(key);
     if (isRecord) {
         const id = body.request_id || uncertainWrites.get(key) || (Date.now().toString(36)+"-"+Math.random().toString(36).slice(2));

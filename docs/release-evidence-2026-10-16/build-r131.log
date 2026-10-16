@@ -43,49 +43,19 @@
 > Task :app:writeReleaseAppMetadata UP-TO-DATE
 > Task :app:writeReleaseSigningConfigVersions UP-TO-DATE
 > Task :app:bundleReleaseClassesToCompileJar UP-TO-DATE
-> Task :app:compressReleaseAssets
 > Task :app:preReleaseAndroidTestBuild SKIPPED
-> Task :app:processReleaseAndroidTestManifest UP-TO-DATE
-> Task :app:generateReleaseAndroidTestBuildConfig
-> Task :app:javaPreCompileReleaseAndroidTest UP-TO-DATE
-> Task :app:checkReleaseAndroidTestAarMetadata UP-TO-DATE
 > Task :app:generateReleaseAndroidTestResValues UP-TO-DATE
-> Task :app:mapReleaseAndroidTestSourceSetPaths UP-TO-DATE
-> Task :app:generateReleaseAndroidTestResources UP-TO-DATE
-> Task :app:mergeReleaseAndroidTestResources UP-TO-DATE
-> Task :app:processReleaseAndroidTestResources UP-TO-DATE
+> Task :app:compressReleaseAssets
+> Task :app:generateReleaseLintReportModel
 > Task :app:lintVitalAnalyzeRelease
-> Task :app:compileReleaseAndroidTestJavaWithJavac
 > Task :app:lintVitalReportRelease SKIPPED
 > Task :app:lintVitalRelease SKIPPED
-> Task :app:mergeReleaseAndroidTestShaders UP-TO-DATE
-> Task :app:compileReleaseAndroidTestShaders NO-SOURCE
-> Task :app:generateReleaseAndroidTestAssets UP-TO-DATE
-> Task :app:mergeReleaseAndroidTestAssets UP-TO-DATE
-> Task :app:compressReleaseAndroidTestAssets UP-TO-DATE
-> Task :app:checkReleaseAndroidTestDuplicateClasses UP-TO-DATE
-> Task :app:dexBuilderReleaseAndroidTest
-> Task :app:desugarReleaseAndroidTestFileDependencies UP-TO-DATE
-> Task :app:mergeExtDexReleaseAndroidTest UP-TO-DATE
-> Task :app:mergeReleaseAndroidTestGlobalSynthetics UP-TO-DATE
-> Task :app:processReleaseAndroidTestJavaRes NO-SOURCE
-> Task :app:mergeReleaseAndroidTestJavaResource UP-TO-DATE
-> Task :app:mergeReleaseAndroidTestJniLibFolders UP-TO-DATE
-> Task :app:mergeReleaseAndroidTestNativeLibs NO-SOURCE
-> Task :app:stripReleaseAndroidTestDebugSymbols NO-SOURCE
-> Task :app:writeReleaseAndroidTestSigningConfigVersions UP-TO-DATE
-> Task :app:generateReleaseLintReportModel
 > Task :app:packageRelease
 > Task :app:createReleaseApkListingFileRedirect UP-TO-DATE
 > Task :app:assembleRelease
-> Task :app:mergeDexReleaseAndroidTest
-> Task :app:packageReleaseAndroidTest
-> Task :app:createReleaseAndroidTestApkListingFileRedirect UP-TO-DATE
-> Task :app:assembleReleaseAndroidTest
-> Task :app:assembleAndroidTest
 > Task :app:lintAnalyzeRelease
 > Task :app:lintReportRelease UP-TO-DATE
 > Task :app:lintRelease
 
-BUILD SUCCESSFUL in 4s
-66 actionable tasks: 13 executed, 53 up-to-date
+BUILD SUCCESSFUL in 3s
+44 actionable tasks: 8 executed, 36 up-to-date
