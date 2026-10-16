@@ -1452,7 +1452,8 @@ def answer_from_user_data(q, d):
     tgt = (d.get("profile") or {}).get("target_weight_jin")
     mode_txt = "运动日" if d.get("day_mode") == "workout" else "休息日"
 
-    if any(k in q for k in ("多重", "体重", "几斤", "多少斤")):
+    # "平台期体重不掉"问的是为什么不掉，不是问现在几斤——别让体重分支把它抢走
+    if any(k in q for k in ("多重", "体重", "几斤", "多少斤"))             and not any(k in q for k in ("平台期", "不掉", "不降", "卡住", "反弹")):
         gap = round(wt - tgt, 1) if tgt else None
         line = f"你最新记录的空腹体重是 <strong>{wt} 斤</strong>"
         if gap is not None and gap > 0:
@@ -1874,6 +1875,45 @@ _TAIL_CUTS = ("怎么办", "怎么补救", "怎么调整", "怎么安排", "如�
 _TIME_WORDS = ("中午", "晚上", "早上", "今晚", "今天", "昨天", "最近", "平时")
 
 
+# 必应中文从这台服务器上抓下来经常给无关页：实测"平台期体重不掉"返回
+# 微信公众平台、"喝黑咖啡"返回网易邮箱和腾讯视频。所以联网结果只能当
+# "有对题命中才允许出现的参考"，答案本体一律来自本人流水与内置场景库。
+DOMAIN_TERMS = [
+    "火锅", "聚餐", "外卖", "点餐", "烧烤", "奶茶", "咖啡", "零食", "夜宵", "加餐",
+    "早餐", "午餐", "晚餐", "主食", "米饭", "面条", "馒头", "粗粮", "糙米", "燕麦",
+    "鸡蛋", "鸡胸", "牛肉", "鱼虾", "豆腐", "酸奶", "牛奶", "豆浆", "蔬菜", "水果",
+    "坚果", "饮料", "玉米", "红薯", "苹果", "香蕉", "西兰花", "冬瓜", "生菜", "代餐",
+    "蛋白粉", "无糖", "火锅底料", "蘸料", "可乐", "午睡", "晚饭", "早饭", "三餐",
+    "热量", "消耗", "跑步", "快走", "零食柜", "烧烤摊",
+    "奶茶店", "轻食", "沙拉", "三明治", "寿司", "快餐", "食堂", "便当", "夜跑",
+    "平台期", "体重", "腰围", "体脂", "基数", "反弹", "节食", "断食", "代谢", "便秘",
+    "训练", "力量", "有氧", "拉伸", "睡眠", "生理期", "水肿",
+]
+_DICT_PAT = re.compile(r"（汉语|汉语词典|汉语国学|怎么读|的意思|的解释|拼音|组词|部首|笔顺|字词|字典")
+
+
+def _question_terms(q):
+    """问题里能确认的领域词。一个都没有就别联网搜——搜回来也不敢用。
+
+    只认两个字以上的词：单字"糖"会让"口香糖"被当成饮食领域词误命中。"""
+    return [t for t in DOMAIN_TERMS if len(t) >= 2 and t in q]
+
+
+def _keep_relevant(items, terms):
+    """两道闸：必须命中问题里的领域词；纯字词页（《喝（汉语文字）》）一律丢。"""
+    keep = []
+    for it in items:
+        blob = (it.get("title") or "") + (it.get("snippet") or "")
+        if not any(t in blob for t in terms):
+            continue
+        if _DICT_PAT.search(it.get("title") or ""):
+            subject = re.split(r"[（_《\s]", it["title"])[0]
+            if subject not in terms:
+                continue
+        keep.append(it)
+    return keep
+
+
 def _rewrite_query(q):
     """把口语问句压成能搜到东西的词。
     上一版整句去搜"中午吃多了晚上怎么自适应补救"，必应返回的是百度百科条目
@@ -1890,12 +1930,18 @@ def _rewrite_query(q):
     s = re.sub(r"[吗呢吧啊呀]+$", "", s).strip()
     if len(s) < 4:
         s = q.strip()
-    # 实测（这台服务器上直接对比四种写法）：必应的分词会咬住查询串的第一个词，
-    # 首位是"喝""黑"这类单字就返回《喝（汉语文字）》《黑（汉语文字）》这类字典页；
-    # 把领域词放到最前面，三条结果立刻全部对题。所以领域词一律加，不看问句里有没有。
-    if not s.startswith("减脂"):
-        s = "减脂 " + s
-    return s[:70]
+    # 实测对比过五种写法：整句中文必应不切词，直接咬开头两个字当词条查字典
+    # （"在外聚餐吃火锅"→《在外》，"练完极饿"→《练》）；"减脂+整句"则永远返回
+    # 同三篇泛泛减脂科普。只有空格分开的词袋能给对题结果。所以查询串一律由
+    # 领域词拼成，领域词打头，末尾再带一个"减脂"限定领域。
+    terms = _question_terms(q)
+    parts = []
+    for t in terms:
+        if t not in parts:
+            parts.append(t)
+    if "减脂" not in parts:
+        parts.append("减脂")
+    return " ".join(parts)[:70]
 
 
 def _qkey(q):
@@ -2034,6 +2080,32 @@ def version_json():
     return Response(content=raw, media_type="application/json", headers=_no_cache())
 
 
+# 内置场景库：这些是软件自己该知道的答案，不该拿去问搜索引擎。
+# 文字与 app.js 的本地场景层逐条对应，判据核对两边关键词集合一致。
+SCENE_RULES = [
+    (('吃多', '中午吃', '补救'),
+     '✨ <strong>中午吃多/未按计划吃应急自适应方案：</strong><br>\n完全不用焦虑自责！偶尔一餐吃多绝对不会立刻长肉：<br>\n1. <strong>晚餐智能自适应：</strong>今晚不吃米面主食，换成【冬瓜清汤虾滑丸】或【老豆腐炖菌菇蔬菜】，热量直接压到 250-300 kcal！<br>\n2. <strong>喝水排钠：</strong>多喝 500ml 温水，加速排泄重油重盐！<br>\n3. <strong>晚间轻运动：</strong>饭后 45 分钟去散步快走 25-30 分钟，轻松把多余能量拉平，今日缺口依旧稳健！'),
+    (('外卖', '做饭', '做菜', '点餐'),
+     '🛵 <strong>上班族打工人外卖吃瘦核心心法：</strong><br>\n上班没时间做菜完全没关系！请在底部【食谱/外卖】中切换至【上班族外卖】模式：<br>\n1. <strong>认准两素一荤：</strong>去老乡鸡/大米先生选手撕鸡+蒸蛋+绿叶菜，米饭只吃半碗；<br>\n2. <strong>过水涮油大法：</strong>拿个纸杯装温开水，吃前肉菜过水涮一下，甩掉 15g 浮油（立省 135 kcal）；<br>\n3. <strong>一键备注模板：</strong>在食谱页点击一键复制【外卖减脂备注】，商家师傅会帮你少油少盐酱汁分装！'),
+    (('身材', '形体', '马甲线', '周期', '照片'),
+     '📷 <strong>形体周期更新与身材照追踪指南：</strong><br>\n1. <strong>多图挑选心仪身材：</strong>在【形体照】或顶部【👤档案】中，点击图示即可在【S型沙漏马甲线 / 修长轻盈 / 健美微肌 / 大基数脱脂】间自由切换，规划会自动联动！<br>\n2. <strong>周期拍照对比：</strong>每 7 天在【形体照】上传或拍摄空腹身材照，记录腰围变化；<br>\n3. <strong>更新下一周期规划：</strong>提交后点击【更新规划】，系统会根据你的蜕变数据，自动把下一周期的训练动作与饮食方案进阶升级！'),
+    (('平台期', '不掉了', '不掉', '卡住'),
+     '🛑 <strong>体重平台期先别加练饿肚子，按这三步查因：</strong><br>\n1. <strong>先分清真假平台期：</strong>连续 3 天晨起空腹同条件称重，波动在 ±0.6 斤内且围度仍在降，是水分波动不是平台；<br>\n2. <strong>查记录而不是查代谢：</strong>翻看【图表】的赤字柱，连续 2 天以上缺口归零多半是漏记的酱料、油、饮品，身体不会骗人，记录会；<br>\n3. <strong>真到平台期再动两件事：</strong>把主食按现有量减 1/4（不砍蛋白质），并把运动日改成 2 次短时快走替代长时间同强度有氧；连着两周不动且腰围也不降，再来找我调整身形目标。'),
+    (('很饿', '饿', '能吃什么', '练完', '运动完'),
+     '🍽️ <strong>练后饿的正确吃法（不是忍着）：</strong><br>\n1. <strong>练后 1 小时内补：</strong>蛋白质 20-30g + 少量慢碳，例：无糖希腊酸奶 100g + 半根玉米，约 180-220 kcal；<br>\n2. <strong>怕睡前长肉就选高 Volume 低热量：</strong>冬瓜虾滑汤、菌菇豆腐汤、焯拌黄瓜鸡蛋，胃填满而热量不到 200 kcal；<br>\n3. <strong>别用"练过了"当加餐理由：</strong>今日打卡的训练消耗只按 220 kcal 记账，喝一杯奶茶就抵光了；<br>\n4. 真饿得难受，先喝 300ml 温水等 10 分钟，仍饿就按上面第 2 条吃，不要跳过头餐。'),
+    (('火锅', '聚餐'),
+     '🍲 <strong>在外吃火锅必胜避坑守则（国内适用）：</strong><br>\n1. <strong>锅底：</strong>坚决选清汤/菌菇锅，杜绝牛油红油！<br>\n2. <strong>蘸料：</strong>薄盐生抽+香醋+蒜泥+小米辣（不要麻酱与香油，立省300kcal）！<br>\n3. <strong>点菜：</strong>多点精瘦牛肉、大虾仁、鲜毛肚、冬瓜、萝卜；炸响铃与冻豆腐千万别下辣汤！<br>\n4. <strong>顺序：</strong>先喝清汤 ➔ 蔬菜 ➔ 肉蛋 ➔ 最后吃少许玉米土豆！'),
+]
+
+
+def answer_from_scenes(q):
+    """命中场景就给成体系的建议；这是答案，不是"参考链接"。"""
+    for keys, text in SCENE_RULES:
+        if any(k in q for k in keys):
+            return text
+    return None
+
+
 @app.post("/api/ask")
 def ask(req: AskReq, user: dict = Depends(get_current_user)):
     """AI 顾问总入口。返回 source 说明这条答案是从哪一层来的。"""
@@ -2064,6 +2136,10 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
     if local:
         return {"code": 0, "source": "data", "answer": local, "items": []}
 
+    scene = answer_from_scenes(q)
+    if scene:
+        return {"code": 0, "source": "scene", "answer": scene, "items": []}
+
     if not _ask_allowed(user["id"]):
         return {"code": 0, "source": "limited",
                 "answer": f"联网查询太快了（每分钟最多 {_ASK_LIMIT_PER_MIN} 次），先等一会儿再问。",
@@ -2082,6 +2158,14 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
                 "items": [{"title": it.get("title", ""), "url": html_escape(it.get("url", ""), quote=True),
                            "host": html_escape(it.get("host", ""), quote=True)} for it in items]}
 
+    terms = _question_terms(q)
+    if not terms:
+        # 认不出领域词就不搜——搜回来的东西我们没法判断对不对题，宁可不答
+        return {"code": 0, "source": "none",
+                "answer": "这个问题里我没有能确认的减脂相关词，联网搜回来的东西判断不了对不对题，"
+                          "所以不拿它凑答案。换个带具体食物或场景的说法再问"
+                          "（例：吃火锅怎么点、中午吃多了怎么办），或先看【食谱/外卖】里的内置建议。",
+                "items": []}
     search_q = _rewrite_query(q)
     try:
         items = web_search(search_q)
@@ -2090,11 +2174,14 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
                 "answer": f"联网查询没成功（{type(e).__name__}）。我不编答案——"
                           f"你可以换个说法再问，或先看【食谱/外卖】里的内置建议。",
                 "items": []}
-    if not items:
+    kept = _keep_relevant(items, terms)
+    if not kept:
         return {"code": 0, "source": "none",
-                "answer": "联网没查到可用结果。我不编答案——你可以换个说法再问，"
-                          "或先看【食谱/外卖】里的内置建议。",
+                "answer": "联网搜到的 %d 条结果里没有一条真正讲到「%s」，都是不相干的页面。"
+                          "我不拿无关内容凑答案——可以换个说法再问，"
+                          "或先看【食谱/外卖】里的内置建议。" % (len(items), "、".join(terms)),
                 "items": []}
+    items = kept
 
     answer, how = synthesize(q, items, mem)
     if not answer:

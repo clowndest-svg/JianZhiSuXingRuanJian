@@ -209,6 +209,9 @@ def main():
         c = sqlite3.connect(dbp)
         c.row_factory = sqlite3.Row
         rows = [dict(x) for x in c.execute(sql, args).fetchall()]
+        # 默认隔离级别下 DML 不开 commit 就等于没做：判据里那些
+        # "DELETE FROM kb_entries / cheers" 清场语句必须真落盘才有效
+        c.commit()
         c.close()
         return rows
 
@@ -437,7 +440,8 @@ def main():
     a6 = m.ask(m.AskReq(question="量子计算是什么"), user=user)
     ok_src = a6["source"] in ("web", "none")
     ok_web = a6["source"] == "web" and a6["items"] and all("url" in it for it in a6["items"])
-    ok_none = a6["source"] == "none" and ("没查到" in a6["answer"] or "没成功" in a6["answer"])
+    ok_none = a6["source"] == "none" and any(k in a6["answer"] for k in
+        ("没查到", "没成功", "没有能确认的减脂相关词", "没有一条真正讲到"))
     check("联网问答不编造（有来源或明说失败）", ok_src and (ok_web or ok_none),
           "source=%s items=%d" % (a6["source"], len(a6.get("items") or [])))
     # 原来这条包在 if source == "web" 里：一旦出口换了 source 词，它就静默跳过，
@@ -868,12 +872,15 @@ def main():
         seen_queries = []
 
         def fake_web(query, limit=4):
+            # 桩必须像真搜索引擎：返回的页面讲的是你问的那个词，
+            # 否则相关性闸门会把桩的产物全丢掉，测出来的是桩不忠实而不是产品有问题
             seen_queries.append(query)
-            return [{"title": html_lib.escape("高蛋白饮食与肌肉量"),
-                     "snippet": html_lib.escape("减脂期每日热量缺口建议 300 到 500 kcal。"),
+            topic = (query or "减脂").split(" ")[0] or "减脂"
+            return [{"title": html_lib.escape(topic + "与肌肉量"),
+                     "snippet": html_lib.escape("减脂期每日热量缺口建议 300 到 500 kcal，%s 要注意总量。" % topic),
                      "url": "https://example.com/a", "host": "example.com"},
                     {"title": html_lib.escape("晚餐安排"),
-                     "snippet": html_lib.escape("过度节食会让夜间饥饿感增强&nbsp;&ensp;这点要注意"),
+                     "snippet": html_lib.escape("过度节食会让%s后的夜间饥饿感增强&nbsp;&ensp;这点要注意" % topic),
                      "url": "https://example.com/b", "host": "example.com"}]
         m.web_search = fake_web
         reset_ask_limiter(m)
@@ -891,6 +898,7 @@ def main():
 
         # 2) 搜索词必须被改写，不能把整句口语直接扔进去
         reset_ask_limiter(m)
+        q("DELETE FROM kb_entries")
         a_web = m.ask(m.AskReq(question="请问不吃晚饭真的能瘦得更快吗？"), u2)
         check("联网问题确实发过一次搜索", len(seen_queries) >= 1, seen_queries)
         rewrote = seen_queries[-1] if seen_queries else ""
@@ -898,7 +906,9 @@ def main():
         check("搜索词带上了领域词", "减脂" in rewrote or "减肥" in rewrote, rewrote)
         # 实测坑：必应咬住查询串第一个词，首位是单字动词就返回《喝（汉语文字）》这类字典页。
         # 所以领域词必须打头，不是"有就不加"。
-        check("领域词打在查询串最前", rewrote.startswith("减脂") or rewrote.startswith("减肥"), rewrote)
+        check("查询串以领域词开头",
+              bool(rewrote.split(" ")[0]) and rewrote.split(" ")[0]
+              in (list(getattr(m, "DOMAIN_TERMS", ["减脂", "减肥"])) + ["减脂", "减肥"]), rewrote)
         check("问句里的句末语气词不进查询串",
           not rewrote.rstrip().endswith(("吗", "呢", "吧")), rewrote)
         check("单字动词不做查询串开头",
@@ -958,7 +968,7 @@ def main():
         # 7) 知识库：同问题第二次不该再抓一次必应，且要说明这不是实时结果
         reset_ask_limiter(m)
         del seen_queries[:]
-        q_kb = "嚼口香糖会不会影响减脂？"
+        q_kb = "喝奶茶会不会影响减脂？"
         a1 = m.ask(m.AskReq(question=q_kb), u2)
         n1 = len(seen_queries)
         reset_ask_limiter(m)
@@ -1103,6 +1113,15 @@ def main():
               or "WEB_DIR" in vsrc, "路由里疑似硬编版本")
         q("DELETE FROM kb_entries")
 
+    reset_ask_limiter(m)
+    q("DELETE FROM kb_entries")
+    a_plateau = m.ask(m.AskReq(question="平台期体重不掉怎么办"), user)
+    check("平台期不被体重分支抢走", a_plateau["source"] == "scene" and "平台期" in a_plateau["answer"],
+          "%s %s" % (a_plateau["source"], a_plateau["answer"][:110]))
+    a_weight = m.ask(m.AskReq(question="我现在多重"), user)
+    check("单纯问体重仍走本人流水", a_weight["source"] == "data" and "斤" in a_weight["answer"],
+          "%s %s" % (a_weight["source"], a_weight["answer"][:110]))
+
     # ============ r124 第八批：审另一个 Agent 交付的四个提交 ============
     # 这一批的每条都对应实测抓到的一个真缺陷；旧版没有对应实现时必须记红，
     # 不然 --mutant 会把它洗成"没测"。
@@ -1245,6 +1264,80 @@ def main():
     except Exception:
         pass
     m.rate_reset_all_ask()
+
+    # ============ r127：AI 乱回的根因与闸门 ============
+    # 实测（服务器上直接打真必应）：整句中文它不切词，咬开头两个字返回《在外》《练》
+    # 这类字典页；"减脂+整句"则永远返回同三篇泛泛减脂科普；"平台期体重不掉"返回
+    # 微信公众平台，"黑咖啡"返回网易邮箱。所以联网只能当"有对题命中才允许出现"的
+    # 参考，答案本体一律来自本人流水与内置场景库。
+    check("场景库存在且覆盖六个场景", len(getattr(m, "SCENE_RULES", [])) == 6,
+          len(getattr(m, "SCENE_RULES", [])))
+    js_terms_sets = set(re.findall(r'q\.includes\("([^"]+)"\)', js_txt))
+    srv_terms_sets = set(k for keys, _t in getattr(m, "SCENE_RULES", []) for k in keys)
+    check("前后端场景关键词一致", js_terms_sets == srv_terms_sets,
+          "只在服务端: %s 只在前端: %s" % (sorted(srv_terms_sets - js_terms_sets),
+                                            sorted(js_terms_sets - srv_terms_sets)))
+
+    probe = []
+    m.web_search = lambda query, limit=4: (probe.append(query), [
+        {"title": "网易163免费邮箱登录", "snippet": "网易免费邮，你的专业电子邮局",
+         "url": "https://mail.163.com", "host": "mail.163.com"},
+        {"title": "腾讯视频频道", "snippet": "最新热门电视剧电影综艺在线观看",
+         "url": "https://v.qq.com", "host": "v.qq.com"},
+        {"title": "喝（汉语文字）_百度百科", "snippet": "喝（拼音：hē）为汉语一级通用规范汉字",
+         "url": "https://baike.baidu.com/h", "host": "baike.baidu.com"},
+    ])[1]
+    reset_ask_limiter(m)
+    q("DELETE FROM kb_entries")
+    del probe[:]
+    a_cof = m.ask(m.AskReq(question="喝黑咖啡会影响减脂吗"), user)
+    check("无关结果被闸门全部丢弃不凑答案", a_cof["source"] == "none"
+          and "没有一条真正讲到" in a_cof["answer"], a_cof["answer"][:150])
+    check("丢弃时点名要的是什么词", "咖啡" in a_cof["answer"], a_cof["answer"][:120])
+    check("字典页与邮箱页没进答案", "邮箱" not in a_cof["answer"] and "汉语文字" not in a_cof["answer"],
+          a_cof["answer"][:150])
+
+    q("DELETE FROM kb_entries")
+    del probe[:]
+    a_ni = m.ask(m.AskReq(question="嚼口香糖会不会影响减脂"), user)
+    check("认不出领域词就根本不联网", len(probe) == 0 and a_ni["source"] == "none", probe)
+    check("不联网时如实说为什么不答", "没有能确认的减脂相关词" in a_ni["answer"], a_ni["answer"][:120])
+
+    del probe[:]
+    a_hot = m.ask(m.AskReq(question="在外聚餐吃火锅该怎么点"), user)
+    check("火锅聚餐走内置场景库", a_hot["source"] == "scene" and len(probe) == 0,
+          "%s probe=%s" % (a_hot["source"], probe))
+    check("场景答案给的是可执行要点", "清汤" in a_hot["answer"] and "蘸料" in a_hot["answer"],
+          a_hot["answer"][:130])
+    check("场景层不再贴能量守恒", "能量守恒" not in a_hot["answer"], a_hot["answer"][:130])
+
+    # 场景层不查网，就不该吃每分钟联网配额
+    reset_ask_limiter(m)
+    q("DELETE FROM kb_entries")
+    for _i in range(25):
+        m.ask(m.AskReq(question="在外聚餐吃火锅该怎么点"), user)
+    del probe[:]
+    a_after = m.ask(m.AskReq(question="喝奶茶会不会影响减脂"), user)
+    check("连问场景不耗尽联网配额", len(probe) == 1 and a_after["source"] != "limited",
+          "probe=%d source=%s" % (len(probe), a_after["source"]))
+
+    # 对题结果要留得下来，否则闸门就成了"永远不答"
+    m.web_search = lambda query, limit=4: (probe.append(query), [
+        {"title": "苹果（蔷薇科苹果属植物的果实）_百度百科",
+         "snippet": "苹果是常见水果，含果胶与膳食纤维",
+         "url": "https://baike.baidu.com/hg", "host": "baike.baidu.com"},
+        {"title": "减脂期吃苹果合适吗", "snippet": "一个苹果约 95 kcal，放在加餐比奶茶合适",
+         "url": "https://example.com/x", "host": "example.com"},
+    ])[1]
+    reset_ask_limiter(m)
+    a_keep = m.ask(m.AskReq(question="吃苹果会不会影响减脂"), user)
+    check("对题结果能通过闸门", a_keep["source"] in ("web", "web_model", "kb"), a_keep["source"])
+    check("查询串是空格分词的词袋", " " in (probe[-1] if probe else ""), probe[-1] if probe else "")
+    _dt = list(getattr(m, "DOMAIN_TERMS", []))
+    check("词袋里每个词都是领域词",
+          bool(_dt) and probe and all(w in _dt + ["减脂", "减肥"] for w in probe[-1].split(" ")),
+          (probe[-1] if probe else "") + " 领域词表存在=%s" % bool(_dt))
+    q("DELETE FROM kb_entries")
 
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (
