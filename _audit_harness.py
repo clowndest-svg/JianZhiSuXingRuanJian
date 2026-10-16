@@ -899,7 +899,7 @@ def main():
         # 2) 搜索词必须被改写，不能把整句口语直接扔进去
         reset_ask_limiter(m)
         q("DELETE FROM kb_entries")
-        a_web = m.ask(m.AskReq(question="请问不吃晚饭真的能瘦得更快吗？"), u2)
+        a_web = m.ask(m.AskReq(question="吃香蕉真的能影响减脂吗？"), u2)
         check("联网问题确实发过一次搜索", len(seen_queries) >= 1, seen_queries)
         rewrote = seen_queries[-1] if seen_queries else ""
         check("搜索词与原始口语问句不同", rewrote != "请问不吃晚饭真的能瘦得更快吗？", rewrote)
@@ -978,7 +978,7 @@ def main():
         reset_ask_limiter(m)
         del seen_queries[:]
         m.llm_chat = lambda *a, **k: "黑咖啡对减脂没有直接作用，关键是总热量。"
-        q_ok = "吃香蕉会不会影响减脂吗？"
+        q_ok = "喝豆浆会不会影响减脂吗？"
         a_ok = m.ask(m.AskReq(question=q_ok), u2)
         check("模型真合成时标 web_model", a_ok["source"] == "web_model", a_ok["source"])
         m.llm_chat = lambda *a, **k: None
@@ -1365,6 +1365,43 @@ def main():
     check("词袋里每个词都是领域词",
           bool(_dt) and probe and all(w in _dt + ["减脂", "减肥"] for w in probe[-1].split(" ")),
           (probe[-1] if probe else "") + " 领域词表存在=%s" % bool(_dt))
+    q("DELETE FROM kb_entries")
+
+    # r129：104 题评测抓到的落点问题，各钉一条
+    probe2 = []
+    m.web_search = lambda query, limit=4: (probe2.append(query), [])[1]
+    m.rate_reset_all_ask()
+    q("DELETE FROM kb_entries")
+    for qq, want_src, must in (
+        ("我的维持代谢是多少", "data", "维持代谢"),
+        ("离目标还要多久", "data", "天"),
+        ("我今天喝够水了吗", "data", "杯"),
+        ("今天训练消耗多少", "data", "kcal"),
+        ("我一共省下多少热量", "data", "kcal"),
+        ("早餐来不及吃怎么办", "scene", "茶叶蛋"),
+        ("不吃晚饭能瘦吗", "scene", "总热量"),
+        ("肌肉酸痛还要不要练", "scene", "延迟性酸痛"),
+        ("每天走一万步有用吗", "scene", "步数"),
+        ("啤酒和白酒哪个更容易胖", "scene", "酒精"),
+        ("肌酸值得买吗", "scene", "肌酸"),
+    ):
+        r2 = m.ask(m.AskReq(question=qq), user)
+        check("评测题「%s」落点与内容都对" % qq[:12],
+              r2.get("source") == want_src and must in (r2.get("answer") or ""),
+              "%s / %s" % (r2.get("source"), (r2.get("answer") or "")[:70]))
+    # 以前被泛词抢走的三条：必须不再被数据层顶掉
+    for qq, bad_must in (("希腊酸奶和普通酸奶有什么区别", "运动日"),
+                         ("豆腐算优质蛋白吗", "目标：蛋白"),
+                         ("生理期能喝奶茶吗", "训练消耗记录")):
+        r3 = m.ask(m.AskReq(question=qq), user)
+        check("泛词不再抢走「%s」" % qq[:12], bad_must not in (r3.get("answer") or ""),
+              "%s / %s" % (r3.get("source"), (r3.get("answer") or "")[:70]))
+    check("场景库扩到 23 条以上", len(getattr(m, "SCENE_RULES", [])) >= 23,
+          len(getattr(m, "SCENE_RULES", [])))
+    check("维持/结束这类泛词不在场景键里",
+          "维持" not in [k for ks, _t in m.SCENE_RULES for k in ks]
+          and "结束" not in [k for ks, _t in m.SCENE_RULES for k in ks],
+          [k for ks, _t in m.SCENE_RULES for k in ks if len(k) <= 2 and k in ("维持", "结束", "糖", "饿")])
     q("DELETE FROM kb_entries")
 
     bad = [r for r in RESULTS if not r[1]]
