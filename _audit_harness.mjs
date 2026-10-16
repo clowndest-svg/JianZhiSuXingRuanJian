@@ -921,6 +921,32 @@ check("取不到姿态表时回落程序化而不是画静图",
 
 
 
+
+// ============ 第六批补：下载弹窗不许有写死的版本与体积 ============
+const DL_NAMES = ["下载弹窗无写死体积","下载弹窗无写死版本号","版本与体积改为待填占位",
+    "清单读不到时显示未知而不是回落假数","下载文件名带真实版本","不再宣称高速直链"];
+const DLN = DL_NAMES;
+const dlHtml = MUTANT
+  ? execFileSync("git", ["show", "HEAD:app/src/main/assets/index.html"], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+  : fs.readFileSync(path.join(ROOT, "app/src/main/assets/index.html"), "utf8");
+const dlJs = MUTANT
+  ? execFileSync("git", ["show", "HEAD:app/src/main/assets/app.js"], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+  : fs.readFileSync(path.join(ROOT, "app/src/main/assets/app.js"), "utf8");
+if (!/loadApkMeta/.test(dlJs)) {
+  for (const nm of DLN) check(nm, false, "该版本没有对应实现");
+} else {
+  check("下载弹窗无写死体积", !/\(\s*5\.5MB\s*\)/.test(dlHtml) && !/安装包 \(\d/.test(dlHtml),
+        (dlHtml.match(/安装包 \([^)]*\)/) || [""])[0]);
+  check("下载弹窗无写死版本号", !/v5\.0/.test(dlHtml), (dlHtml.match(/v5\.0[^<"]{0,14}/g) || []).slice(0,3));
+  check("版本与体积改为待填占位",
+        dlHtml.includes("apk-size-line") && dlHtml.includes("apk-ver-top"), "");
+  check("清单读不到时显示未知而不是回落假数",
+        dlJs.includes("版本未知") && dlJs.includes("体积未知"), "");
+  check("下载文件名带真实版本",
+        dlJs.includes("setAttribute") && dlJs.includes("轻塑_") && dlJs.includes("version_code"), "");
+  check("不再宣称高速直链", !/高速直链/.test(dlHtml), (dlHtml.match(/.{0,10}直链/) || [""])[0]);
+}
+
 const bad = R.filter(x => !x[1]);
 console.log(`\n=== ${MUTANT ? "变异样本(HEAD 改动前)" : "当前源码"}：${R.length} 条，绿 ${R.length - bad.length}，红 ${bad.length} ===`);
 for (const [name, ok, detail] of R) console.log(`  ${ok ? "绿" : "红"} ${name}${ok ? "" : "  -> " + detail}`);

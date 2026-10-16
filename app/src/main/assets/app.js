@@ -3205,9 +3205,48 @@ function initViewMode() {
     applyViewMode(saved || (wide ? "desktop" : "mobile"));
 }
 
+// ============ 第六批补：下载弹窗的版本与体积一律现读，不留写死字 ============
+/**
+ * 线上包的真实指纹来自 /version.json（由 make_version_json.py 从 build.gradle 与
+ * 实际 apk 现算）。读不到就写"未知"，绝不回落到旧的字面量——那正是这次要修的 bug。
+ */
+async function loadApkMeta() {
+    const put = function (id, txt) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = txt;
+    };
+    let v = null;
+    try {
+        const r = await fetch("/version.json", { cache: "no-store" });
+        if (r.ok) v = await r.json();
+    } catch (e) { v = null; }
+    if (!v || !v.version_name) {
+        put("apk-ver-top", "版本未知（清单没读到）");
+        put("apk-ver-line", "版本未知");
+        put("apk-size-line", "体积未知");
+        put("apk-speed-line", "下载速度未测");
+        return null;
+    }
+    const mib = v.size ? (v.size / 1048576) : 0;
+    const sizeTxt = v.size ? (mib.toFixed(2) + " MB / " + v.size.toLocaleString() + " 字节") : "未知";
+    put("apk-ver-top", "v" + v.version_name + "（build " + v.version_code + "）");
+    put("apk-ver-line", "v" + v.version_name + " · build " + v.version_code);
+    put("apk-size-line", sizeTxt);
+    // 这台服务器下行实测约 0.33 MB/s，按它估耗时；不写"高速"这种没量过的形容词
+    put("apk-speed-line", v.size ?
+        ("实测下行约 0.3 MB/s，这个包大约要 " + Math.max(1, Math.round(v.size / 330000)) + " 秒") :
+        "下载速度未测");
+    const link = document.getElementById("apk-direct-link");
+    if (link) {
+        link.setAttribute("download", "轻塑_" + v.version_name + "_b" + v.version_code + ".apk");
+    }
+    state.apkMeta = v;
+    return v;
+}
 function openDownloadModal() {
     const modal = document.getElementById("download-apk-modal");
     if (modal) modal.classList.add("show");
+    loadApkMeta();
     callNativeVibrate(40);
 }
 
