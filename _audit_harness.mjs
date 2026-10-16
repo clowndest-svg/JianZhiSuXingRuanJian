@@ -651,8 +651,12 @@ check("有视图切换按钮", htmlSrc.includes('id="btn-view-toggle"'), "");
 check("有日子差异说明位", htmlSrc.includes('id="mode-diff-hint"'), "");
 check("有每日状态条", htmlSrc.includes('class="daily-strip"'), "");
 check("有拍摄标准指引", htmlSrc.includes("shoot-guide"), "");
-check("CSS 有桌面双栏", cssSrc.includes("desktop-view main .view-panel") && cssSrc.includes("grid-template-columns"), "");
-check("CSS 桌面横幅跨满", cssSrc.includes("grid-column: 1 / -1"), "");
+check("桌面端不做面板级分栏",
+      !/\.view-panel[^{]*\{[^}]*column-count/.test(cssSrc) && !/\.view-panel\.active[^{]*\{[^}]*grid-template-columns/.test(cssSrc),
+      "还残留分栏");
+check("没有规则让某个面板常驻显示",
+      !/body\.desktop-view\s+#panel-[a-z-]+\s*\{[^}]*display:\s*block\s*!important/.test(cssSrc),
+      "有面板被 !important 钉成永远显示——切 tab 它也压在别人上面");
 check("标题不再是被挤的长句", /<h1>轻塑<\/h1>/.test(htmlSrc), "");
 } catch (e) {
   check("本轮前端改动在该版本无法执行（等价于全红）", false, String(e && e.message));
@@ -1042,12 +1046,8 @@ check("打印样式只留复盘页",
         "样式点了不存在的面板: " + JSON.stringify(cssMissing));
 
   // 3) 窄屏媒体查询：旧版改的是 grid-template-columns，而那时元素是 block + column-count，规则恒不生效
-  const nqAt = rCss.indexOf("@media (max-width: 900px)");
-  const nq = nqAt < 0 ? "" : rCss.slice(nqAt, nqAt + 700);
-  check("窄屏媒体查询真的把分栏收回一栏",
-        nq.length > 40 && /view-panel\.active[^}]*column-count:\s*1\s*!important/.test(nq)
-        && !/view-panel\.active\s*\{\s*grid-template-columns/.test(nq),
-        nq.slice(0, 130));
+  check("窄屏身材库仍收得住", /@media \(max-width: 900px\)[\s\S]{0,300}#main-body-shapes-grid[^}]*repeat\(2/.test(rCss),
+        rCss.slice(rCss.indexOf("@media (max-width: 900px)"), rCss.indexOf("@media (max-width: 900px)") + 160));
 
   // 4) 自律矩阵：三处都得对，否则首屏永远是一片灰格子
   const syncBody = rJs.slice(rJs.indexOf("async function syncRemoteDashboard"),
@@ -1091,12 +1091,29 @@ check("打印样式只留复盘页",
 
   // 7.5) 用户实拍那一屏：发几条消息后气泡压到下一张卡上，根因是分栏子元素规则
   //      强加 display:inline-block，把 .chat-container 本来的 flex 顶掉了
-  const kidRule = rCss.slice(rCss.indexOf(".view-panel.active > *"), rCss.indexOf("横幅类与全宽卡片"));
-  const spanRule = rCss.slice(rCss.indexOf("横幅类与全宽卡片"), rCss.indexOf("饮食计划子视图"));
-  check("分栏与跨栏规则都不抢 display",
-        kidRule.length > 30 && spanRule.length > 30
-        && !/display:/.test(kidRule) && !/display:/.test(spanRule),
-        "子元素规则命中 display=" + /display:/.test(kidRule) + " 跨栏规则命中 display=" + /display:/.test(spanRule));
+  const kidAt = rCss.indexOf(".view-panel.active > *");
+  const kidRule = kidAt < 0 ? "" : rCss.slice(kidAt, kidAt + 260);
+  check("面板子元素规则不抢 display",
+        kidRule.length > 20 && !/display:/.test(kidRule.slice(0, kidRule.indexOf("}") + 1)),
+        kidRule.slice(0, 130));
+  // 一屏只排一条轴：CSS 里不能再有面板级分栏
+  check("CSS 里没有面板级 column-count", !/\.view-panel[^{]*\{[^}]*column-count/.test(rCss), "");
+  // 工作台/公开工具/身体数据提示必须归在监控大屏面板里，否则每个模块页都会把它们带出来
+  // 网页独占的三块必须落在 panel-dashboard 与 panel-takeout 之间：
+  // 它们原先挂在 main 下、面板之间，于是每个模块页都会把它们带出来，
+  // 用户看到的"点了训练计划，计划模块跑到最下面"就是这个
+  const dashPos = rHtml.indexOf('id="panel-dashboard"');
+  const nextPos = rHtml.indexOf('id="panel-takeout"');
+  const zone = dashPos < 0 || nextPos < 0 || nextPos < dashPos ? "" : rHtml.slice(dashPos, nextPos);
+  const stray = ["web-workbench", "public-tools", "body-suspect-card"]
+    .filter(id => zone.indexOf('id="' + id + '"') < 0);
+  check("网页独占模块都挂在监控大屏里", stray.length === 0 && zone.length > 200,
+        "跑到面板外的: " + JSON.stringify(stray) + " zone=" + zone.length);
+  const mainInner = rHtml.slice(rHtml.indexOf("<main"), rHtml.indexOf("</main>"));
+  const mainKids = [...mainInner.matchAll(/<section[^>]*id="(panel-[a-z-]+)"/g)].map(x => x[1]);
+  check("main 之下只有七个面板",
+        mainKids.length === 7 && (mainInner.match(/<div/g) || []).length === (mainInner.match(/<div/g) || []).length,
+        mainKids);
   // 跨栏/半栏规则里写的类名必须真的在页面里，否则那条规则永远不命中（.chat-box 就是这一类）
   const clsRefs = [...new Set([...rCss.matchAll(/body\.desktop-view[^{]*>\.([a-z][a-z0-9-]*)/g)].map(m => m[1]))];
   const clsDead = clsRefs.filter(cn => !new RegExp("\b" + cn + "\b").test(rHtml));

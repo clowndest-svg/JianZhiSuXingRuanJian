@@ -264,7 +264,96 @@
                 <span style="font-size: 12px; color: var(--primary-dark); font-weight: bold;">进入 ➔</span>
             </div>
 
-        </section>
+        
+<div class="card body-suspect" id="body-suspect-card" style="display:none;">
+            <div class="bs-title">⚠️ 你的身高体重年龄可能还是系统早期的默认值</div>
+            <div class="bs-body">这几项直接决定每日热量额度。若不是你本人填的，
+                现在看到的「控卡 / 充能」就是按一个没问过的身体算出来的。</div>
+            <button type="button" class="btn-primary" onclick="openProfileModal()">去核对并改成真实值</button>
+        </div>
+<div class="card web-wb" id="web-workbench" style="display:none;">
+            <div class="wb-head">
+                <span class="wb-title">🖥 网页端工作台</span>
+                <span class="wb-tag">App 里没有这三件事</span>
+            </div>
+
+            <div class="wb-block">
+                <div class="wb-h">① 目标日倒推：这个日期现不现实</div>
+                <div class="wb-row">
+                    <label>目标日期<input type="date" id="wb-target-date" class="input-control"></label>
+                    <label>目标（斤）<input type="number" step="0.1" id="wb-target-jin" class="input-control"></label>
+                    <button type="button" class="btn-secondary" onclick="planByTargetDate()">算一下</button>
+                </div>
+                <div id="wb-plan-out" class="wb-out"></div>
+            </div>
+
+            <div class="wb-block">
+                <div class="wb-h">② 流水表格：搜索、按列排序、只看高热量那几笔</div>
+                <div class="wb-row">
+                    <input type="search" id="wb-search" class="input-control" placeholder="搜菜名/日期" oninput="renderLedger()">
+                    <select id="wb-kind" class="input-control" onchange="renderLedger()">
+                        <option value="">全部类型</option><option value="饮食">饮食</option>
+                        <option value="体重">体重</option><option value="训练">训练</option>
+                        <option value="饮水">饮水</option>
+                    </select>
+                    <label class="wb-chk"><input type="checkbox" id="wb-over" onchange="renderLedger()">只看 ≥600 kcal</label>
+                    <button type="button" class="btn-secondary" onclick="loadLedger()">读流水</button>
+                </div>
+                <div id="wb-ledger" class="wb-out"></div>
+            </div>
+
+            <div class="wb-block">
+                <div class="wb-h">③ 周复盘一页纸：直接打印或存 PDF</div>
+                <div class="wb-row">
+                    <button type="button" class="btn-secondary" onclick="printWeeklyReport()">生成并打印</button>
+                </div>
+                <div id="wb-report" class="wb-report"></div>
+            </div>
+
+            <div class="wb-block">
+                <div class="wb-h">④ 30天自律习惯热力矩阵：打卡轨迹可视化复盘</div>
+                <div class="wb-row" style="margin-bottom: 6px;">
+                    <span style="font-size: 11px; color: var(--text-muted);">一格看一天：记了吃、记了练、净缺口到 300，各算一分，绿越深分越高</span>
+                    <button type="button" class="btn-secondary" onclick="renderHabitMatrix()">刷新打卡矩阵</button>
+                </div>
+                <div id="wb-habit-matrix" class="wb-habit-grid"></div>
+                <div class="wb-habit-legend">
+                    <span>未记录</span>
+                    <span class="legend-dot lvl-0"></span>
+                    <span class="legend-dot lvl-1"></span>
+                    <span class="legend-dot lvl-2"></span>
+                    <span class="legend-dot lvl-3"></span>
+                    <span>三项全满</span>
+                </div>
+            </div>
+        </div>
+<div class="card" id="public-tools" style="display:none;">
+            <div class="pub-tools-head">
+                <span class="pub-tools-title">这块大屏独有的功能（App 里没有）</span>
+                <span id="public-refresh-stamp" class="public-refresh-stamp"></span>
+            </div>
+            <div class="pub-tools-row">
+                <button type="button" class="btn-secondary" onclick="makeProgressPoster()">生成进度海报（PNG）</button>
+                <button type="button" class="btn-secondary" onclick="toggleKioskMode()">📺 全景沉浸大屏模式</button>
+                <button type="button" class="btn-secondary" onclick="startPublicPolling(); stampPublicRefresh()">立刻刷新一次</button>
+            </div>
+            <div class="pub-tools-note">海报上的数字全部来自这次真实拉到的打卡流水；一条记录都没有时不会生成空海报。</div>
+
+            <div id="pub-cheer-section" class="pub-cheer-box" style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border-color);">
+                <div style="font-size: 12px; font-weight: 700; color: var(--text-main); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                    <span>👏 访客打气角（为TA的自律投递徽章）</span>
+                    <span id="pub-cheer-count" style="font-size: 11px; color: var(--primary-dark); font-weight: normal;">还没有人送过打气</span>
+                </div>
+                <div class="pub-cheer-btns">
+                    <button type="button" class="btn-cheer-chip" onclick="sendCheerSticker('🔥 稳步减脂')">🔥 稳步减脂</button>
+                    <button type="button" class="btn-cheer-chip" onclick="sendCheerSticker('🥗 饮食超干净')">🥗 饮食超干净</button>
+                    <button type="button" class="btn-cheer-chip" onclick="sendCheerSticker('💪 肌肉在生长')">💪 肌肉在生长</button>
+                    <button type="button" class="btn-cheer-chip" onclick="sendCheerSticker('💧 喝水达人')">💧 喝水达人</button>
+                </div>
+                <div id="pub-cheer-toast" class="pub-cheer-toast" style="display: none;"></div>
+            </div>
+        </div>
+</section>
 
 
         <!-- ================= TAB 2: 外卖严审与智能拦截 ================= -->
@@ -541,98 +630,13 @@
         <!-- 网页独占：只有拿到这条大屏链接的人看得到，装在手机里的 App 不出现这块 -->
         <!-- 旧版注册/保存会用 26/165/140/120 兜底，存量档案可能仍是那组数；
              这里只提醒核对，不替用户改任何数字 -->
-        <div class="card body-suspect" id="body-suspect-card" style="display:none;">
-            <div class="bs-title">⚠️ 你的身高体重年龄可能还是系统早期的默认值</div>
-            <div class="bs-body">这几项直接决定每日热量额度。若不是你本人填的，
-                现在看到的「控卡 / 充能」就是按一个没问过的身体算出来的。</div>
-            <button type="button" class="btn-primary" onclick="openProfileModal()">去核对并改成真实值</button>
-        </div>
+        
 
         <!-- 网页独占工作台：判断标准是「需不需要大屏/键盘/打印机」，
              需要就留在网页，App 里整块 remove 掉，不做两边一样的复制品 -->
-        <div class="card web-wb" id="web-workbench" style="display:none;">
-            <div class="wb-head">
-                <span class="wb-title">🖥 网页端工作台</span>
-                <span class="wb-tag">App 里没有这三件事</span>
-            </div>
+        
 
-            <div class="wb-block">
-                <div class="wb-h">① 目标日倒推：这个日期现不现实</div>
-                <div class="wb-row">
-                    <label>目标日期<input type="date" id="wb-target-date" class="input-control"></label>
-                    <label>目标（斤）<input type="number" step="0.1" id="wb-target-jin" class="input-control"></label>
-                    <button type="button" class="btn-secondary" onclick="planByTargetDate()">算一下</button>
-                </div>
-                <div id="wb-plan-out" class="wb-out"></div>
-            </div>
-
-            <div class="wb-block">
-                <div class="wb-h">② 流水表格：搜索、按列排序、只看高热量那几笔</div>
-                <div class="wb-row">
-                    <input type="search" id="wb-search" class="input-control" placeholder="搜菜名/日期" oninput="renderLedger()">
-                    <select id="wb-kind" class="input-control" onchange="renderLedger()">
-                        <option value="">全部类型</option><option value="饮食">饮食</option>
-                        <option value="体重">体重</option><option value="训练">训练</option>
-                        <option value="饮水">饮水</option>
-                    </select>
-                    <label class="wb-chk"><input type="checkbox" id="wb-over" onchange="renderLedger()">只看 ≥600 kcal</label>
-                    <button type="button" class="btn-secondary" onclick="loadLedger()">读流水</button>
-                </div>
-                <div id="wb-ledger" class="wb-out"></div>
-            </div>
-
-            <div class="wb-block">
-                <div class="wb-h">③ 周复盘一页纸：直接打印或存 PDF</div>
-                <div class="wb-row">
-                    <button type="button" class="btn-secondary" onclick="printWeeklyReport()">生成并打印</button>
-                </div>
-                <div id="wb-report" class="wb-report"></div>
-            </div>
-
-            <div class="wb-block">
-                <div class="wb-h">④ 30天自律习惯热力矩阵：打卡轨迹可视化复盘</div>
-                <div class="wb-row" style="margin-bottom: 6px;">
-                    <span style="font-size: 11px; color: var(--text-muted);">一格看一天：记了吃、记了练、净缺口到 300，各算一分，绿越深分越高</span>
-                    <button type="button" class="btn-secondary" onclick="renderHabitMatrix()">刷新打卡矩阵</button>
-                </div>
-                <div id="wb-habit-matrix" class="wb-habit-grid"></div>
-                <div class="wb-habit-legend">
-                    <span>未记录</span>
-                    <span class="legend-dot lvl-0"></span>
-                    <span class="legend-dot lvl-1"></span>
-                    <span class="legend-dot lvl-2"></span>
-                    <span class="legend-dot lvl-3"></span>
-                    <span>三项全满</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="card" id="public-tools" style="display:none;">
-            <div class="pub-tools-head">
-                <span class="pub-tools-title">这块大屏独有的功能（App 里没有）</span>
-                <span id="public-refresh-stamp" class="public-refresh-stamp"></span>
-            </div>
-            <div class="pub-tools-row">
-                <button type="button" class="btn-secondary" onclick="makeProgressPoster()">生成进度海报（PNG）</button>
-                <button type="button" class="btn-secondary" onclick="toggleKioskMode()">📺 全景沉浸大屏模式</button>
-                <button type="button" class="btn-secondary" onclick="startPublicPolling(); stampPublicRefresh()">立刻刷新一次</button>
-            </div>
-            <div class="pub-tools-note">海报上的数字全部来自这次真实拉到的打卡流水；一条记录都没有时不会生成空海报。</div>
-
-            <div id="pub-cheer-section" class="pub-cheer-box" style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border-color);">
-                <div style="font-size: 12px; font-weight: 700; color: var(--text-main); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-                    <span>👏 访客打气角（为TA的自律投递徽章）</span>
-                    <span id="pub-cheer-count" style="font-size: 11px; color: var(--primary-dark); font-weight: normal;">还没有人送过打气</span>
-                </div>
-                <div class="pub-cheer-btns">
-                    <button type="button" class="btn-cheer-chip" onclick="sendCheerSticker('🔥 稳步减脂')">🔥 稳步减脂</button>
-                    <button type="button" class="btn-cheer-chip" onclick="sendCheerSticker('🥗 饮食超干净')">🥗 饮食超干净</button>
-                    <button type="button" class="btn-cheer-chip" onclick="sendCheerSticker('💪 肌肉在生长')">💪 肌肉在生长</button>
-                    <button type="button" class="btn-cheer-chip" onclick="sendCheerSticker('💧 喝水达人')">💧 喝水达人</button>
-                </div>
-                <div id="pub-cheer-toast" class="pub-cheer-toast" style="display: none;"></div>
-            </div>
-        </div>
+        
 
         <!-- ================= TAB 4: 形体训练计划 ================= -->
         <section id="panel-workout" class="view-panel">

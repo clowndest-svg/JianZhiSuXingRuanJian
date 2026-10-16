@@ -1973,81 +1973,25 @@ body.has-floating-dl #app-main { padding-bottom: 140px; }
 /* 电脑版排版：宽容器 + CSS 分栏双栏。分栏是"按内容高度配平"而不是最短列优先，
    所以 tall 卡片仍会在某一栏顶出一段空白（实测 1440 下监控大屏约 228px），
    这里不再声称已彻底消除空隙。 */
-body.desktop-view #app-main { max-width: 1120px; margin: 0 auto; padding-bottom: 100px; }
+body.desktop-view #app-main { max-width: 900px; margin: 0 auto; padding-bottom: 96px; }
 body.desktop-view main .view-panel {
     display: none;
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 body.desktop-view main .view-panel.active {
     display: block;
-    column-count: 2;
-    column-gap: 20px;
 }
 body.desktop-view main .view-panel.active > * {
-    break-inside: avoid;
-    -webkit-column-break-inside: avoid;
-    page-break-inside: avoid;
-    margin-bottom: 16px;
-    width: 100%;
+    margin-bottom: 14px;
     box-sizing: border-box;
-}
-
-/* 横幅类与全宽卡片：跨满双栏 (column-span: all + grid-column: 1 / -1) */
-body.desktop-view main .view-panel > .user-web-banner,
-body.desktop-view main .view-panel > .web-download-card,
-body.desktop-view main .view-panel > .daily-strip,
-body.desktop-view main .view-panel > .alert-banner-danger,
-body.desktop-view main .view-panel > .alert-banner-warning,
-body.desktop-view main .view-panel > .card-title,
-body.desktop-view main .view-panel > .header-mode-bar,
-body.desktop-view main .view-panel > .callout,
-body.desktop-view main .view-panel > .full-width-card,
-body.desktop-view main .view-panel > .body-shape-card-container,
-body.desktop-view main .view-panel > .interceptor-hero,
-body.desktop-view main .view-panel > #web-workbench,
-body.desktop-view main .view-panel > #public-tools,
-body.desktop-view main > #web-workbench,
-body.desktop-view main > #public-tools,
-body.desktop-view main > #body-suspect-card,
-body.desktop-view #panel-recipes > .card,
-body.desktop-view #panel-gemini > .chat-container,
-body.desktop-view #panel-takeout > .card {
-    /* 这里绝不能再写 display：跨栏清单里有 .chat-container（flex）、
-       .daily-strip（grid）这类靠自身 display 排布的组件，
-       一旦强制成 block，它们内部的 flex:1 / grid-template-columns 全部失效，
-       聊天记录就会撑破 380px 卡片压到下一张卡上。 */
-    width: 100%;
-    grid-column: 1 / -1;
-    column-span: all;
-    -webkit-column-span: all;
-    margin-bottom: 16px;
 }
 
 /* 饮食计划子视图：烹饪方案与外卖方案桌面端双栏紧凑排列 */
-body.desktop-view #panel-recipes {
-    column-count: 1 !important;
-    display: block !important;
-}
-body.desktop-view #dining-cook-view,
-body.desktop-view #dining-takeout-view {
-    column-count: 2;
-    column-gap: 20px;
-}
+
 body.desktop-view #dining-cook-view > *,
 body.desktop-view #dining-takeout-view > * {
-    break-inside: avoid;
-    -webkit-column-break-inside: avoid;
-    page-break-inside: avoid;
-    margin-bottom: 16px;
-    width: 100%;
+    margin-bottom: 14px;
     box-sizing: border-box;
-}
-body.desktop-view #dining-cook-view > .plan-tabs {
-    display: flex !important;
-    column-span: all;
-    -webkit-column-span: all;
-    width: 100%;
-    margin-bottom: 16px;
 }
 
 /* 身材库选择卡片：桌面端 4 列横向展示，紧凑高级，消除竖直堆叠产生的空白 */
@@ -2057,19 +2001,13 @@ body.desktop-view #main-body-shapes-grid {
     gap: 12px;
 }
 
-/* 统计大图面板：图表左右双栏匀称对称分布 */
-body.desktop-view #panel-charts > .card {
-    grid-column: auto;
-    column-span: none;
-    -webkit-column-span: none;
-    width: 100%;
-}
+
 /* 电脑版各弹窗排版优化：适度放宽宽度，提供更开阔呼吸感，严防内容挤压 */
 body.desktop-view .modal-card { max-width: 480px; }
 body.desktop-view #profile-modal .modal-card { max-width: 520px; }
 body.desktop-view .download-modal-card { max-width: 460px; }
 body.desktop-view .ex-detail { max-width: 500px; }
-body.desktop-view .app-header { max-width: 1120px; margin: 0 auto; }
+body.desktop-view .app-header { max-width: 900px; margin: 0 auto; }
 
 /* 电脑版顶部导航栏 */
 .desktop-top-nav { display: none; }
@@ -2125,11 +2063,7 @@ body.desktop-view .bottom-nav {
 }
 
 @media (max-width: 900px) {
-    body.desktop-view main .view-panel.active,
-    body.desktop-view #dining-cook-view,
-    body.desktop-view #dining-takeout-view { column-count: 1 !important; }
     body.desktop-view #main-body-shapes-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    body.desktop-view .bottom-nav { max-width: 100%; left: 0; transform: none; bottom: 0; border-radius: 0; }
 }
 /* ============ 第五批：顶栏按钮竖排换行与提示语截断（实测定位） ============
    量法：把元素克隆进 360px 宽的容器，读 clientWidth/scrollHeight。
