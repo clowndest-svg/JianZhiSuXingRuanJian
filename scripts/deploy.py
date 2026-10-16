@@ -24,12 +24,22 @@ def copy_files(src,dst):
     for file in src.iterdir():
         if file.is_file():
             temp=dst/(file.name+'.new');shutil.copy2(file,temp);os.replace(temp,dst/file.name)
+
+def protect_code(path):
+    # Windows release archives may carry writable mode bits. The service account
+    # must never be able to replace the code that runs on its next restart.
+    os.chown(path,0,0);path.chmod(0o755 if path.is_dir() else 0o644)
+    if path.is_dir():
+        for child in path.iterdir():
+            if child.is_symlink():raise RuntimeError('Unexpected symlink in release: '+str(child))
+            protect_code(child)
 def restart():run('systemctl','daemon-reload');run('systemctl','restart','qingsu')
 try:
     shutil.copy2(stage/'server.py',root/'server.py.new');os.replace(root/'server.py.new',root/'server.py')
     if (root/'app_modules').exists():shutil.rmtree(root/'app_modules')
     shutil.copytree(stage/'app_modules',root/'app_modules');copy_files(stage/'web',root/'web')
     for name in ('backup.py','monitor.py'):shutil.copy2(stage/'scripts'/name,root/name)
+    for name in ('server.py','app_modules','web','backup.py','monitor.py'):protect_code(root/name)
     ips=[run('docker','inspect','-f','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}',name) for name in ('xiaoye-release','qingsu-tls')]
     config=unit.read_text();import re
     config=re.sub(r'--forwarded-allow-ips=\S+','--forwarded-allow-ips='+','.join(ips),config)

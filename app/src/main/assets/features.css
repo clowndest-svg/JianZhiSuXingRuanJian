@@ -11,6 +11,8 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 .public-readonly>header,.public-readonly>#app-main,.public-readonly>.bottom-nav,.public-readonly>.floating-dl-btn,.public-readonly>.modal-overlay{display:none!important}
 #public-view{max-width:760px;margin:0 auto;padding:24px 16px;font-size:16px;line-height:1.6}
 #public-view header{margin-bottom:20px}#public-view h1{font-size:25px}#public-view dt{color:#64748b}#public-view dd{font-weight:700;font-size:22px;margin:0 0 14px}
+.ai-engine-bar{flex-wrap:wrap;max-width:100%}
+.ai-engine-bar .eng-why{min-width:0;overflow-wrap:anywhere}
 .shared-photo{max-width:100%;max-height:520px;object-fit:contain}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
@@ -20,4 +22,6 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
  .header-tools{flex:1 1 100%;max-width:100%;flex-wrap:wrap;justify-content:flex-end}
  .header-mode-bar{flex-wrap:wrap}
  .mode-btn{min-width:0;flex:1 1 120px;white-space:normal}
+ .water-cups-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+ .water-cup-btn{min-width:0;min-height:44px}
 }

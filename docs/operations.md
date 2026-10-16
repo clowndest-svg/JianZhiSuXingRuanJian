@@ -14,6 +14,7 @@
 ## 正式服务
 
 - `systemctl status qingsu`：专用账号运行，只读代码，数据与媒体目录可写。
+- 发布脚本显式将代码/网页目录设为root所有、目录755、文件644，避免Windows归档的可写权限进入服务器。服务账号不可写`server.py`；数据和媒体继续由服务账号管理。
 - `systemctl list-timers qingsu-*`：备份每日03:10（随机最多5分钟）；短期证书每日00/12点检查（随机最多10分钟）；监控每5分钟。
 - `python3 /opt/qingsu/monitor.py`：检查 HTTPS readiness、服务、证书剩余寿命、磁盘、备份时效及近5分钟请求 P95、5xx、SQLite 锁和缓存退化。结果为聚合 JSON，保存在 `/opt/qingsu/monitor/status.json`；异常以 service 非零状态和 journal 报告。
 - 日志不记录 query、token、分享密钥、照片或健康原文。nginx access log 关闭；应用日志保留 request_id、状态与耗时。
@@ -30,7 +31,7 @@ IP证书路径 `/etc/letsencrypt/live/124.220.54.64`，Certbot运行时 `/opt/qi
 
 `/opt/qingsu/backup.py` 使用 SQLite backup API，记录 integrity_check，并打包媒体与隔离的孤儿档案。服务器本地快照root私有、保留14天；公钥加密的 `.p7m` 不需要把解密私钥放到服务器。
 
-Windows 任务 `QingsuEncryptedBackup` 每日04:00运行 `scripts/pull-backup.py`，从服务器拉取加密副本至仓库内被忽略且权限受限的 `.private-backups/`；保留30天，恢复数据库副本并实际还原媒体文件验证。电脑关闭/离线时无法完成异地拉取，因此异地 RPO 依赖这台电脑在线；服务器每日本地备份独立运行。
+Windows 任务 `QingsuEncryptedBackup` 每日04:00运行 `scripts/pull-backup.py`，从服务器拉取加密副本至仓库内被忽略且权限受限的 `.private-backups/`；保留30天，恢复数据库副本并实际还原媒体文件验证。计划任务使用当前用户交互登录，已启用错过后补跑；电脑关闭、离线或用户未登录时无法完成异地拉取，因此异地 RPO 依赖这台电脑在线；服务器每日本地备份独立运行。
 
 恢复必须在空的隔离目录进行，先解密到内存/临时受限目录，验证 SQLite 完整性、外键、记录数和媒体文件，再停止服务并选择恢复时间点；不要直接覆盖正在运行的数据库。生产回退默认只回退代码和配置，schema保留前向兼容。历史58条孤儿记录已放在 root 私有隔离数据库中，未猜测归属或不可恢复地删除。
 

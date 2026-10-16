@@ -1,15 +1,16 @@
 {
-  "engine": "Android WebView",
+  "engine": "Android WebView / Android 16",
+  "version": "1.5.1 (14)",
   "measurements": [
     {
       "requested": 320,
-      "width": 382,
-      "scroll": 382
+      "width": 320,
+      "scroll": 320
     },
     {
       "requested": 360,
-      "width": 382,
-      "scroll": 382
+      "width": 360,
+      "scroll": 360
     },
     {
       "requested": 390,
@@ -27,5 +28,6 @@
       "scroll": 1440
     }
   ],
-  "note": "Requested 320/360 did not yield those actual widths; these are not passes for 320/360."
+  "panels_per_width": 7,
+  "horizontal_overflow": false
 }

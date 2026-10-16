@@ -1,0 +1,8 @@
+{
+  "synthetic_database_restore": "ok",
+  "synthetic_media_files_restored": 1,
+  "image_sha256_verified": true,
+  "decoded_image_verified": true,
+  "round_trip_seconds": 2.28,
+  "production_media_files_at_backup": 0
+}

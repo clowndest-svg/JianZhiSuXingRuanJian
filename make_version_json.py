@@ -38,7 +38,7 @@ def main():
         "size": len(blob),
         "md5": hashlib.md5(blob).hexdigest(),
         "sha256": hashlib.sha256(blob).hexdigest(),
-        "notes": "r131：全链路可信 HTTPS、正式签名轮换；分享字段权限/到期/撤销；完整日确认、历史纠错与补录；餐食份量核对；离线草稿与网页离线外壳；Android 每日提醒、拍照入口和 CSV 保存；统一问答路由及场景规则。",
+        "notes": "r131.1：修复320px饮水网格溢出、下载二维码直达HTTPS；全链路可信 HTTPS、正式签名轮换；分享字段权限/到期/撤销；完整日确认、历史纠错与补录；餐食份量核对；离线草稿与网页离线外壳；Android 每日提醒、拍照入口和 CSV 保存；统一问答路由及场景规则。",
     }
     io.open(OUT, "w", encoding="utf-8", newline="").write(
         json.dumps(out, ensure_ascii=False, indent=1))

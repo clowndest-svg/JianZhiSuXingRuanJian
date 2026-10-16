@@ -1,0 +1,11 @@
+{
+  "result": "OK (1 test)",
+  "duration_seconds": 17.489,
+  "production_apk_installed_sha256": "3d44d41cad30b68056d1401b0f1adc78e1fb8b24d59372ab96da5acdbd564dd3",
+  "test_package_removed": true,
+  "synthetic_fixture_removed": true,
+  "remaining_production_users": 2,
+  "public_webview_has_native_bridge": false,
+  "csv_scope": "app-owned URI callback; not full system picker confirmation",
+  "local_http_scope": "loopback protocol fixture; not real mobile LLM"
+}
