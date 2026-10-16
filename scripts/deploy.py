@@ -5,12 +5,12 @@ from pathlib import Path
 p=argparse.ArgumentParser();p.add_argument('--stage',required=True);p.add_argument('--revision',required=True)
 p.add_argument('--release',default=None,help='发布标签；默认取 --stage 目录名（例如 releases/r132 -> r132）')
 args=p.parse_args()
+root=Path('/opt/qingsu');stage=Path(args.stage).resolve()
+if os.geteuid()!=0 or stage.parent!=root/'releases' or not (stage/'server.py').is_file():raise SystemExit('Expected root and a prepared release directory')
 RELEASE=args.release or stage.name
 if not RELEASE.startswith('r'):raise SystemExit('无法确定发布标签，请显式传 --release')
 # 先落盘再重启：服务必须能上报自己跑的是哪个提交，门禁才有东西可对账
 (root/'release.json').write_text(json.dumps({'release':RELEASE,'source_revision':args.revision}))
-root=Path('/opt/qingsu');stage=Path(args.stage).resolve()
-if os.geteuid()!=0 or stage.parent!=root/'releases' or not (stage/'server.py').is_file():raise SystemExit('Expected root and a prepared release directory')
 def run(*cmd):return subprocess.run(cmd,check=True,capture_output=True,text=True).stdout.strip()
 backup=root/'backups'/('release-'+datetime.now().strftime('%Y%m%d-%H%M%S'));backup.mkdir(mode=0o700)
 for name in ('server.py','app_modules','web'):

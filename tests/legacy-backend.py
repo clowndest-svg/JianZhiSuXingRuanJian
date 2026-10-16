@@ -452,6 +452,11 @@ def main():
                              cwd=ROOT, capture_output=True).stdout.decode("utf-8")
     hard = re.findall(r'["\']r[0-9]{2,}["\']', dep)
     check("部署脚本源码里没有写死的发布标签", not hard, hard[:2])
+    # 部署脚本只在服务器上跑得起来，本地测不到执行顺序；写错顺序就是 NameError，
+    # 所以这里静态拦一道：用到 stage 之前必须先定义 stage。
+    check("部署脚本先定义 stage 再推导发布标签",
+          dep.find("stage=Path(") >= 0 and dep.find("stage=Path(") < dep.find("RELEASE=args.release"),
+          (dep.find("stage=Path("), dep.find("RELEASE=args.release")))
     check("部署脚本按提交号对账而不是按标签自比",
           "source_revision')==args.revision" in dep.replace(" ", ""),
           dep.count("args.revision"))
