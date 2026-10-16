@@ -49,6 +49,17 @@
             </button>
         </div>
         <div class="mode-diff-hint" id="mode-diff-hint"></div>
+
+        <!-- 桌面版顶部导航栏 (只在桌面模式显示，解决电脑端点击不便与无法切换问题) -->
+        <nav class="desktop-top-nav" id="desktop-top-nav">
+            <button type="button" class="d-nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 监控大屏</button>
+            <button type="button" class="d-nav-item" data-tab="recipes" onclick="switchTab('recipes')">🥗 食谱与外卖</button>
+            <button type="button" class="d-nav-item" data-tab="workout" onclick="switchTab('workout')">🏋️ 训练计划</button>
+            <button type="button" class="d-nav-item" data-tab="body" onclick="switchTab('body')">📷 形体档案</button>
+            <button type="button" class="d-nav-item" data-tab="takeout-stats" onclick="switchTab('takeout-stats')">🚨 外卖拦截</button>
+            <button type="button" class="d-nav-item" data-tab="charts" onclick="switchTab('charts')">📈 统计大图</button>
+            <button type="button" class="d-nav-item" data-tab="ai" onclick="switchTab('ai')">🤖 AI顾问</button>
+        </nav>
     </header>
 
     <!-- 主体视窗区域 -->

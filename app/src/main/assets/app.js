@@ -691,15 +691,23 @@ function renderMealDiary() {
 
     let html = `<div style="font-size: 11.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">📝 今日饮食真实记录：</div>`;
     state.mealDiary.forEach(item => {
+        const p = item.protein_g ? `蛋 ${item.protein_g}g ` : "";
+        const c = item.carbs_g ? `碳 ${item.carbs_g}g ` : "";
+        const f = item.fat_g ? `脂 ${item.fat_g}g` : "";
+        const macroStr = (p || c || f) ? `<div style="font-size: 9.5px; color: var(--text-muted); margin-top: 1px;">${p}${c}${f}</div>` : "";
+
         html += `
             <div class="diary-record-item">
-                <div>
-                    <span class="meal-badge" style="font-size: 10px; margin-right: 4px;">${item.slot}</span>
-                    <span>${item.food_name || item.name}</span>
+                <div style="flex: 1; min-width: 0;">
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <span class="meal-badge" style="font-size: 10px; flex-shrink: 0;">${escapeHtml(item.slot || '')}</span>
+                        <span style="font-weight: 600; font-size: 12px; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(item.food_name || item.name || '')}</span>
+                    </div>
+                    ${macroStr}
                 </div>
-                <div style="flex-shrink: 0; margin-left: 8px;">
-                    <strong>${item.cal} kcal</strong>
-                    <span style="font-size: 10px; color: var(--text-light); margin-left: 4px;">${item.time_str || ''}</span>
+                <div style="flex-shrink: 0; margin-left: 8px; text-align: right;">
+                    <strong style="color: var(--primary-dark); font-size: 12px;">${item.cal} kcal</strong>
+                    <div style="font-size: 10px; color: var(--text-light);">${escapeHtml(item.time_str || '')}</div>
                 </div>
             </div>
         `;
@@ -3062,6 +3070,9 @@ function resetChecklist() {
 function switchTab(tabName) {
     document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
     document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
+    document.querySelectorAll(".d-nav-item").forEach(b => {
+        b.classList.toggle("active", b.getAttribute("data-tab") === tabName);
+    });
 
     const panel = document.getElementById("panel-" + tabName);
     const nav = document.getElementById("nav-" + tabName);
@@ -3070,6 +3081,9 @@ function switchTab(tabName) {
 
     if (tabName === "charts") {
         setTimeout(renderCharts, 50);
+    }
+    if (typeof window !== "undefined" && window.scrollTo) {
+        try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) {}
     }
 }
 
