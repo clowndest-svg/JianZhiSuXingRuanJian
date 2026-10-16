@@ -2742,46 +2742,510 @@ const BONES = [
     ["pelvis", "l_hip", 6], ["pelvis", "r_hip", 6]
 ];
 
-/** 画一帧：远处肢体先画（暗、细），近处后画（亮、粗），加上投影，得到立体感。 */
+// ==========================================
+// 3D 生物力学人体模型渲染引擎 (3D Biomechanical Mannequin Engine)
+// 彻底取代简陋火柴人：具备真实 3D 空间深度透视、肌肉体块光影、360°自由拖拽旋转、
+// 发力肌群全息高亮、动作阶段(向心/离心)HUD实时反馈、地台透视网格与动力学投影。
+// ==========================================
+
+let ex3DCamera = {
+    yaw: 0.42,          // 水平偏航角（默认 ~24° 黄金立体透视）
+    pitch: 0.12,        // 俯仰视角（默认 ~7° 俯视地台）
+    targetYaw: 0.42,
+    targetPitch: 0.12,
+    isDragging: false,
+    startX: 0,
+    startY: 0,
+    paused: false,
+    mode: "3d",
+    eventsBound: false
+};
+
+// 动作原型主要激活肌群配置
+const ACTIVE_MUSCLES = {
+    squat: { name: "股四头肌 · 臀大肌", targets: ["thigh_l", "thigh_r", "calf_l", "calf_r", "glutes"] },
+    lunge: { name: "股四头肌 · 臀大肌", targets: ["thigh_l", "thigh_r", "glutes"] },
+    bridge: { name: "臀大肌 · 腘绳肌", targets: ["pelvis", "glutes", "thigh_l", "thigh_r"] },
+    pushup: { name: "胸大肌 · 肱三头肌", targets: ["chest", "arm_l", "arm_r", "core"] },
+    press: { name: "三角肌 · 肱三头肌", targets: ["chest", "deltoid_l", "deltoid_r", "arm_l", "arm_r"] },
+    plank: { name: "腹横肌 · 核心深层肌群", targets: ["core", "pelvis"] },
+    deadbug: { name: "腹直肌 · 核心稳定", targets: ["core"] },
+    birddog: { name: "竖脊肌 · 臀大肌", targets: ["core", "thigh_r", "arm_l"] },
+    twist: { name: "腹内外斜肌 · 核心旋转", targets: ["core", "chest"] },
+    walk: { name: "心肺下肢 · 腓肠肌", targets: ["thigh_l", "thigh_r", "calf_l", "calf_r"] },
+    sideleg: { name: "臀中肌 · 外展肌群", targets: ["pelvis", "thigh_r"] },
+    clamshell: { name: "臀中肌 · 髋外旋肌", targets: ["pelvis", "thigh_r"] }
+};
+
+// 骨骼与肢体体块定义：骨端1、骨端2、基准半宽、肌肉类型、受力加粗倍数
+const MUSCLE_VOLUMES = [
+    // 躯干核心与脊柱
+    { j1: "neck", j2: "sternum", r1: 8, r2: 12, rMid: 10, type: "neck" },
+    { j1: "sternum", j2: "pelvis", r1: 22, r2: 18, rMid: 20, type: "core" },
+    { j1: "l_shoulder", j2: "r_shoulder", r1: 14, r2: 14, rMid: 16, type: "chest" },
+    { j1: "l_hip", j2: "r_hip", r1: 16, r2: 16, rMid: 17, type: "pelvis" },
+    
+    // 双臂肌肉体块（肱二头肌/三头肌呈橄榄形隆起，前臂渐细）
+    { j1: "l_shoulder", j2: "l_elbow", r1: 11, r2: 8, rMid: 14, type: "arm_l" },
+    { j1: "l_elbow", j2: "l_wrist", r1: 8, r2: 5, rMid: 9, type: "forearm_l" },
+    { j1: "r_shoulder", j2: "r_elbow", r1: 11, r2: 8, rMid: 14, type: "arm_r" },
+    { j1: "r_elbow", j2: "r_wrist", r1: 8, r2: 5, rMid: 9, type: "forearm_r" },
+    
+    // 双腿肌肉体块（大腿股四头肌强劲饱满，小腿腓肠肌自然曲线，踝部收紧）
+    { j1: "l_hip", j2: "l_knee", r1: 17, r2: 12, rMid: 20, type: "thigh_l" },
+    { j1: "l_knee", j2: "l_ankle", r1: 12, r2: 7, rMid: 13, type: "calf_l" },
+    { j1: "r_hip", j2: "r_knee", r1: 17, r2: 12, rMid: 20, type: "thigh_r" },
+    { j1: "r_knee", j2: "r_ankle", r1: 12, r2: 7, rMid: 13, type: "calf_r" }
+];
+
+function setEx3DAngle(mode) {
+    ex3DCamera.mode = mode;
+    if (mode === "3d") {
+        ex3DCamera.targetYaw = 0.42;
+        ex3DCamera.targetPitch = 0.12;
+    } else if (mode === "front") {
+        ex3DCamera.targetYaw = 0.0;
+        ex3DCamera.targetPitch = 0.06;
+    } else if (mode === "side") {
+        ex3DCamera.targetYaw = 1.57;
+        ex3DCamera.targetPitch = 0.06;
+    }
+    ["3d", "front", "side"].forEach(function(m) {
+        const btn = document.getElementById("cam-btn-" + m);
+        if (btn) btn.classList.toggle("active", m === mode);
+    });
+    updateEx3DAngleText();
+}
+window.setEx3DAngle = setEx3DAngle;
+
+function resetEx3DAngle() {
+    setEx3DAngle("3d");
+}
+window.resetEx3DAngle = resetEx3DAngle;
+
+function updateEx3DAngleText() {
+    const el = document.getElementById("ex-view-angle-text");
+    if (!el) return;
+    const deg = Math.round((ex3DCamera.yaw * 180 / Math.PI) % 360);
+    const posDeg = deg < 0 ? deg + 360 : deg;
+    if (ex3DCamera.mode === "front") {
+        el.textContent = "🎯 正面视角 (0°)";
+    } else if (ex3DCamera.mode === "side") {
+        el.textContent = "🔍 侧面视角 (90°)";
+    } else {
+        el.textContent = "📐 3D 自由视角 (" + posDeg + "° · 按住拖拽旋转)";
+    }
+}
+
+function toggleExDetailPlay() {
+    ex3DCamera.paused = !ex3DCamera.paused;
+    const btn = document.getElementById("ex-detail-play");
+    if (btn) btn.textContent = ex3DCamera.paused ? "▶️ 继续" : "⏸️ 暂停";
+}
+window.toggleExDetailPlay = toggleExDetailPlay;
+
+function bindCanvas3DInteractions(cv) {
+    if (!cv || ex3DCamera.eventsBound) return;
+    ex3DCamera.eventsBound = true;
+
+    function handleStart(clientX, clientY) {
+        ex3DCamera.isDragging = true;
+        ex3DCamera.startX = clientX;
+        ex3DCamera.startY = clientY;
+    }
+
+    function handleMove(clientX, clientY) {
+        if (!ex3DCamera.isDragging) return;
+        const dx = (clientX - ex3DCamera.startX) * 0.012;
+        const dy = (clientY - ex3DCamera.startY) * 0.008;
+        ex3DCamera.startX = clientX;
+        ex3DCamera.startY = clientY;
+        ex3DCamera.targetYaw += dx;
+        ex3DCamera.targetPitch = Math.max(-0.25, Math.min(0.45, ex3DCamera.targetPitch + dy));
+        ex3DCamera.mode = "free";
+        ["3d", "front", "side"].forEach(function(m) {
+            const btn = document.getElementById("cam-btn-" + m);
+            if (btn) btn.classList.remove("active");
+        });
+        updateEx3DAngleText();
+    }
+
+    function handleEnd() {
+        ex3DCamera.isDragging = false;
+    }
+
+    cv.addEventListener("mousedown", function(e) { handleStart(e.clientX, e.clientY); });
+    window.addEventListener("mousemove", function(e) { handleMove(e.clientX, e.clientY); });
+    window.addEventListener("mouseup", handleEnd);
+
+    cv.addEventListener("touchstart", function(e) {
+        if (e.touches.length === 1) {
+            handleStart(e.touches[0].clientX, e.touches[0].clientY);
+            e.preventDefault();
+        }
+    }, { passive: false });
+    window.addEventListener("touchmove", function(e) {
+        if (ex3DCamera.isDragging && e.touches.length === 1) {
+            handleMove(e.touches[0].clientX, e.touches[0].clientY);
+            e.preventDefault();
+        }
+    }, { passive: false });
+    window.addEventListener("touchend", handleEnd);
+}
+
+/**
+ * 3D 生物力学人体模型渲染引擎核心函数：
+ * 将 16 关键帧关节升维至真 3D 空间坐标，进行透视投影变换与深度排序，
+ * 绘制高科技地台网格、动态柔和接触阴影、圆柱体肌纤维渐变肌肉体块、
+ * 关节镀铬金属球铰链、3D高光头部视向、受力肌群发力全息脉冲与运动阶段HUD。
+ */
 function drawFrame(g, W, H, pose, arch, t) {
+    // 摄像机平滑阻尼插值
+    ex3DCamera.yaw += (ex3DCamera.targetYaw - ex3DCamera.yaw) * 0.16;
+    ex3DCamera.pitch += (ex3DCamera.targetPitch - ex3DCamera.pitch) * 0.16;
+
+    // 清空视口并绘制深色运动科技工作室背景
     g.clearRect(0, 0, W, H);
-    g.fillStyle = "#0B1220"; g.fillRect(0, 0, W, H);
-    const grd = g.createLinearGradient(0, H * 0.55, 0, H);
-    grd.addColorStop(0, "#111C2E"); grd.addColorStop(1, "#0B1220");
-    g.fillStyle = grd; g.fillRect(0, H * 0.55, W, H * 0.45);
+    const bgGrd = g.createRadialGradient(W * 0.5, H * 0.35, 10, W * 0.5, H * 0.5, Math.max(W, H) * 0.85);
+    bgGrd.addColorStop(0, "#1E293B");
+    bgGrd.addColorStop(0.65, "#0F172A");
+    bgGrd.addColorStop(1, "#020617");
+    g.fillStyle = bgGrd;
+    g.fillRect(0, 0, W, H);
 
-    const px = function (v) { return [v[0] * W, v[1] * H]; };
-    // 落地投影随起伏缩放，是判断"有没有真在动"最直观的线索
-    const lift = 1 - Math.abs(Math.sin(t * Math.PI * 2)) * 0.18;
-    g.fillStyle = "rgba(16,185,129,0.16)";
-    g.beginPath(); g.ellipse(W * 0.5, H * 0.9, W * 0.2 * lift, H * 0.022, 0, 0, Math.PI * 2); g.fill();
+    const isSideArch = (arch === "pushup" || arch === "plank" || arch === "bridge");
+    const activeCfg = ACTIVE_MUSCLES[arch] || { name: "背阔肌 · 上背肌群", targets: ["chest", "arm_l", "arm_r"] };
 
-    const back = ["l_shoulder", "l_elbow", "l_wrist", "l_hip", "l_knee", "l_ankle"];
-    for (let i = 0; i < BONES.length; i++) {
-        const b = BONES[i];
-        const isNear = back.indexOf(b[0]) >= 0 || back.indexOf(b[1]) >= 0;
-        if (isNear) continue;
-        g.strokeStyle = "#34D399"; g.lineWidth = b[2] * 0.9; g.lineCap = "round";
-        const a = px(pose[b[0]]), c = px(pose[b[1]]);
-        g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(c[0], c[1]); g.stroke();
+    // 1. 将 2D 骨骼关节升维至三维空间点 (X, Y, Z)
+    const points3D = {};
+    const norm = function(pt, name) {
+        if (!pt) pt = [0.5, 0.5];
+        let x = (pt[0] - 0.5) * 2.0;
+        let y = (pt[1] - 0.5) * 2.0;
+        let z = 0;
+
+        if (isSideArch) {
+            // 侧视原型：左右肢体在 Z 轴分离
+            if (name.indexOf("l_") === 0) z = -0.16;
+            else if (name.indexOf("r_") === 0) z = 0.16;
+            else z = 0;
+        } else {
+            // 正视原型：构建自然人体胸腹与站姿深度
+            if (name === "sternum") z = 0.08;
+            else if (name === "head") z = 0.04;
+            else if (name === "pelvis") z = -0.02;
+            else if (name.indexOf("l_") === 0) z = -0.06;
+            else if (name.indexOf("r_") === 0) z = 0.06;
+
+            // 动态步态/屈伸深度摆动
+            const s = Math.sin(t * Math.PI * 2);
+            if (arch === "walk" || arch === "lunge") {
+                if (name === "l_knee" || name === "l_ankle") z += -0.22 * s;
+                if (name === "r_knee" || name === "r_ankle") z += 0.22 * s;
+                if (name === "l_wrist") z += 0.18 * s;
+                if (name === "r_wrist") z += -0.18 * s;
+            } else if (arch === "twist") {
+                if (name.indexOf("l_") === 0) z += 0.18 * s;
+                if (name.indexOf("r_") === 0) z += -0.18 * s;
+            }
+        }
+        return [x, y, z];
+    };
+
+    for (const jn in pose) {
+        if (Object.prototype.hasOwnProperty.call(pose, jn)) {
+            points3D[jn] = norm(pose[jn], jn);
+        }
     }
-    for (let i = 0; i < BONES.length; i++) {
-        const b = BONES[i];
-        const isNear = back.indexOf(b[0]) >= 0 || back.indexOf(b[1]) >= 0;
-        if (!isNear) continue;
-        g.strokeStyle = "#0E7490"; g.lineWidth = b[2] * 0.75; g.lineCap = "round";
-        const a = px(pose[b[0]]), c = px(pose[b[1]]);
-        g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(c[0], c[1]); g.stroke();
-    }
-    const hd = px(pose.head);
-    g.fillStyle = "#10B981"; g.beginPath(); g.arc(hd[0], hd[1], W * 0.045, 0, Math.PI * 2); g.fill();
-    const pel = px(pose.pelvis);
-    g.fillStyle = "rgba(255,90,54,0.9)"; g.beginPath(); g.arc(pel[0], pel[1], W * 0.016, 0, Math.PI * 2); g.fill();
 
-    g.fillStyle = "#64748B"; g.font = "12px sans-serif";
-    g.fillText("程序化示意 · 非真人实拍", 10, H - 10);
+    // 2. 3D 旋转变换矩阵与中心校准 (以人体胸腹中心为旋转原点)
+    const yaw = ex3DCamera.yaw;
+    const pitch = ex3DCamera.pitch;
+    const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+    const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+    const FOCAL = 3.6; // 透视焦距
+
+    const projected = {};
+    for (const jn in points3D) {
+        const p = points3D[jn];
+        const cx = 0, cy = 0.06, cz = 0;
+        const rx = p[0] - cx;
+        const ry = p[1] - cy;
+        const rz = p[2] - cz;
+
+        // 偏航角旋转
+        const x1 = rx * cosY + rz * sinY;
+        const z1 = -rx * sinY + rz * cosY;
+        // 俯仰角旋转
+        const y2 = ry * cosP - z1 * sinP;
+        const z2 = ry * sinP + z1 * cosP;
+
+        // 透视投影
+        const k = FOCAL / (FOCAL + z2);
+        projected[jn] = {
+            x: W * 0.5 + x1 * k * (W * 0.44),
+            y: H * 0.5 + (y2 + cy) * k * (H * 0.45) + 6,
+            z: z2,
+            scale: k
+        };
+    }
+
+    // 3. 绘制 3D 透视地台网格 (Gym Floor Perspective Grid)
+    const groundY = 0.90;
+    g.save();
+    g.strokeStyle = "rgba(16, 185, 129, 0.12)";
+    g.lineWidth = 1;
+    for (let gz = -0.9; gz <= 0.9; gz += 0.3) {
+        const x_a = -0.9 * cosY + gz * sinY;
+        const z_a = 0.9 * sinY + gz * cosY;
+        const ya_2 = groundY * cosP - z_a * sinP;
+        const za_2 = groundY * sinP + z_a * cosP;
+        const ka = FOCAL / (FOCAL + za_2);
+        const scr_xa = W * 0.5 + x_a * ka * (W * 0.44);
+        const scr_ya = H * 0.5 + ya_2 * ka * (H * 0.45) + 6;
+
+        const x_b = 0.9 * cosY + gz * sinY;
+        const z_b = -0.9 * sinY + gz * cosY;
+        const yb_2 = groundY * cosP - z_b * sinP;
+        const zb_2 = groundY * sinP + z_b * cosP;
+        const kb = FOCAL / (FOCAL + zb_2);
+        const scr_xb = W * 0.5 + x_b * kb * (W * 0.44);
+        const scr_yb = H * 0.5 + yb_2 * kb * (H * 0.45) + 6;
+
+        g.beginPath();
+        g.moveTo(scr_xa, scr_ya);
+        g.lineTo(scr_xb, scr_yb);
+        g.stroke();
+    }
+    g.restore();
+
+    // 4. 动力学柔和地面投影 (随运动重心起伏缩放)
+    const pel = projected.pelvis || { x: W * 0.5, y: H * 0.82, z: 0, scale: 1 };
+    const liftScale = 1 - Math.abs(Math.sin(t * Math.PI * 2)) * 0.22;
+    const shdGrd = g.createRadialGradient(pel.x, H * 0.91, 2, pel.x, H * 0.91, W * 0.24 * pel.scale * liftScale);
+    shdGrd.addColorStop(0, "rgba(2, 6, 23, 0.65)");
+    shdGrd.addColorStop(0.6, "rgba(16, 185, 129, 0.10)");
+    shdGrd.addColorStop(1, "rgba(2, 6, 23, 0)");
+    g.fillStyle = shdGrd;
+    g.beginPath();
+    g.ellipse(pel.x, H * 0.91, W * 0.24 * pel.scale * liftScale, H * 0.035 * pel.scale, 0, 0, Math.PI * 2);
+    g.fill();
+
+    // 5. 肌肉收缩发力状态脉冲计算
+    const isConcentric = (t < 0.5);
+    const pulseStrength = isConcentric ? (1 - Math.cos(t * Math.PI * 4)) * 0.5 : 0.15;
+
+    // 辅助函数：绘制立体肌肉体块胶囊 (Volumetric Muscle Capsule)
+    function drawMuscleCapsule(p1, p2, r1, r2, rMid, type) {
+        if (!p1 || !p2) return;
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = -dy / len;
+        const ny = dx / len;
+
+        const k1 = p1.scale, k2 = p2.scale;
+        const km = (k1 + k2) * 0.5;
+        const w1 = r1 * k1;
+        const w2 = r2 * k2;
+        const wm = (rMid || ((r1 + r2) * 0.5)) * km * 1.35;
+
+        const mx = (p1.x + p2.x) * 0.5;
+        const my = (p1.y + p2.y) * 0.5;
+
+        // 构建橄榄形肌肉体块外轮廓多边形
+        g.beginPath();
+        g.moveTo(p1.x + nx * w1, p1.y + ny * w1);
+        g.quadraticCurveTo(mx + nx * wm, my + ny * wm, p2.x + nx * w2, p2.y + ny * w2);
+        g.arc(p2.x, p2.y, w2, Math.atan2(ny, nx), Math.atan2(-ny, -nx), false);
+        g.quadraticCurveTo(mx - nx * wm, my - ny * wm, p1.x - nx * w1, p1.y - ny * w1);
+        g.arc(p1.x, p1.y, w1, Math.atan2(-ny, -nx), Math.atan2(ny, nx), false);
+        g.closePath();
+
+        // 3D 圆柱体定向光影渐变 (左上天光高亮，右下背光深色)
+        const isActive = activeCfg.targets.indexOf(type) >= 0;
+        const mGrd = g.createLinearGradient(mx + nx * wm, my + ny * wm, mx - nx * wm, my - ny * wm);
+
+        if (isActive && pulseStrength > 0.2) {
+            // 受力肌群全息能量高亮模式
+            mGrd.addColorStop(0, "#34D399");
+            mGrd.addColorStop(0.35, "#06B6D4");
+            mGrd.addColorStop(0.7, "#10B981");
+            mGrd.addColorStop(1, "#064E3B");
+            g.fillStyle = mGrd;
+            g.shadowColor = "#10B981";
+            g.shadowBlur = 10 * pulseStrength;
+            g.fill();
+            g.shadowBlur = 0;
+        } else {
+            // 常规高质感 3D 金属与深绿机甲肌肉
+            mGrd.addColorStop(0, "#34D399");
+            mGrd.addColorStop(0.28, "#10B981");
+            mGrd.addColorStop(0.7, "#047857");
+            mGrd.addColorStop(1, "#064E3B");
+            g.fillStyle = mGrd;
+            g.fill();
+        }
+
+        // 肌肉中线高光棱线 (增强立体感)
+        g.strokeStyle = "rgba(255, 255, 255, 0.35)";
+        g.lineWidth = Math.max(1, 1.5 * km);
+        g.beginPath();
+        g.moveTo(p1.x, p1.y);
+        g.quadraticCurveTo(mx + nx * 2, my + ny * 2, p2.x, p2.y);
+        g.stroke();
+    }
+
+    // 辅助函数：绘制高科技 3D 球形关节铰链 (Joint Cap)
+    function drawJointSphere(p, r, isAnchor) {
+        if (!p) return;
+        const rad = r * p.scale;
+        const jGrd = g.createRadialGradient(p.x - rad * 0.35, p.y - rad * 0.35, rad * 0.1, p.x, p.y, rad);
+        if (isAnchor) {
+            jGrd.addColorStop(0, "#FBBF24");
+            jGrd.addColorStop(0.6, "#F59E0B");
+            jGrd.addColorStop(1, "#B45309");
+        } else {
+            jGrd.addColorStop(0, "#6EE7B7");
+            jGrd.addColorStop(0.5, "#10B981");
+            jGrd.addColorStop(1, "#064E3B");
+        }
+        g.fillStyle = jGrd;
+        g.beginPath();
+        g.arc(p.x, p.y, Math.max(2, rad), 0, Math.PI * 2);
+        g.fill();
+        g.strokeStyle = "rgba(255, 255, 255, 0.3)";
+        g.lineWidth = 1;
+        g.stroke();
+    }
+
+    // 6. 深度排序 (Z-Sort Painter's Algorithm)：远处的肢体先画，近处的后画
+    const renderItems = [];
+    for (let i = 0; i < MUSCLE_VOLUMES.length; i++) {
+        const item = MUSCLE_VOLUMES[i];
+        const p1 = projected[item.j1];
+        const p2 = projected[item.j2];
+        if (p1 && p2) {
+            renderItems.push({
+                type: "muscle",
+                data: item,
+                p1: p1,
+                p2: p2,
+                avgZ: (p1.z + p2.z) * 0.5
+            });
+        }
+    }
+
+    // 躯干实体多边形 (胸肌与腹肌块)
+    const sL = projected.l_shoulder, sR = projected.r_shoulder;
+    const hL = projected.l_hip, hR = projected.r_hip;
+    const st = projected.sternum, pv = projected.pelvis;
+    if (sL && sR && hL && hR && st && pv) {
+        renderItems.push({
+            type: "torso",
+            sL: sL, sR: sR, hL: hL, hR: hR, st: st, pv: pv,
+            avgZ: (st.z + pv.z) * 0.5
+        });
+    }
+
+    // 按 Z 深度降序排序（Z 越大距离视线越远，先绘制）
+    renderItems.sort(function(a, b) { return b.avgZ - a.avgZ; });
+
+    // 7. 执行排序后的 3D 肢体渲染
+    for (let i = 0; i < renderItems.length; i++) {
+        const it = renderItems[i];
+        if (it.type === "muscle") {
+            const m = it.data;
+            drawMuscleCapsule(it.p1, it.p2, m.r1, m.r2, m.rMid, m.type);
+        } else if (it.type === "torso") {
+            // 绘制立体肌肉胸腔与核心腹肌体块
+            g.beginPath();
+            g.moveTo(it.sL.x, it.sL.y);
+            g.lineTo(it.sR.x, it.sR.y);
+            g.lineTo(it.hR.x, it.hR.y);
+            g.lineTo(it.pv.x, it.pv.y);
+            g.lineTo(it.hL.x, it.hL.y);
+            g.closePath();
+
+            const tGrd = g.createLinearGradient(it.st.x, it.st.y - 20, it.pv.x, it.pv.y + 10);
+            tGrd.addColorStop(0, "#059669");
+            tGrd.addColorStop(0.35, "#10B981");
+            tGrd.addColorStop(0.7, "#047857");
+            tGrd.addColorStop(1, "#064E3B");
+            g.fillStyle = tGrd;
+            g.fill();
+
+            // 胸大肌两片轮廓线
+            g.strokeStyle = "rgba(255, 255, 255, 0.28)";
+            g.lineWidth = 1.5;
+            g.beginPath();
+            g.moveTo(it.sL.x + (it.st.x - it.sL.x) * 0.5, it.sL.y + (it.st.y - it.sL.y) * 0.5);
+            g.quadraticCurveTo(it.st.x, it.st.y, it.sR.x + (it.st.x - it.sR.x) * 0.5, it.sR.y + (it.st.y - it.sR.y) * 0.5);
+            g.stroke();
+        }
+    }
+
+    // 8. 绘制 3D 关节球铰链
+    const jointRadius = {
+        l_shoulder: 10, r_shoulder: 10,
+        l_elbow: 7, r_elbow: 7,
+        l_wrist: 6, r_wrist: 6,
+        l_hip: 12, r_hip: 12,
+        l_knee: 10, r_knee: 10,
+        l_ankle: 7, r_ankle: 7
+    };
+    for (const jn in jointRadius) {
+        if (projected[jn]) {
+            drawJointSphere(projected[jn], jointRadius[jn], false);
+        }
+    }
+
+    // 9. 绘制 3D 头部与面罩视线 (Head Sphere with Visor)
+    const hd = projected.head;
+    if (hd) {
+        const hRad = W * 0.056 * hd.scale;
+        const hdGrd = g.createRadialGradient(hd.x - hRad * 0.35, hd.y - hRad * 0.35, hRad * 0.1, hd.x, hd.y, hRad);
+        hdGrd.addColorStop(0, "#A7F3D0");
+        hdGrd.addColorStop(0.4, "#10B981");
+        hdGrd.addColorStop(0.85, "#047857");
+        hdGrd.addColorStop(1, "#064E3B");
+        g.fillStyle = hdGrd;
+        g.beginPath();
+        g.arc(hd.x, hd.y, hRad, 0, Math.PI * 2);
+        g.fill();
+
+        // 视向 HUD 护目镜面线 (随着偏航角度偏转)
+        const lookOffset = Math.sin(yaw) * hRad * 0.5;
+        g.strokeStyle = "#38BDF8";
+        g.lineWidth = 2.5 * hd.scale;
+        g.lineCap = "round";
+        g.beginPath();
+        g.moveTo(hd.x - hRad * 0.5 + lookOffset, hd.y - hRad * 0.1);
+        g.lineTo(hd.x + hRad * 0.5 + lookOffset, hd.y - hRad * 0.1);
+        g.stroke();
+    }
+
+    // 10. 绘制盆骨重心指示球 (Center of Mass)
+    if (pel) {
+        drawJointSphere(pel, 8, true);
+    }
+
+    // 11. HUD 文本状态反馈：实时更新相位与发力肌群
+    const phaseEl = document.getElementById("ex-phase-text");
+    if (phaseEl) {
+        phaseEl.textContent = isConcentric ? "向心收缩 (爆发发力)" : "离心控制 (匀速还原)";
+    }
+    const phaseBadge = document.getElementById("ex-phase-badge");
+    if (phaseBadge) {
+        phaseBadge.style.color = isConcentric ? "#34D399" : "#38BDF8";
+        phaseBadge.style.borderColor = isConcentric ? "rgba(16, 185, 129, 0.4)" : "rgba(56, 189, 248, 0.4)";
+    }
+
+    // 画布内置 HUD 辅助信息
+    g.fillStyle = "rgba(148, 163, 184, 0.85)";
+    g.font = "11px system-ui, -apple-system, sans-serif";
     const meta = EX_ARCHETYPES[arch] || EX_ARCHETYPES.plank;
-    g.fillStyle = "#94A3B8"; g.fillText(meta.cn + " · " + (meta.view === "side" ? "侧面" : meta.view === "back" ? "仰卧" : "正面"), 10, 18);
+    g.fillText(meta.cn + " · 标准3D生物力学解算", 12, H - 12);
 }
 
 let exAnim = null;
@@ -2852,7 +3316,7 @@ function closeExerciseDetail() {
     if (m) m.classList.remove("show");
 }
 
-/** 打开详情：名称、组数、要点、常见错误、动画、慢放开关。 */
+/** 打开详情：3D人物标准动作展示、要点分解、避坑指南、多视角切换与慢放。 */
 function openExerciseDetail(idx) {
     const list = window.__currentExercises || [];
     const item = list[idx];
@@ -2863,20 +3327,42 @@ function openExerciseDetail(idx) {
     const poseKey = currentExKey(idx);
     const nameEl = document.getElementById("ex-detail-name");
     const repsEl = document.getElementById("ex-detail-reps");
+    const targetMuscleEl = document.getElementById("ex-detail-target-muscle");
     const stepsEl = document.getElementById("ex-detail-steps");
     const wrongEl = document.getElementById("ex-detail-wrong");
     const cv = document.getElementById("ex-detail-canvas");
     if (!nameEl || !cv) return;
 
     nameEl.textContent = String(item.name || "").replace(/^\d+\.\s*/, "");
-    repsEl.textContent = item.reps || "";
+    repsEl.textContent = item.reps || "10-12次 × 4组";
+
+    const activeCfg = ACTIVE_MUSCLES[arch] || { name: "背阔肌 · 上背核心肌群" };
+    if (targetMuscleEl) {
+        targetMuscleEl.textContent = "🔥 核心发力：" + activeCfg.name;
+    }
+
     const steps = (meta.steps || []);
     stepsEl.innerHTML = steps.length
-        ? steps.map(function (x, i) { return "<li>" + (i + 1) + ". " + escapeHtml(x) + "</li>"; }).join("")
-        : "<li>这个动作还没有分解要点记录</li>";
-    wrongEl.innerHTML = meta.wrong
-        ? "常见错误：" + escapeHtml(meta.wrong)
-        : "暂无常见错误条目";
+        ? steps.map(function (x, i) {
+            const cleanText = String(x).replace(/^(\d+[\.、\s]+)+/, "").trim();
+            return "<li><span class='step-badge'>" + (i + 1) + "</span><span class='step-text'>" + escapeHtml(cleanText) + "</span></li>";
+        }).join("")
+        : "<li><span class='step-badge'>1</span><span class='step-text'>这个动作还没有分解要点记录</span></li>";
+
+    const rawWrong = meta.wrong || "";
+    const cleanWrong = String(rawWrong).replace(/^常见错误[：:]\s*/, "").trim();
+    wrongEl.innerHTML = cleanWrong
+        ? escapeHtml(cleanWrong)
+        : "暂无常见错误记录，保持核心收紧呼吸顺畅即可。";
+
+    // 绑定 3D 画布触控与拖拽旋转事件
+    bindCanvas3DInteractions(cv);
+
+    // 重置 3D 摄像机为 45° 黄金立体透视
+    setEx3DAngle("3d");
+    ex3DCamera.paused = false;
+    const playBtn = document.getElementById("ex-detail-play");
+    if (playBtn) playBtn.textContent = "⏸️ 暂停";
 
     const modal = document.getElementById("ex-detail-modal");
     modal.classList.add("show");
@@ -2884,12 +3370,21 @@ function openExerciseDetail(idx) {
     const g = cv.getContext("2d");
     if (!g) { callNativeToast("这台设备的画布不可用，动画放不出来"); return; }
     if (exAnim) cancelAnimationFrame(exAnim.raf);
-    const start = Date.now();
+    let lastTime = Date.now();
+    let currentT = 0;
     exAnim = { raf: 0, slow: false };
     const loop = function () {
         if (!exAnim) return;
-        const speed = exAnim.slow ? 0.35 : 1;
-        const t = (((Date.now() - start) / 2600) * speed) % 1;
+        const now = Date.now();
+        const dt = now - lastTime;
+        lastTime = now;
+
+        if (!ex3DCamera.paused) {
+            const speed = exAnim.slow ? 0.35 : 1.0;
+            currentT = (currentT + (dt / 2600) * speed) % 1.0;
+        }
+
+        const t = currentT;
         drawFrame(g, cv.width, cv.height, poseFromTable(poseKey, arch, t), arch, t);
         exAnim.raf = requestAnimationFrame(loop);
     };

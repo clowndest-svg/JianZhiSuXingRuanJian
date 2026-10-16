@@ -754,10 +754,11 @@ body {
     background: #FFFFFF;
     border-radius: var(--radius-lg);
     width: 100%;
-    max-width: 380px;
+    max-width: 420px;
     max-height: 90vh;
     overflow-y: auto;
-    box-shadow: var(--shadow-lg);
+    -webkit-overflow-scrolling: touch;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
     animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     border: 1px solid var(--border);
 }
@@ -768,14 +769,15 @@ body {
 }
 
 .modal-header {
-    padding: 16px 18px 12px;
+    padding: 16px 20px 14px;
     border-bottom: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
     align-items: center;
     position: sticky;
     top: 0;
-    background: #FFFFFF;
+    background: rgba(255, 255, 255, 0.97);
+    backdrop-filter: blur(8px);
     z-index: 10;
 }
 
@@ -789,18 +791,24 @@ body {
     background: #F1F5F9;
     border: none;
     border-radius: 50%;
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
     font-size: 15px;
     color: var(--text-muted);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: all 0.2s;
+}
+
+.modal-close-btn:hover {
+    background: #E2E8F0;
+    color: #0F172A;
 }
 
 .modal-body {
-    padding: 16px 18px;
+    padding: 18px 20px 24px;
 }
 
 .form-group {
@@ -1737,11 +1745,13 @@ body {
     100% { transform: scale(1.15); opacity: 0; }
 }
 
-/* 下载弹窗特定样式 */
+/* 下载弹窗特定样式：支持触控平滑滚动，严防窄屏内容截断 */
 .download-modal-card {
-    max-width: 420px;
+    max-width: 440px;
     border-radius: var(--radius-lg);
-    overflow: hidden;
+    max-height: 90vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .qr-container-card {
@@ -2054,6 +2064,11 @@ body.desktop-view #panel-charts > .card {
     display: inline-block;
     width: 100%;
 }
+/* 电脑版各弹窗排版优化：适度放宽宽度，提供更开阔呼吸感，严防内容挤压 */
+body.desktop-view .modal-card { max-width: 480px; }
+body.desktop-view #profile-modal .modal-card { max-width: 520px; }
+body.desktop-view .download-modal-card { max-width: 460px; }
+body.desktop-view .ex-detail { max-width: 500px; }
 body.desktop-view .app-header { max-width: 1120px; margin: 0 auto; }
 
 /* 电脑版顶部导航栏 */
@@ -2426,31 +2441,323 @@ header *, .header-tools, .header-row-1 {
 .public-refresh-stamp.bad { color: #DC2626; white-space: normal; }
 .pub-tools-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .pub-tools-note { margin-top: 8px; font-size: 11px; color: #94A3B8; line-height: 1.5; }
-/* 第五批后续：动作详情层 */
-.ex-detail { max-width: 420px; }
-.exd-head { display: flex; align-items: flex-start; gap: 10px; }
-.exd-name { font-size: 16px; font-weight: 800; color: #0F172A; }
-.exd-reps { font-size: 12px; color: #059669; font-weight: 700; margin-top: 2px; }
+/* ================= 3D 人物动作全息演示系统与弹窗全面排版升级 ================= */
+.ex-detail {
+    max-width: 480px;
+    padding: 20px 20px 28px;
+    border-radius: var(--radius-lg);
+    background: #FFFFFF;
+    box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+}
+.exd-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+}
+.exd-head-info {
+    flex: 1;
+    min-width: 0;
+}
+.exd-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.exd-badge-3d {
+    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+    color: #FFFFFF;
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 7px;
+    border-radius: 99px;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 6px rgba(16, 185, 129, 0.25);
+}
+.exd-name {
+    font-size: 17px;
+    font-weight: 800;
+    color: #0F172A;
+    line-height: 1.3;
+}
+.exd-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+}
+.exd-reps {
+    font-size: 12px;
+    color: #059669;
+    font-weight: 700;
+    background: #ECFDF5;
+    padding: 2px 8px;
+    border-radius: 6px;
+    border: 1px solid #A7F3D0;
+}
+.exd-target-muscle {
+    font-size: 11px;
+    color: #0284C7;
+    font-weight: 700;
+    background: #F0F9FF;
+    padding: 2px 8px;
+    border-radius: 6px;
+    border: 1px solid #BAE6FD;
+}
 .exd-close {
-    margin-left: auto;
-    width: 30px; height: 30px;
-    border: none; border-radius: 50%;
-    background: #F1F5F9; color: #475569;
-    font-size: 20px; line-height: 1;
-    flex: 0 0 30px; cursor: pointer;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 50%;
+    background: #F1F5F9;
+    color: #64748B;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+.exd-close:hover {
+    background: #E2E8F0;
+    color: #0F172A;
+}
+
+/* 3D 动作视口容器 */
+.exd-viewport-box {
+    position: relative;
+    width: 100%;
+    border-radius: 16px;
+    overflow: hidden;
+    background: radial-gradient(ellipse at 50% 25%, #1E293B 0%, #0A0F1D 100%);
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    margin-bottom: 12px;
+    cursor: grab;
+    user-select: none;
+}
+.exd-viewport-box:active {
+    cursor: grabbing;
 }
 .exd-canvas {
     display: block;
     width: 100%;
-    max-width: 300px;
     height: auto;
-    margin: 10px auto;
-    border-radius: 12px;
-    background: #0B1220;
+    aspect-ratio: 340 / 360;
+    margin: 0 auto;
 }
-.exd-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
-.exd-note { flex: 1 1 160px; font-size: 10.5px; color: #94A3B8; line-height: 1.5; }
-.exd-steps { margin: 0 0 8px 18px; padding: 0; font-size: 12.5px; color: #334155; line-height: 1.7; }
+.exd-viewport-overlay {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    pointer-events: none;
+}
+.exd-view-indicator {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 99px;
+    padding: 3px 10px;
+    font-size: 10.5px;
+    color: #E2E8F0;
+    font-weight: 600;
+}
+.exd-phase-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    backdrop-filter: blur(6px);
+    border-radius: 99px;
+    padding: 3px 10px;
+    font-size: 11px;
+    color: #34D399;
+    font-weight: 700;
+}
+.phase-dot {
+    width: 6px;
+    height: 6px;
+    background: #34D399;
+    border-radius: 50%;
+    box-shadow: 0 0 6px #34D399;
+    animation: pulseDot 1.4s infinite ease-in-out;
+}
+@keyframes pulseDot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+/* 3D 视角切换栏 */
+.exd-camera-bar {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 6px;
+    background: rgba(15, 23, 42, 0.82);
+    backdrop-filter: blur(8px);
+    padding: 4px 6px;
+    border-radius: 99px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    z-index: 5;
+}
+.exd-cam-btn {
+    background: transparent;
+    border: none;
+    color: #94A3B8;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 99px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.exd-cam-btn:hover {
+    color: #FFFFFF;
+    background: rgba(255, 255, 255, 0.1);
+}
+.exd-cam-btn.active {
+    background: #10B981;
+    color: #FFFFFF;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
+}
+
+/* 动作播放控制栏 */
+.exd-ctl {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 8px 12px;
+}
+.exd-ctl-btns {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.btn-exd-ctl {
+    border: 1px solid #CBD5E1;
+    background: #FFFFFF;
+    color: #1E293B;
+    border-radius: 99px;
+    padding: 5px 12px;
+    font-size: 11.5px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.btn-exd-ctl:hover {
+    background: #F1F5F9;
+    border-color: #94A3B8;
+}
+.exd-note {
+    font-size: 11px;
+    color: #64748B;
+    line-height: 1.5;
+    flex: 1;
+}
+
+/* 分解步骤 */
+.exd-section-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: #1E293B;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.exd-steps {
+    list-style: none;
+    margin: 0 0 12px 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.exd-steps li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 12.5px;
+    color: #334155;
+    line-height: 1.55;
+}
+.step-badge {
+    flex: 0 0 22px;
+    height: 22px;
+    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+    color: #FFFFFF;
+    font-size: 11.5px;
+    font-weight: 800;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 1px;
+    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+}
+.step-text {
+    flex: 1;
+}
+
+/* 常见错误重点避坑卡片 (绝不遮挡、不贴底) */
+.ex-wrong-card {
+    background: #FFFBEB;
+    border: 1px solid #FDE68A;
+    border-radius: 12px;
+    padding: 10px 14px 12px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+.exw-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+.exw-icon {
+    font-size: 15px;
+}
+.exw-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #92400E;
+}
+.ex-wrong {
+    font-size: 12px;
+    color: #B45309;
+    line-height: 1.6;
+    margin-top: 0;
+    background: transparent;
+    border-radius: 0;
+    padding: 0;
+}
 .ex-btn.ghost { background: #F1F5F9; color: #475569; }
 
 /* 疑似旧默认身体数据的核对横幅 */

@@ -1264,23 +1264,72 @@
         <span class="floating-dl-text">下载App</span>
     </div>
 
-    <!-- 动作详情：要点 + 常见错误 + 程序化示意动画。动画是本机画的骨骼，不是真人视频 -->
+    <!-- 动作详情：3D 人物标准动作演示模块与要点避坑 -->
     <div class="modal-overlay" id="ex-detail-modal">
         <div class="modal-card ex-detail">
+            <!-- 头部：动作名称与组数 -->
             <div class="exd-head">
-                <div>
-                    <div class="exd-name" id="ex-detail-name">动作</div>
-                    <div class="exd-reps" id="ex-detail-reps"></div>
+                <div class="exd-head-info">
+                    <div class="exd-title-row">
+                        <span class="exd-badge-3d">3D 动作教练</span>
+                        <div class="exd-name" id="ex-detail-name">动作</div>
+                    </div>
+                    <div class="exd-meta-row">
+                        <span class="exd-reps" id="ex-detail-reps">10-12次 × 4组</span>
+                        <span class="exd-target-muscle" id="ex-detail-target-muscle">🔥 目标受力：核心肌群</span>
+                    </div>
                 </div>
-                <button type="button" class="exd-close" onclick="closeExerciseDetail()">×</button>
+                <button type="button" class="exd-close" onclick="closeExerciseDetail()" aria-label="关闭">×</button>
             </div>
-            <canvas id="ex-detail-canvas" class="exd-canvas" width="300" height="330"></canvas>
+
+            <!-- 3D 动作视口容器 -->
+            <div class="exd-viewport-box">
+                <canvas id="ex-detail-canvas" class="exd-canvas" width="340" height="360"></canvas>
+                
+                <!-- 3D 悬浮视口提示与 HUD -->
+                <div class="exd-viewport-overlay">
+                    <div class="exd-view-indicator">
+                        <span class="exd-view-icon">🔄</span>
+                        <span id="ex-view-angle-text">3D 自由视角 (画面可拖拽旋转)</span>
+                    </div>
+                    <div class="exd-phase-badge" id="ex-phase-badge">
+                        <span class="phase-dot"></span>
+                        <span id="ex-phase-text">向心收缩</span>
+                    </div>
+                </div>
+
+                <!-- 3D 视角快速切换工具栏 -->
+                <div class="exd-camera-bar">
+                    <button type="button" class="exd-cam-btn active" id="cam-btn-3d" onclick="setEx3DAngle('3d')">📐 立体视角</button>
+                    <button type="button" class="exd-cam-btn" id="cam-btn-front" onclick="setEx3DAngle('front')">🎯 正面</button>
+                    <button type="button" class="exd-cam-btn" id="cam-btn-side" onclick="setEx3DAngle('side')">🔍 侧面</button>
+                    <button type="button" class="exd-cam-btn" id="cam-btn-reset" onclick="resetEx3DAngle()">🔄 重置</button>
+                </div>
+            </div>
+
+            <!-- 播放控制栏 -->
             <div class="exd-ctl">
-                <button type="button" class="btn-secondary" id="ex-detail-slow" onclick="toggleExDetailSlow()">慢放：关</button>
-                <span class="exd-note">骨骼动画由本应用按关键帧实时绘制，用于看发力顺序与幅度，不是真人示范视频。</span>
+                <div class="exd-ctl-btns">
+                    <button type="button" class="btn-exd-ctl" id="ex-detail-play" onclick="toggleExDetailPlay()">⏸️ 暂停</button>
+                    <button type="button" class="btn-secondary" id="ex-detail-slow" onclick="toggleExDetailSlow()">慢放：关</button>
+                </div>
+                <span class="exd-note">3D生物力学人体解算用于看发力顺序与幅度，不是真人示范视频；按住拖拽画面可360°旋转多角度检视。</span>
+            </div>
+
+            <!-- 动作规范分解步骤 -->
+            <div class="exd-section-title">
+                <span>📋 标准动作分解要点</span>
             </div>
             <ol class="exd-steps" id="ex-detail-steps"></ol>
-            <div class="ex-wrong" id="ex-detail-wrong"></div>
+
+            <!-- 常见错误避坑提示 (有独立卡片容器与警示图标，绝不贴底遮挡) -->
+            <div class="ex-wrong-card" id="ex-detail-wrong-box">
+                <div class="exw-header">
+                    <span class="exw-icon">⚠️</span>
+                    <span class="exw-title">常见错误重点避坑：</span>
+                </div>
+                <div class="ex-wrong" id="ex-detail-wrong"></div>
+            </div>
         </div>
     </div>
 
