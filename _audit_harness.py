@@ -1103,6 +1103,149 @@ def main():
               or "WEB_DIR" in vsrc, "路由里疑似硬编版本")
         q("DELETE FROM kb_entries")
 
+    # ============ r124 第八批：审另一个 Agent 交付的四个提交 ============
+    # 这一批的每条都对应实测抓到的一个真缺陷；旧版没有对应实现时必须记红，
+    # 不然 --mutant 会把它洗成"没测"。
+    import time
+
+    def soft(name, fn):
+        try:
+            v = fn()
+            check(name, bool(v[0]) if isinstance(v, tuple) else bool(v),
+                  v[1] if isinstance(v, tuple) else "")
+        except AttributeError as e:
+            check(name, False, "该版本没有对应实现: %s" % e)
+        except Exception as e:
+            check(name, False, "%s: %s" % (type(e).__name__, str(e)[:110]))
+
+    psrc = srv_txt[srv_txt.index("def parse_food_nutrition"):][:3400] \
+        if "def parse_food_nutrition" in srv_txt else ""
+    check("打卡估算函数存在", bool(psrc), "该版本没有 parse_food_nutrition")
+    check("打卡不拦本机模型", bool(psrc) and "llm_chat" not in psrc and "llm_ready" not in psrc,
+          psrc[:100] if psrc else "")
+    check("成分表不冒充国家权威表", bool(psrc) and "中国食物成分表" not in psrc and "精准核算" not in psrc,
+          [w for w in ("中国食物成分表", "精准核算") if psrc and w in psrc])
+
+    def f_partial():
+        r = m.log_food(m.FoodLogReq(slot="午餐", food_name="香菜牛肉拌面加煎蛋"), user=user)
+        return (r.get("source") == "nutrition_kb_partial"
+                and "可能比这个数高" in r.get("reason", "")
+                and "AI" not in r.get("msg", "")), r
+    soft("只认出一部分食材时如实说偏低", f_partial)
+
+    def f_heur():
+        r = m.log_food(m.FoodLogReq(slot="早餐", food_name="杂粮南瓜粥配腐乳"), user=user)
+        return (r.get("source") == "nutrition_heuristic"
+                and "粗估" in r.get("reason", "")
+                and r.get("source") != "ai_model"), r
+    soft("成分表没有的菜名走关键词粗估", f_heur)
+
+    def f_kbhit():
+        r = m.log_food(m.FoodLogReq(slot="早餐", food_name="茶叶蛋、纯牛奶"), user=user)
+        return (r.get("source") == "nutrition_kb" and r.get("cal") == 205
+                and abs(r.get("protein_g", 0) - 13.0) < 0.01), r
+    soft("两样都认得出时按成分表相加", f_kbhit)
+
+    def f_speed():
+        # 计时在这套判据里量不出来：模型不通时旧代码本来就跳过 AI 分支，
+        # 两边都"很快"。所以把模型装成"随时可用"，再用探针数它被调用了几次。
+        real_chat, real_ready = getattr(m, "llm_chat", None), getattr(m, "llm_ready", None)
+        calls = []
+        m.llm_chat = lambda *a, **k: (calls.append(1), "{}")[1]
+        m.llm_ready = lambda: True
+        try:
+            r = m.log_food(m.FoodLogReq(slot="加餐", food_name="鸡胸肉沙拉"), user=user)
+        finally:
+            m.llm_chat, m.llm_ready = real_chat, real_ready
+        return (len(calls) == 0 and r.get("source") != "ai_model"),                "模型被叫了 %d 次, source=%s" % (len(calls), r.get("source"))
+    soft("打卡链路一次都不叫模型", f_speed)
+
+    def f_habits():
+        d = m.get_habits(user=user)
+        rows = d.get("days") or []
+        today = date.today().isoformat()
+        return (len(rows) == 30 and d.get("window") == 30 and rows[-1]["date"] == today
+                and all(set(("date", "consumed", "burned", "deficit")) <= set(r) for r in rows)), \
+               "len=%s last=%s" % (len(rows), rows[-1]["date"] if rows else "-")
+    soft("自律矩阵后端真给 30 天", f_habits)
+
+    def f_same_rule():
+        # 正向对照：7 天柱图与 30 天矩阵必须是同一份算法出来的，两边都从 _deficit_rows 取
+        bar = m.compute_charts_data(user)["deficit_history"]
+        mat = m.get_habits(user=user)["days"][-7:]
+        return (len(bar) == 7 and bar == mat), "柱图=%s 矩阵尾=%s" % (bar[-1], mat[-1])
+    soft("柱图与矩阵同口径", f_same_rule)
+
+    def f_table():
+        cols = [r["name"] for r in q("PRAGMA table_info(cheers)")]
+        return ("sender_hash" in cols and "cheer_date" in cols and "kind" in cols), cols
+    soft("打气落到服务端表里", f_table)
+
+    def f_cheer_dedup():
+        m.rate_reset("cheer:5.5.5.5"); m.rate_reset("pub:5.5.5.5")
+        before = q("SELECT COUNT(*) AS n FROM cheers WHERE user_id=?", (user["id"],))[0]["n"]
+        a = m.post_cheer(m.CheerReq(username=uname, k=okk, kind="稳步减脂"), request=m.Request("5.5.5.5"))
+        b = m.post_cheer(m.CheerReq(username=uname, k=okk, kind="稳步减脂"), request=m.Request("5.5.5.5"))
+        c2 = m.post_cheer(m.CheerReq(username=uname, k=okk, kind="喝水达人"), request=m.Request("5.5.5.5"))
+        after = q("SELECT COUNT(*) AS n FROM cheers WHERE user_id=?", (user["id"],))[0]["n"]
+        return (a["total"] == before + 1 and b["total"] == before + 1
+                and c2["total"] == before + 2 and after == before + 2), \
+               "before=%s a=%s b=%s c=%s after=%s" % (before, a["total"], b["total"], c2["total"], after)
+    soft("同一设备同款打气一天只算一枚", f_cheer_dedup)
+
+    def f_cheer_counts():
+        other = q("SELECT COUNT(*) AS n FROM cheers WHERE user_id<>?", (user["id"],))[0]["n"]
+        return (other == 0,), "别的账号被写进了 %s 条" % other
+    soft("打气只写进被分享的那个人", f_cheer_counts)
+
+    def f_cheer_kind():
+        m.rate_reset("cheer:6.6.6.6"); m.rate_reset("pub:6.6.6.6")
+        try:
+            m.post_cheer(m.CheerReq(username=uname, k=okk, kind="<img src=x>"), request=m.Request("6.6.6.6"))
+            return False, "非白名单徽章被接受了"
+        except Exception as e:
+            return getattr(e, "status_code", 0) == 400, repr(e)[:120]
+    soft("打气文案只认白名单", f_cheer_kind)
+
+    def f_cheer_key():
+        m.rate_reset("cheer:6.6.6.7"); m.rate_reset("pub:6.6.6.7")
+        codes = []
+        for kk in (None, "wrongwrongwr"):
+            try:
+                m.post_cheer(m.CheerReq(username=uname, k=kk, kind="稳步减脂"), request=m.Request("6.6.6.7"))
+                codes.append(200)
+            except Exception as e:
+                codes.append(getattr(e, "status_code", 0))
+        return (codes == [404, 404]), codes
+    soft("没密钥或密钥错送不出打气且不泄露用户名", f_cheer_key)
+
+    def f_pub_total():
+        m.rate_reset("cheer:6.6.6.8"); m.rate_reset("pub:6.6.6.8"); m.rate_reset("pub:6.6.6.9")
+        m.post_cheer(m.CheerReq(username=uname, k=okk, kind="肌肉在生长"), request=m.Request("6.6.6.8"))
+        n = q("SELECT COUNT(*) AS n FROM cheers WHERE user_id=?", (user["id"],))[0]["n"]
+        d = m.get_public_dashboard(username=uname, k=okk, request=m.Request("6.6.6.9"))
+        return (int(d.get("cheer_total", -1)) == n), "屏上=%s 库里=%s" % (d.get("cheer_total"), n)
+    soft("公开大屏读到的打气数就是库里的数", f_pub_total)
+
+    def f_cheer_limit():
+        m.rate_reset("cheer:6.6.6.10"); m.rate_reset("pub:6.6.6.10")
+        got = []
+        for i in range(34):
+            try:
+                m.post_cheer(m.CheerReq(username=uname, k=okk, kind="饮食超干净"),
+                             request=m.Request("6.6.6.10"))
+                got.append(200)
+            except Exception as e:
+                got.append(getattr(e, "status_code", 0))
+        return (got.count(200) >= 5 and 429 in got), "成功 %d 次 / %s" % (got.count(200), got[-3:])
+    soft("同一设备狂点会被限流", f_cheer_limit)
+
+    try:
+        q("DELETE FROM cheers")
+    except Exception:
+        pass
+    m.rate_reset_all_ask()
+
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (
         "变异样本(HEAD 改动前)" if mutant else "当前源码",

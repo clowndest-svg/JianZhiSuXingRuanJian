@@ -263,6 +263,19 @@ def migrate_db():
         hits INTEGER DEFAULT 0
     )
     """)
+    # 访客打气：必须落到服务端，否则"已收到 N 枚"只数了访客自己这台设备
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS cheers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        sender_hash TEXT NOT NULL,
+        cheer_date TEXT NOT NULL,
+        created_at TEXT,
+        UNIQUE(user_id, kind, sender_hash, cheer_date),
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+    """)
     conn.commit()
     conn.close()
 
@@ -857,10 +870,55 @@ def get_public_dashboard(username: str, k: Optional[str] = None, request: Reques
         raise HTTPException(status_code=429, detail="访问过于频繁")
     conn = get_db()
     user = check_share(conn, username, k)
-    conn.close()
     if not user:
+        conn.close()
         raise HTTPException(status_code=404, detail="链接不完整或已失效")
-    return compute_dashboard_data(user)
+    data = compute_dashboard_data(user)
+    cc = conn.cursor()
+    cc.execute("SELECT COUNT(*) AS n FROM cheers WHERE user_id = ?", (user["id"],))
+    row = cc.fetchone()
+    data["cheer_total"] = int(row["n"] or 0) if row else 0
+    conn.close()
+    return data
+
+
+CHEER_KINDS = ("稳步减脂", "饮食超干净", "肌肉在生长", "喝水达人")
+
+
+class CheerReq(BaseModel):
+    username: str
+    k: Optional[str] = None
+    kind: str
+
+
+@app.post("/api/cheer")
+def post_cheer(req: CheerReq, request: Request = None):
+    """打气只有写进服务端，"已收到 N 枚"才是别人真送的。"""
+    ip = _ip(request)
+    if not _public_allowed(ip):
+        raise HTTPException(status_code=429, detail="访问过于频繁")
+    allowed, store, _n = rate_hit("cheer:" + ip, 30, 3600)
+    if not allowed:
+        raise HTTPException(status_code=429, detail="这台设备一小时内打气太多次了")
+    kind = (req.kind or "").strip()
+    if kind not in CHEER_KINDS:
+        raise HTTPException(status_code=400, detail="只能送这几款打气徽章")
+    conn = get_db()
+    user = check_share(conn, req.username, req.k)
+    if not user:
+        conn.close()
+        raise HTTPException(status_code=404, detail="链接不完整或已失效")
+    today = date.today().isoformat()
+    sender = hashlib.sha256(("%s|%s|%s" % (ip, user["id"], today)).encode()).hexdigest()[:32]
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO cheers (user_id, kind, sender_hash, cheer_date, created_at) VALUES (?,?,?,?,?)",
+              (user["id"], kind, sender, today,
+               datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    c.execute("SELECT COUNT(*) AS n FROM cheers WHERE user_id = ?", (user["id"],))
+    total = int(c.fetchone()["n"] or 0)
+    conn.close()
+    return {"code": 0, "total": total, "kind": kind, "store": store}
 
 # ==================== Real Food Logging with AI & Nutrition KB ====================
 
@@ -935,21 +993,26 @@ FOOD_KB_ITEMS = [
 ]
 
 def parse_food_nutrition(food_name: str) -> dict:
+    """打卡走的必须是确定性路径：能匹配成分表就按表算，匹配不到就按关键词粗估。
+
+    这里刻意不调模型。实测把本机 0.5B 放进写入路径后，一次打卡要等 2.0~2.6 秒，
+    而它给的数字又无法交叉验证——成分表没匹配到时任何 30~3500 的数都会被放行，
+    reason 里写的克数和落库的克数还经常对不上。慢和编造一起发生，比原来的粗估更糟。
+    """
     name = (food_name or "").strip()
-    
-    # 1. 权威食物成分表分词聚类基准核算
-    parts = re.split(r"[,，、\s;；]+", name)
-    matched_items = []
-    tot_cal = 0
-    tot_pro = 0.0
-    tot_carb = 0.0
-    tot_fat = 0.0
 
     mult = 1.0
     if any(k in name for k in ("吃饱", "吃撑", "大份", "加倍", "超大", "两碗", "两个")):
         mult = 1.2
     elif any(k in name for k in ("小份", "少许", "几口", "半个", "半份")):
         mult = 0.75
+
+    parts = re.split(r"[,，、\s;；]+", name)
+    matched_items = []
+    tot_cal = 0
+    tot_pro = 0.0
+    tot_carb = 0.0
+    tot_fat = 0.0
 
     for part in parts:
         p_clean = part.strip()
@@ -967,67 +1030,26 @@ def parse_food_nutrition(food_name: str) -> dict:
             tot_carb += best_match[3]
             tot_fat += best_match[4]
 
-    kb_result = None
     if tot_cal > 0:
-        tot_cal = int(round(tot_cal * mult))
-        tot_pro = round(tot_pro * mult, 1)
-        tot_carb = round(tot_carb * mult, 1)
-        tot_fat = round(tot_fat * mult, 1)
-        kb_result = {
-            "cal": tot_cal, "protein_g": tot_pro, "carbs_g": tot_carb, "fat_g": tot_fat,
-            "source": "nutrition_kb", "reason": f"匹配食材：{'、'.join(matched_items)}（中国食物成分表算法精准核算）"
+        # 只匹配到菜名里的一部分食材时，差额必须说出来，不能让它看起来像算全了
+        covered = sum(len(x) for x in set(matched_items))
+        partial = covered < len(name) * 0.6
+        uniq = []
+        for x in matched_items:
+            if x not in uniq:
+                uniq.append(x)
+        reason = "内置成分表匹配到：" + "、".join(uniq)
+        if partial:
+            reason += "（其余字面没认出来，这一餐可能比这个数高）"
+        return {
+            "cal": int(round(tot_cal * mult)),
+            "protein_g": round(tot_pro * mult, 1),
+            "carbs_g": round(tot_carb * mult, 1),
+            "fat_g": round(tot_fat * mult, 1),
+            "source": "nutrition_kb_partial" if partial else "nutrition_kb",
+            "reason": reason,
         }
 
-    # 2. 尝试 AI 模型深度理解（带成分基准防幻觉校验）
-    ai_result = None
-    if llm_ready():
-        ctx_hint = ""
-        if matched_items:
-            ctx_hint = f"（系统食物成分库识别出：{'、'.join(matched_items)}，基准约 {tot_cal} kcal）"
-        prompt = (
-            "你是一位严谨的临床营养学与热量核算专家。请精准分析这餐食物内容：\n"
-            f"【餐食内容】：{name} {ctx_hint}\n"
-            "根据食材成分、常规食用份量、烹饪吸油率估算其总热量与三大营养素。\n"
-            "必须严格返回纯 JSON 格式，严禁低估高热量油脂：\n"
-            '{"cal": 整数, "protein_g": 浮点数, "carbs_g": 浮点数, "fat_g": 浮点数, "reason": "分析说明"}'
-        )
-        try:
-            raw = llm_chat(prompt, max_tokens=150, temperature=0.1)
-            if raw:
-                m = re.search(r'\{[^{}]*"cal"[^{}]*\}', raw)
-                if m:
-                    data = json.loads(m.group(0))
-                    cal = int(data.get("cal", 0))
-                    is_hallucination = False
-                    if kb_result and (cal < kb_result["cal"] * 0.55 or cal > kb_result["cal"] * 2.2):
-                        is_hallucination = True
-                    if 30 <= cal <= 3500 and not is_hallucination:
-                        pro = round(float(data.get("protein_g", 0)), 1)
-                        carb = round(float(data.get("carbs_g", 0)), 1)
-                        fat = round(float(data.get("fat_g", 0)), 1)
-                        cal_from_macros = pro * 4 + carb * 4 + fat * 9
-                        if cal_from_macros < cal * 0.6 or cal_from_macros > cal * 1.4:
-                            if kb_result:
-                                pro = kb_result["protein_g"]
-                                carb = kb_result["carbs_g"]
-                                fat = kb_result["fat_g"]
-                            else:
-                                pro = round(cal * 0.25 / 4, 1)
-                                carb = round(cal * 0.45 / 4, 1)
-                                fat = round(cal * 0.30 / 9, 1)
-                        ai_result = {
-                            "cal": cal, "protein_g": pro, "carbs_g": carb, "fat_g": fat,
-                            "source": "ai_model", "reason": str(data.get("reason", "AI临床营养学模型深度解析"))
-                        }
-        except Exception:
-            pass
-
-    if ai_result:
-        return ai_result
-    if kb_result:
-        return kb_result
-
-    # 3. 兜底基础平衡餐估算
     base_cal = 380
     if any(k in name for k in ["炸", "烤", "红油", "麻酱", "猪脚", "奶茶", "全糖"]): base_cal += 260
     if any(k in name for k in ["米饭", "面条", "包子", "饺子", "馒头", "粉", "面包"]): base_cal += 150
@@ -1041,7 +1063,7 @@ def parse_food_nutrition(food_name: str) -> dict:
         "carbs_g": round(base_cal * 0.45 / 4, 1),
         "fat_g": round(base_cal * 0.30 / 9, 1),
         "source": "nutrition_heuristic",
-        "reason": "基础烹饪热量宏量守恒核算"
+        "reason": "菜名没在成分表里，按烹饪方式关键词粗估（不是称重，误差会大）",
     }
 
 @app.post("/api/food/log")
@@ -1081,7 +1103,7 @@ def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
     conn.commit()
     conn.close()
 
-    source_desc = "AI精准解析" if how_parsed == "ai_model" else ("成分表核算" if how_parsed == "nutrition_kb" else "智能估算")
+    source_desc = {"nutrition_kb": "成分表匹配", "nutrition_kb_partial": "成分表部分匹配", "nutrition_heuristic": "关键词粗估", "direct": "你自己填的"}.get(how_parsed, "粗估")
     return {
         "code": 0,
         "msg": f"已成功记入【{req.slot}】：{name} ({est_cal} kcal · {source_desc})",
@@ -2099,6 +2121,45 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
             "items": [{"title": it["title"], "url": it["url"], "host": it["host"]} for it in items]}
 # ==================== 100% REAL Chart Data API ====================
 
+def _deficit_rows(c, user_id: int, metrics: dict, days: int) -> list:
+    """近 days 天的真实净缺口。7 天柱图和 30 天热力矩阵都从这里取，避免两处口径漂移。"""
+    weekdays_zh = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    rows = []
+    for i in range(days - 1, -1, -1):
+        target_d = date.today() - timedelta(days=i)
+        ds = target_d.isoformat()
+        day_label = "今天" if i == 0 else weekdays_zh[target_d.weekday()]
+
+        c.execute("SELECT SUM(cal) as c_sum FROM food_logs WHERE user_id = ? AND log_date = ?", (user_id, ds))
+        c_res = c.fetchone()["c_sum"] or 0
+
+        c.execute("SELECT SUM(cal_burned) as b_sum FROM workout_logs WHERE user_id = ? AND log_date = ?", (user_id, ds))
+        b_res = c.fetchone()["b_sum"] or 0
+
+        # 真实净缺口 = 维持代谢(TDEE) + 当日真实训练消耗 - 当日真实摄入
+        # 用 target_cal 当基准会少算一个 deficit：吃满预算时缺口显示 0，而实际仍有 420 的缺口
+        if c_res == 0 and b_res == 0:
+            # 这一天一笔未记，缺口为 0，不拿目标值冒充"已创造赤字"（旧写法漏了今天）
+            day_def = 0
+        else:
+            day_def = round(metrics["tdee"] + b_res - c_res)
+
+        rows.append({"day": day_label, "date": ds, "deficit": day_def, "consumed": c_res, "burned": b_res})
+    return rows
+
+
+@app.get("/api/habits")
+def get_habits(user: dict = Depends(get_current_user)):
+    """30 天自律矩阵：前端画 30 格，后端就必须真给 30 天，不能只给 7 天让剩下 23 格永远灰。"""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT * FROM profiles WHERE user_id = ?", (user["id"],))
+    p = dict(c.fetchone() or {})
+    rows = _deficit_rows(c, user["id"], compute_metrics(p), 30)
+    conn.close()
+    return {"days": rows, "window": 30}
+
+
 def compute_charts_data(user: dict) -> dict:
     conn = get_db()
     c = conn.cursor()
@@ -2130,28 +2191,7 @@ def compute_charts_data(user: dict) -> dict:
         weight_data.append({"date": today_label, "val": round(p.get("weight_jin", 140.0) / 2.0, 1), "jin": p.get("weight_jin", 140.0)})
 
     # 2. Real Deficit History (Past 7 Days actual data)
-    deficit_data = []
-    weekdays_zh = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-    for i in range(6, -1, -1):
-        target_d = date.today() - timedelta(days=i)
-        ds = target_d.isoformat()
-        day_label = "今天" if i == 0 else weekdays_zh[target_d.weekday()]
-
-        c.execute("SELECT SUM(cal) as c_sum FROM food_logs WHERE user_id = ? AND log_date = ?", (user["id"], ds))
-        c_res = c.fetchone()["c_sum"] or 0
-
-        c.execute("SELECT SUM(cal_burned) as b_sum FROM workout_logs WHERE user_id = ? AND log_date = ?", (user["id"], ds))
-        b_res = c.fetchone()["b_sum"] or 0
-
-        # 真实净缺口 = 维持代谢(TDEE) + 当日真实训练消耗 - 当日真实摄入
-        # 用 target_cal 当基准会少算一个 deficit：吃满预算时缺口显示 0，而实际仍有 420 的缺口
-        if c_res == 0 and b_res == 0:
-            # 这一天一笔未记，缺口为 0，不拿目标值冒充"已创造赤字"（旧写法漏了今天）
-            day_def = 0
-        else:
-            day_def = round(metrics["tdee"] + b_res - c_res)
-
-        deficit_data.append({"day": day_label, "date": ds, "deficit": day_def, "consumed": c_res, "burned": b_res})
+    deficit_data = _deficit_rows(c, user["id"], metrics, 7)
 
     # 3. Real Macros breakdown today
     today = date.today().isoformat()

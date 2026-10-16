@@ -37,8 +37,9 @@ def main():
         "apk_url": "/qingsu.apk",
         "size": len(blob),
         "md5": hashlib.md5(blob).hexdigest(),
-        "notes": ("顾问接入本机模型与每用户长期记忆；身体数据不再由系统编造；"
-                  "App 启动自检通知权限；外卖面板显示真实使用情况；顶栏切换按钮改纯图标。"),
+        "notes": ("打卡改为纯本地计算，不再等模型（实测 0.1 秒内返回，不再出现自相矛盾的'AI 精准解析'）；"
+                  "30 天自律矩阵读满 30 天真数据并把没记录的天画成灰格；电脑版顶栏两颗点了白屏的按钮修好；"
+                  "动作弹窗画布按屏幕尺寸出图；访客打气改为服务端真实计数。"),
     }
     io.open(OUT, "w", encoding="utf-8", newline="").write(
         json.dumps(out, ensure_ascii=False, indent=1))

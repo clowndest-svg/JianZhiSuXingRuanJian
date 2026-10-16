@@ -56,9 +56,9 @@
             <button type="button" class="d-nav-item" data-tab="recipes" onclick="switchTab('recipes')">🥗 食谱与外卖</button>
             <button type="button" class="d-nav-item" data-tab="workout" onclick="switchTab('workout')">🏋️ 训练计划</button>
             <button type="button" class="d-nav-item" data-tab="body" onclick="switchTab('body')">📷 形体档案</button>
-            <button type="button" class="d-nav-item" data-tab="takeout-stats" onclick="switchTab('takeout-stats')">🚨 外卖拦截</button>
+            <button type="button" class="d-nav-item" data-tab="takeout" onclick="switchTab('takeout')">🚨 外卖拦截</button>
             <button type="button" class="d-nav-item" data-tab="charts" onclick="switchTab('charts')">📈 统计大图</button>
-            <button type="button" class="d-nav-item" data-tab="ai" onclick="switchTab('ai')">🤖 AI顾问</button>
+            <button type="button" class="d-nav-item" data-tab="gemini" onclick="switchTab('gemini')">🤖 AI顾问</button>
         </nav>
     </header>
 
@@ -592,7 +592,7 @@
             <div class="wb-block">
                 <div class="wb-h">④ 30天自律习惯热力矩阵：打卡轨迹可视化复盘</div>
                 <div class="wb-row" style="margin-bottom: 6px;">
-                    <span style="font-size: 11px; color: var(--text-muted);">方块颜色代表当日自律综合达成度（绿越深自律越满）</span>
+                    <span style="font-size: 11px; color: var(--text-muted);">一格看一天：记了吃、记了练、净缺口到 300，各算一分，绿越深分越高</span>
                     <button type="button" class="btn-secondary" onclick="renderHabitMatrix()">刷新打卡矩阵</button>
                 </div>
                 <div id="wb-habit-matrix" class="wb-habit-grid"></div>
@@ -622,7 +622,7 @@
             <div id="pub-cheer-section" class="pub-cheer-box" style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border-color);">
                 <div style="font-size: 12px; font-weight: 700; color: var(--text-main); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
                     <span>👏 访客打气角（为TA的自律投递徽章）</span>
-                    <span id="pub-cheer-count" style="font-size: 11px; color: var(--primary-dark); font-weight: normal;">已收到 0 枚打气</span>
+                    <span id="pub-cheer-count" style="font-size: 11px; color: var(--primary-dark); font-weight: normal;">还没有人送过打气</span>
                 </div>
                 <div class="pub-cheer-btns">
                     <button type="button" class="btn-cheer-chip" onclick="sendCheerSticker('🔥 稳步减脂')">🔥 稳步减脂</button>
@@ -1275,8 +1275,8 @@
                         <div class="exd-name" id="ex-detail-name">动作</div>
                     </div>
                     <div class="exd-meta-row">
-                        <span class="exd-reps" id="ex-detail-reps">10-12次 × 4组</span>
-                        <span class="exd-target-muscle" id="ex-detail-target-muscle">🔥 目标受力：核心肌群</span>
+                        <span class="exd-reps" id="ex-detail-reps"></span>
+                        <span class="exd-target-muscle" id="ex-detail-target-muscle"></span>
                     </div>
                 </div>
                 <button type="button" class="exd-close" onclick="closeExerciseDetail()" aria-label="关闭">×</button>
@@ -1294,7 +1294,7 @@
                     </div>
                     <div class="exd-phase-badge" id="ex-phase-badge">
                         <span class="phase-dot"></span>
-                        <span id="ex-phase-text">向心收缩</span>
+                        <span id="ex-phase-text">相位未开始</span>
                     </div>
                 </div>
 
@@ -1313,7 +1313,7 @@
                     <button type="button" class="btn-exd-ctl" id="ex-detail-play" onclick="toggleExDetailPlay()">⏸️ 暂停</button>
                     <button type="button" class="btn-secondary" id="ex-detail-slow" onclick="toggleExDetailSlow()">慢放：关</button>
                 </div>
-                <span class="exd-note">3D生物力学人体解算用于看发力顺序与幅度，不是真人示范视频；按住拖拽画面可360°旋转多角度检视。</span>
+                <span class="exd-note">画面是程序按关键帧算出来的立体体块，用来看发力顺序与幅度，不是真人示范视频，也不是动作医学判断；按住拖拽可转动视角。</span>
             </div>
 
             <!-- 动作规范分解步骤 -->

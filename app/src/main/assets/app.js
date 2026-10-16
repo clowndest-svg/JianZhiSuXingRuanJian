@@ -199,6 +199,15 @@ async function initAuthAndData() {
     }
 }
 
+/** 分享链接里的密钥只服务端的 /u/<名字> 校验过一次；前端再拉公开 API 时必须带上，
+    否则带密钥的链接打开后每一格都是空的。 */
+function publicShareKey() {
+    try {
+        const m = new URLSearchParams(window.location.search).get("k");
+        return m || "";
+    } catch (e) { return ""; }
+}
+
 async function loadPublicUserData(username) {
     updateUserUI(username);
     const banner = document.getElementById("user-web-link-card");
@@ -211,17 +220,19 @@ async function loadPublicUserData(username) {
         authBtn.innerHTML = `<span>👤</span><span>@${safeName}</span>`;
     }
     try {
-        const res = await fetch(`${API_BASE}/api/public/dashboard?username=${encodeURIComponent(username)}`);
+        const res = await fetch(`${API_BASE}/api/public/dashboard?username=${encodeURIComponent(username)}&k=${encodeURIComponent(publicShareKey())}`);
         if (res.ok) {
             const data = await res.json();
             state.publicNickname = (data.user && data.user.nickname) || "";
+            state.cheerTotal = Number(data.cheer_total || 0);
+            paintCheerCount();
             applyDashboardData(data);
         }
     } catch (e) {
         console.error("Failed to load public dashboard", e);
     }
     try {
-        const res = await fetch(`${API_BASE}/api/public/charts?username=${encodeURIComponent(username)}`);
+        const res = await fetch(`${API_BASE}/api/public/charts?username=${encodeURIComponent(username)}&k=${encodeURIComponent(publicShareKey())}`);
         if (res.ok) {
             const data = await res.json();
             if (data.weight_history) {
@@ -411,6 +422,7 @@ async function syncRemoteDashboard() {
         }
         const data = await res.json();
         applyDashboardData(data);
+        renderHabitMatrix();
     } catch (e) {
         console.error("Failed to sync remote dashboard", e);
     }
@@ -2147,7 +2159,7 @@ function renderWeeklyReport() {
         + "<table class='rpt-table'><thead><tr><th>日期</th><th>摄入</th><th>消耗</th><th>净缺口</th></tr></thead>"
         + "<tbody>" + (rows || "<tr><td colspan=4>这 7 天没有可算的记录</td></tr>") + "</tbody></table>"
         + "<div class='rpt-foot'>缺口为 0 的那些天是<strong>当天一笔未记</strong>，不是「零缺口」。"
-        + "摄入按菜名关键词粗估、宏量按 25/45/30 固定比例倒推，不是营养学数据。"
+        + "摄入先按内置成分表匹配菜名、匹配不到才按关键词粗估；宏量按 25/45/30 固定比例倒推，不是营养学检测值。"
         + "本系统不诊断疾病，涉及用药与疾病请咨询医生。</div>";
 }
 
@@ -2167,48 +2179,68 @@ function initWebWorkbench() {
     if (!isPublicScreen() && !inApp()) {
         const host = document.getElementById("web-workbench");
         if (host) host.style.display = "block";
-        renderHabitMatrix();
-        loadCheers();
+        if (state.token) renderHabitMatrix();
+        paintCheerCount();
         return;
     }
     const host = document.getElementById("web-workbench");
     if (host) host.remove();
 }
 
-/** 30天自律习惯打卡热力矩阵：基于近30天真实历史流水生成可视化方块 */
-function renderHabitMatrix() {
+/** 30 天自律矩阵。三处必须同时成立才是真功能：后端真给 30 天、日期按本地历法算、
+    取数失败要在屏上说原因——之前它读的是只有 7 天的 deficitHistory，
+    23 个格子永远灰着，而且首屏在任何数据到位之前渲染，进去看就是全灰。 */
+async function renderHabitMatrix() {
     if (typeof document === "undefined") return;
     const el = document.getElementById("wb-habit-matrix");
     if (!el) return;
-    const historyBars = state.deficitHistory || [];
+    let bars;
+    try {
+        const d = await getJson("/api/habits");
+        bars = (d && d.days) || [];
+    } catch (e) {
+        el.innerHTML = "";
+        el.className = "wb-habit-empty";
+        el.textContent = "矩阵没取到数据：" + String((e && e.message) || e);
+        return;
+    }
+    el.className = "wb-habit-grid";
     const dates = [];
     const now = new Date();
     for (let i = 29; i >= 0; i--) {
-        const d = new Date(now.getTime() - i * 86400000);
+        // 不能用 toISOString：UTC+8 的早上 8 点前它会给出昨天，今天这一格就成了"未打卡"
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+        const yy = String(d.getFullYear());
         const mm = String(d.getMonth() + 1).padStart(2, "0");
         const dd = String(d.getDate()).padStart(2, "0");
-        dates.push({ full: d.toISOString().slice(0, 10), label: mm + "-" + dd });
+        dates.push({ full: yy + "-" + mm + "-" + dd, label: mm + "-" + dd });
     }
     const lookup = {};
-    for (const b of historyBars) {
+    for (const b of bars) {
         const k = String(b.date || b.day || "");
         lookup[k] = b;
     }
     let html = "";
     for (const item of dates) {
-        const rec = lookup[item.label] || lookup[item.full];
+        const rec = lookup[item.full] || lookup[item.label];
         let lvl = 0;
         let tip = item.label + "：未打卡";
         if (rec) {
             const consumed = Number(rec.consumed) || 0;
             const burned = Number(rec.burned) || 0;
             const deficit = Number(rec.deficit) || 0;
-            let score = 0;
-            if (consumed > 0) score++;
-            if (burned > 0) score++;
-            if (deficit >= 300) score++;
-            lvl = Math.min(3, Math.max(1, score));
-            tip = item.label + "：摄入 " + consumed + " / 消耗 " + burned + " / 净缺口 " + deficit + " kcal";
+            if (consumed === 0 && burned === 0) {
+                // 后端每天都给一行（没记就是 0），所以"没记录"必须靠这两个 0 认出来；
+                // 旧写法 score=0 也被抬成 lvl-1，30 个格子全绿，等于在伪造全勤
+                tip = item.label + "：这一天一笔未记";
+            } else {
+                let score = 0;
+                if (consumed > 0) score++;
+                if (burned > 0) score++;
+                if (deficit >= 300) score++;
+                lvl = Math.min(3, score);
+                tip = item.label + "：摄入 " + consumed + " / 消耗 " + burned + " / 净缺口 " + deficit + " kcal";
+            }
         }
         html += "<div class='wb-habit-cell lvl-" + lvl + "' title='" + escapeHtml(tip) + "'></div>";
     }
@@ -2232,39 +2264,38 @@ function toggleKioskMode() {
     }
 }
 
-/** 访客打气投递徽章 */
-function sendCheerSticker(text) {
+/** 打气计数只能来自服务端：写 localStorage 的话，"已收到 N 枚"数的其实是
+    这位访客自己在这台设备上点了几次，大屏主人永远看不到别人送的东西。 */
+function paintCheerCount() {
+    const el = document.getElementById("pub-cheer-count");
+    if (!el) return;
+    const n = Number(state.cheerTotal || 0);
+    el.textContent = n > 0 ? "已收到 " + n + " 枚打气" : "还没有人送过打气";
+}
+
+async function sendCheerSticker(kind) {
     if (typeof document === "undefined") return;
     const toast = document.getElementById("pub-cheer-toast");
-    const countEl = document.getElementById("pub-cheer-count");
-    const uname = (state.user && state.user.username) || "guest";
-    const storageKey = "qingsu_cheers_" + uname;
-    let cnt = 0;
-    try {
-        cnt = Number(localStorage.getItem(storageKey) || 0) + 1;
-        localStorage.setItem(storageKey, String(cnt));
-    } catch (e) {
-        cnt++;
-    }
-    if (countEl) countEl.textContent = "已收到 " + cnt + " 枚打气";
-    if (toast) {
+    function flash(txt) {
+        if (!toast) return;
         toast.style.display = "block";
-        toast.textContent = "🎉 成功投递「" + text + "」！自律之路上有你加油！";
-        setTimeout(function() { if (toast) toast.style.display = "none"; }, 3000);
+        toast.textContent = txt;
+        setTimeout(function () { if (toast) toast.style.display = "none"; }, 3000);
+    }
+    const who = window.__PUBLIC_USER__ || "";
+    if (!who) { flash("这条链接没绑定要加油的人，送不出去"); return; }
+    try {
+        const data = await postApi("/api/cheer", { username: who, k: publicShareKey(), kind: kind });
+        state.cheerTotal = Number(data.total || 0);
+        paintCheerCount();
+        flash("🎉 已把「" + kind + "」送给 @" + who);
+    } catch (e) {
+        // 没送达就说没送达，不能把失败演成成功
+        flash("这枚没送出去：" + String((e && e.message) || e));
     }
 }
 
-function loadCheers() {
-    if (typeof document === "undefined") return;
-    const countEl = document.getElementById("pub-cheer-count");
-    if (!countEl) return;
-    const uname = (state.user && state.user.username) || "guest";
-    const storageKey = "qingsu_cheers_" + uname;
-    try {
-        const cnt = Number(localStorage.getItem(storageKey) || 0);
-        countEl.textContent = "已收到 " + cnt + " 枚打气";
-    } catch (e) {}
-}
+
 
 function openProfileModal() {
     const p = state.profile;
@@ -2743,9 +2774,9 @@ const BONES = [
 ];
 
 // ==========================================
-// 3D 生物力学人体模型渲染引擎 (3D Biomechanical Mannequin Engine)
-// 彻底取代简陋火柴人：具备真实 3D 空间深度透视、肌肉体块光影、360°自由拖拽旋转、
-// 发力肌群全息高亮、动作阶段(向心/离心)HUD实时反馈、地台透视网格与动力学投影。
+// 立体人体渲染引擎：关节是 2D 关键帧，深度(z)是按原型人为给的一组偏移，
+// 再做偏航/俯仰旋转与透视投影。所以"转到底"能看到厚度，但它是示意体块，
+// 不是真人动作捕捉，也不是从运动学/动力学解算出来的。
 // ==========================================
 
 let ex3DCamera = {
@@ -2797,6 +2828,25 @@ const MUSCLE_VOLUMES = [
     { j1: "r_hip", j2: "r_knee", r1: 17, r2: 12, rMid: 20, type: "thigh_r" },
     { j1: "r_knee", j2: "r_ankle", r1: 12, r2: 7, rMid: 13, type: "calf_r" }
 ];
+
+// MUSCLE_VOLUMES 里只有 pelvis/core/chest/arm/forearm/thigh/calf 这几类体块。
+// 文案里写的臀大肌、三角肌必须由这张表落到真实存在的体块上，否则标签说"发力：臀大肌"
+// 而屏幕上那一块永远不会亮。
+const MUSCLE_ALIAS = {
+    glutes: ["pelvis"],
+    hamstring: ["thigh_l", "thigh_r"],
+    deltoid_l: ["arm_l"],
+    deltoid_r: ["arm_r"]
+};
+
+function expandMuscleTargets(list) {
+    const out = [];
+    (list || []).forEach(function (t) {
+        const mapped = MUSCLE_ALIAS[t] || [t];
+        mapped.forEach(function (m) { if (out.indexOf(m) < 0) out.push(m); });
+    });
+    return out;
+}
 
 function setEx3DAngle(mode) {
     ex3DCamera.mode = mode;
@@ -2894,7 +2944,7 @@ function bindCanvas3DInteractions(cv) {
 }
 
 /**
- * 3D 生物力学人体模型渲染引擎核心函数：
+ * 立体人体渲染核心函数：
  * 将 16 关键帧关节升维至真 3D 空间坐标，进行透视投影变换与深度排序，
  * 绘制高科技地台网格、动态柔和接触阴影、圆柱体肌纤维渐变肌肉体块、
  * 关节镀铬金属球铰链、3D高光头部视向、受力肌群发力全息脉冲与运动阶段HUD。
@@ -2915,6 +2965,7 @@ function drawFrame(g, W, H, pose, arch, t) {
 
     const isSideArch = (arch === "pushup" || arch === "plank" || arch === "bridge");
     const activeCfg = ACTIVE_MUSCLES[arch] || { name: "背阔肌 · 上背肌群", targets: ["chest", "arm_l", "arm_r"] };
+    const activeTypes = expandMuscleTargets(activeCfg.targets || []);
 
     // 1. 将 2D 骨骼关节升维至三维空间点 (X, Y, Z)
     const points3D = {};
@@ -3063,7 +3114,7 @@ function drawFrame(g, W, H, pose, arch, t) {
         g.closePath();
 
         // 3D 圆柱体定向光影渐变 (左上天光高亮，右下背光深色)
-        const isActive = activeCfg.targets.indexOf(type) >= 0;
+        const isActive = activeTypes.indexOf(type) >= 0;
         const mGrd = g.createLinearGradient(mx + nx * wm, my + ny * wm, mx - nx * wm, my - ny * wm);
 
         if (isActive && pulseStrength > 0.2) {
@@ -3233,7 +3284,8 @@ function drawFrame(g, W, H, pose, arch, t) {
     // 11. HUD 文本状态反馈：实时更新相位与发力肌群
     const phaseEl = document.getElementById("ex-phase-text");
     if (phaseEl) {
-        phaseEl.textContent = isConcentric ? "向心收缩 (爆发发力)" : "离心控制 (匀速还原)";
+        // 关键帧表里没写哪个半程是向心，硬贴"向心/离心"就是编；只报屏上真看得见的相位
+        phaseEl.textContent = isConcentric ? "前半程（起身/推起方向）" : "后半程（还原方向）";
     }
     const phaseBadge = document.getElementById("ex-phase-badge");
     if (phaseBadge) {
@@ -3245,7 +3297,7 @@ function drawFrame(g, W, H, pose, arch, t) {
     g.fillStyle = "rgba(148, 163, 184, 0.85)";
     g.font = "11px system-ui, -apple-system, sans-serif";
     const meta = EX_ARCHETYPES[arch] || EX_ARCHETYPES.plank;
-    g.fillText(meta.cn + " · 标准3D生物力学解算", 12, H - 12);
+    g.fillText(meta.cn + " · 程序化体块示意 · 非真人实拍", 12, H - 12);
 }
 
 let exAnim = null;
@@ -3334,7 +3386,7 @@ function openExerciseDetail(idx) {
     if (!nameEl || !cv) return;
 
     nameEl.textContent = String(item.name || "").replace(/^\d+\.\s*/, "");
-    repsEl.textContent = item.reps || "10-12次 × 4组";
+    repsEl.textContent = item.reps || "";
 
     const activeCfg = ACTIVE_MUSCLES[arch] || { name: "背阔肌 · 上背核心肌群" };
     if (targetMuscleEl) {
@@ -3354,6 +3406,14 @@ function openExerciseDetail(idx) {
     wrongEl.innerHTML = cleanWrong
         ? escapeHtml(cleanWrong)
         : "暂无常见错误记录，保持核心收紧呼吸顺畅即可。";
+
+    // 画布位图要按实际显示尺寸建：写死 340×360 在桌面端被拉到 444×470，整幅糊 1.3 倍
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const shown = cv.getBoundingClientRect();
+    if (shown.width > 60 && shown.height > 60) {
+        cv.width = Math.round(shown.width * dpr);
+        cv.height = Math.round(shown.height * dpr);
+    }
 
     // 绑定 3D 画布触控与拖拽旋转事件
     bindCanvas3DInteractions(cv);

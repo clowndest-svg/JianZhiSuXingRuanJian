@@ -1011,6 +1011,145 @@ check("打印样式只留复盘页",
       WB_CSS.includes("@media print") && WB_CSS.includes("printing-report")
       && WB_CSS.includes("#wb-report"), "");
 
+// ============ r124 第八批：审另一个 Agent 交付的四个提交 ============
+// 每条都对应一次实测抓到的缺陷（那位 Agent 的提交说明里声称"已修复"的正是这些）。
+{
+  // 判据用的 srcOf 在那个块里是块级作用域，这里自己再开一份，同样按 --mutant 取源
+  const pick = (rel) => MUTANT
+    ? execFileSync("git", ["show", "HEAD:" + rel], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+    : fs.readFileSync(path.join(ROOT, rel), "utf8");
+  const rHtml = pick("app/src/main/assets/index.html");
+  const rJs = pick("app/src/main/assets/app.js");
+  const rCss = pick("app/src/main/assets/style.css");
+  const val = (id) => String(run(h.context,
+    `(function(){var e=document.getElementById(${JSON.stringify(id)});`
+    + `return String((e&&((e.textContent||"")+ "| " + (e.innerText||"")))||"");})()`));
+
+  // 1) 电脑版顶栏：那颗按钮点的面板必须真的存在——旧版有两颗点了会把整屏清空
+  const dTabs = [...rHtml.matchAll(/class="d-nav-item[^"]*"\s+data-tab="([^"]+)"/g)].map(m => m[1]);
+  check("顶栏按钮数量符合预期", dTabs.length >= 6, dTabs);
+  const dMissing = dTabs.filter(t => !rHtml.includes(`id="panel-${t}"`));
+  check("顶栏每颗按钮都有对应面板", dMissing.length === 0, "缺面板: " + JSON.stringify(dMissing));
+  const mTabs = [...rHtml.matchAll(/class="nav-item[^"]*"[^>]*onclick="switchTab\('([^']+)'\)/g)].map(m => m[1]);
+  check("底部导航也都指向存在的面板",
+        mTabs.filter(t => !rHtml.includes(`id="panel-${t}"`)).length === 0,
+        JSON.stringify(mTabs.filter(t => !rHtml.includes(`id="panel-${t}"`))));
+
+  // 2) CSS 里点不存在的面板＝那条排版规则永远不生效（#panel-ai 就是这一类）
+  const cssPanels = [...new Set([...rCss.matchAll(/#panel-([a-z-]+)/g)].map(m => m[1]))];
+  const cssMissing = cssPanels.filter(t => !rHtml.includes(`id="panel-${t}"`));
+  check("样式引用的面板 id 都真实存在", cssMissing.length === 0,
+        "样式点了不存在的面板: " + JSON.stringify(cssMissing));
+
+  // 3) 窄屏媒体查询：旧版改的是 grid-template-columns，而那时元素是 block + column-count，规则恒不生效
+  const nqAt = rCss.indexOf("@media (max-width: 900px)");
+  const nq = nqAt < 0 ? "" : rCss.slice(nqAt, nqAt + 700);
+  check("窄屏媒体查询真的把分栏收回一栏",
+        nq.length > 40 && /view-panel\.active[^}]*column-count:\s*1\s*!important/.test(nq)
+        && !/view-panel\.active\s*\{\s*grid-template-columns/.test(nq),
+        nq.slice(0, 130));
+
+  // 4) 自律矩阵：三处都得对，否则首屏永远是一片灰格子
+  const syncBody = rJs.slice(rJs.indexOf("async function syncRemoteDashboard"),
+                             rJs.indexOf("async function syncRemoteCharts"));
+  check("矩阵渲染排在数据到位之后",
+        /applyDashboardData\(data\);\s*\n\s*renderHabitMatrix\(\);/.test(syncBody), syncBody.slice(-150));
+  const matAt = rJs.indexOf("async function renderHabitMatrix");
+  const matBody = matAt < 0 ? "" : rJs.slice(matAt, matAt + 1500);
+  check("矩阵按本地历法铺日期",
+        /new Date\(now\.getFullYear\(\), now\.getMonth\(\), now\.getDate\(\) - i\)/.test(matBody),
+        matBody.slice(0, 130));
+  check("矩阵向后端要满 30 天", matBody.includes("/api/habits"), matBody.slice(0, 90));
+  check("矩阵取数失败会在屏上说原因",
+        matBody.includes("矩阵没取到数据") && rCss.includes(".wb-habit-empty"), "");
+
+  // 5) 访客打气：计数必须来自服务端
+  check("打气不再拿本机 localStorage 充当人数", !rJs.includes("qingsu_cheers"), "");
+  const cheerAt = rJs.indexOf("async function sendCheerSticker");
+  const cheerBody = cheerAt < 0 ? "" : rJs.slice(cheerAt, cheerAt + 1200);
+  check("打气真的发到服务端", cheerBody.includes('postApi("/api/cheer"') && cheerBody.includes("publicShareKey()"),
+        cheerBody.slice(0, 120));
+  check("打气失败要说没送出去而不是成功", cheerBody.includes("这枚没送出去"), cheerBody.slice(-150));
+
+  // 6) 分享链接：服务端认了 k，前端拉公开 API 也必须带上，否则整屏空白
+  const pubDash = rJs.match(/\/api\/public\/dashboard[^;]*/g) || [];
+  const pubCharts = rJs.match(/\/api\/public\/charts[^;]*/g) || [];
+  check("公开大屏请求带密钥", pubDash.some(u => u.includes("&k=") && u.includes("publicShareKey()")), pubDash);
+  check("公开图表请求带密钥", pubCharts.some(u => u.includes("&k=") && u.includes("publicShareKey()")), pubCharts);
+
+  // 7) 动作详情弹窗
+  const odBody = rJs.slice(rJs.indexOf("function openExerciseDetail"), rJs.indexOf("function resetChecklist"));
+  check("画布位图按显示尺寸建", odBody.includes("getBoundingClientRect()") && /cv\.width\s*=/.test(odBody),
+        odBody.slice(0, 130));
+  check("弹窗里没有写死的组数占位",
+        /id="ex-detail-reps"><\/span>/.test(rHtml) && /id="ex-detail-target-muscle"><\/span>/.test(rHtml), "");
+  check("画面文案不声称生物力学解算",
+        !rJs.includes("生物力学") && !rHtml.includes("生物力学") && rJs.includes("程序化体块示意 · 非真人实拍"),
+        [rJs.includes("生物力学"), rHtml.includes("生物力学")]);
+  check("相位只报屏上看得见的半程",
+        rJs.includes("前半程（起身/推起方向）") && !rJs.includes("向心收缩 (爆发发力)"), "");
+
+  // 8) 标签说要亮的肌肉，屏幕上必须真有一块体块会亮（正向核对，不是"包含于"）
+  try {
+    const list = run(h.context, `Object.keys(ACTIVE_MUSCLES)`);
+    const types = run(h.context, `MUSCLE_VOLUMES.map(v => v.type)`);
+    const dead = (list || []).filter(k => {
+      const lit = run(h.context, `expandMuscleTargets(ACTIVE_MUSCLES[${JSON.stringify(k)}].targets)`);
+      return !(lit || []).some(t => (types || []).includes(t));
+    });
+    check("每个发力肌群标签都能点亮至少一块体块", dead.length === 0, JSON.stringify(dead));
+    check("肌群配置覆盖到的原型数量", (list || []).length >= 12, list);
+  } catch (e) {
+    check("每个发力肌群标签都能点亮至少一块体块", false, "该版本没有对应实现: " + String(e && e.message).slice(0, 60));
+    check("肌群配置覆盖到的原型数量", false, "同上");
+  }
+
+  // 9) 真跑一遍：取数失败与打气成功分别会画成什么
+  const R124_NAMES = ["矩阵取数失败真的画出了原因", "矩阵把没记录的天画成灰格", "矩阵有记录那天按三项打满", "打气计数用的是服务端返回的总数", "没送达时提示词说的是没送出去"];
+  const SUITE124 = (async () => {
+    if (!needSymbols(R124_NAMES, ["renderHabitMatrix", "sendCheerSticker", "paintCheerCount"])) return;
+    const real = sandbox.__fetchHandler;
+    // 后端每天都返回一行（没记的那两天是 0/0），矩阵必须自己把"未记录"认出来
+    const rows = [];
+    for (let i = 29; i >= 0; i--) {
+      const dt = new Date(); dt.setDate(dt.getDate() - i);
+      const iso = dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0")
+        + "-" + String(dt.getDate()).padStart(2, "0");
+      rows.push({ day: "d", date: iso, consumed: i === 0 ? 1200 : 0,
+                  burned: i === 0 ? 220 : 0, deficit: i === 0 ? 300 : 0 });
+    }
+    sandbox.__fetchHandler = (u) => String(u).indexOf("/api/habits") >= 0
+      ? Promise.resolve(okJson({ days: rows, window: 30 }))
+      : Promise.reject(new Error("unexpected " + u));
+    await run(h.context, `renderHabitMatrix()`).then(() => {}, () => {});
+    await drain();
+    const mHtml = String(run(h.context, `String(document.getElementById("wb-habit-matrix").innerHTML || "")`) || "");
+    check("矩阵把没记录的天画成灰格", (mHtml.match(/lvl-0/g) || []).length === 29,
+          "灰格 " + (mHtml.match(/lvl-0/g) || []).length + "/30");
+    check("矩阵有记录那天按三项打满", /lvl-3/.test(mHtml) && /净缺口 300/.test(mHtml), mHtml.slice(-140));
+
+    sandbox.__fetchHandler = () => Promise.reject(new TypeError("network down"));
+    await run(h.context, `renderHabitMatrix()`).then(() => {}, () => {});
+    await drain();
+    check("矩阵取数失败真的画出了原因", val("wb-habit-matrix").includes("矩阵没取到数据"),
+          val("wb-habit-matrix").slice(0, 100));
+
+    sandbox.__fetchHandler = (u) => String(u).indexOf("/api/cheer") >= 0
+      ? Promise.resolve(okJson({ code: 0, total: 7, kind: "稳步减脂" }))
+      : Promise.reject(new Error("unexpected " + u));
+    run(h.context, `window.__PUBLIC_USER__ = "someone"; state.token = "TK124";`);
+    await run(h.context, `sendCheerSticker("稳步减脂")`).then(() => {}, () => {});
+    await drain();
+    check("打气计数用的是服务端返回的总数", val("pub-cheer-count").includes("已收到 7 枚打气"), val("pub-cheer-count"));
+    sandbox.__fetchHandler = () => Promise.reject(new TypeError("server down"));
+    await run(h.context, `sendCheerSticker("稳步减脂")`).then(() => {}, () => {});
+    await drain();
+    check("没送达时提示词说的是没送出去", val("pub-cheer-toast").includes("这枚没送出去"), val("pub-cheer-toast").slice(0, 100));
+    sandbox.__fetchHandler = real;
+  })();
+  await SUITE124;
+}
+
 const bad = R.filter(x => !x[1]);
 console.log(`\n=== ${MUTANT ? "变异样本(HEAD 改动前)" : "当前源码"}：${R.length} 条，绿 ${R.length - bad.length}，红 ${bad.length} ===`);
 for (const [name, ok, detail] of R) console.log(`  ${ok ? "绿" : "红"} ${name}${ok ? "" : "  -> " + detail}`);

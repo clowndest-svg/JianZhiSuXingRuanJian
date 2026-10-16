@@ -1970,7 +1970,9 @@ body.has-floating-dl #app-main { padding-bottom: 140px; }
 .ex-steps.open { display: block; }
 .ex-wrong { margin-top: 6px; font-size: 11px; color: #B45309; background: #FFFBEB; border-radius: 8px; padding: 5px 8px; }
 
-/* 电脑版排版：更宽的容器 + 双栏瀑布流 (Masonry) 紧凑排版，彻底消除卡片上下参差不齐的大面积留白与空隙 */
+/* 电脑版排版：宽容器 + CSS 分栏双栏。分栏是"按内容高度配平"而不是最短列优先，
+   所以 tall 卡片仍会在某一栏顶出一段空白（实测 1440 下监控大屏约 228px），
+   这里不再声称已彻底消除空隙。 */
 body.desktop-view #app-main { max-width: 1120px; margin: 0 auto; padding-bottom: 100px; }
 body.desktop-view main .view-panel {
     display: none;
@@ -2010,8 +2012,8 @@ body.desktop-view main > #web-workbench,
 body.desktop-view main > #public-tools,
 body.desktop-view main > #body-suspect-card,
 body.desktop-view #panel-recipes > .card,
-body.desktop-view #panel-ai > .chat-box,
-body.desktop-view #panel-takeout-stats > .card {
+body.desktop-view #panel-gemini > .chat-box,
+body.desktop-view #panel-takeout > .card {
     display: block !important;
     width: 100%;
     grid-column: 1 / -1;
@@ -2122,8 +2124,11 @@ body.desktop-view .bottom-nav {
     -webkit-backdrop-filter: blur(12px);
 }
 
-@media (max-width: 768px) {
-    body.desktop-view main .view-panel.active { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 900px) {
+    body.desktop-view main .view-panel.active,
+    body.desktop-view #dining-cook-view,
+    body.desktop-view #dining-takeout-view { column-count: 1 !important; }
+    body.desktop-view #main-body-shapes-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     body.desktop-view .bottom-nav { max-width: 100%; left: 0; transform: none; bottom: 0; border-radius: 0; }
 }
 /* ============ 第五批：顶栏按钮竖排换行与提示语截断（实测定位） ============
@@ -2608,6 +2613,9 @@ header *, .header-tools, .header-row-1 {
     left: 50%;
     transform: translateX(-50%);
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100% - 14px);
     gap: 6px;
     background: rgba(15, 23, 42, 0.82);
     backdrop-filter: blur(8px);
@@ -3007,8 +3015,9 @@ header *, .header-tools, .header-row-1 {
 /* ④ 30天自律习惯热力矩阵 */
 .wb-habit-grid {
     display: grid;
-    grid-template-columns: repeat(10, 1fr);
-    gap: 6px;
+    grid-template-columns: repeat(10, minmax(16px, 26px));
+    justify-content: start;
+    gap: 5px;
     padding: 10px;
     background: #F8FAFC;
     border-radius: 8px;
@@ -3032,6 +3041,17 @@ header *, .header-tools, .header-row-1 {
 .wb-habit-cell.lvl-2 { background: #34D399; }
 .wb-habit-cell.lvl-3 { background: #059669; }
 
+.wb-habit-empty {
+    display: block;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #B45309;
+    background: #FFFBEB;
+    border: 1px solid #FDE68A;
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+}
 .wb-habit-legend {
     display: flex;
     align-items: center;
