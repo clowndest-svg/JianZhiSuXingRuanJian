@@ -26,6 +26,25 @@ def read_gradle_version():
     return int(code.group(1)), name.group(1)
 
 
+def latest_release_note():
+    """更新说明现读 CHANGELOG 最新一条。
+
+    以前这里是手写的一串字，换包时忘了改，手机上弹的"新版本说明"讲的就不是这一版。
+    """
+    text = io.open(os.path.join(ROOT, "CHANGELOG.md"), encoding="utf-8").read()
+    NL = chr(10)
+    lines = text.split(NL)
+    head = body = ""
+    for i, line in enumerate(lines):
+        if line.startswith("## ") and not head:
+            head = line[3:].strip()
+            body = "".join(lines[i + 1:]).strip().split(NL + NL)[0].strip()
+            break
+    if not head or not body:
+        raise SystemExit("CHANGELOG.md 里找不到最新版本条目，拒绝生成没有说明的版本清单")
+    note = head + "：" + body.replace(NL, " ")
+    return note[:600]
+
 def main():
     code, name = read_gradle_version()
     if not os.path.exists(APK):
@@ -38,7 +57,7 @@ def main():
         "size": len(blob),
         "md5": hashlib.md5(blob).hexdigest(),
         "sha256": hashlib.sha256(blob).hexdigest(),
-        "notes": "r131.1：修复320px饮水网格溢出、下载二维码直达HTTPS；全链路可信 HTTPS、正式签名轮换；分享字段权限/到期/撤销；完整日确认、历史纠错与补录；餐食份量核对；离线草稿与网页离线外壳；Android 每日提醒、拍照入口和 CSV 保存；统一问答路由及场景规则。",
+        "notes": latest_release_note(),
     }
     io.open(OUT, "w", encoding="utf-8", newline="").write(
         json.dumps(out, ensure_ascii=False, indent=1))

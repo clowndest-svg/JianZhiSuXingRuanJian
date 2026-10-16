@@ -110,6 +110,53 @@ public class DeviceSmokeTest {
         waitFor("document.getElementById('chat-messages-box').innerText.includes('150')");screenshot("chat");
         js("openReminderSettings()");waitFor("!!document.getElementById('reminder-enabled')");screenshot("reminders");
         js("document.getElementById('account-tools-dialog').close();switchTab('dashboard')");
+        // --- r132: 今日完整日确认（后端早有接口，界面上第一次有入口）---
+        assertEquals("完整日确认按钮存在", "true", js("!!document.getElementById('day-complete-btn')"));
+        waitFor("!document.getElementById('day-complete-btn').disabled");
+        String dayLabel = js("document.getElementById('day-complete-state').innerText");
+        assertTrue("确认状态先回读服务端: " + dayLabel, dayLabel.contains("还没确认") || dayLabel.contains("已确认"));
+        js("document.getElementById('day-complete-btn').click()");
+        waitFor("state.dayComplete && state.dayComplete.confirmed===true");
+        assertTrue("确认后界面跟着改口: " + js("document.getElementById('day-complete-state').innerText"),
+                js("document.getElementById('day-complete-state').innerText").contains("已确认"));
+        assertTrue("确认后按钮变成可撤销: " + js("document.getElementById('day-complete-btn').innerText"),
+                js("document.getElementById('day-complete-btn').innerText").contains("取消"));
+        js("document.getElementById('day-complete-btn').click()");
+        waitFor("state.dayComplete && state.dayComplete.confirmed===false");
+        assertEquals("撤销后回到未确认", "true", js("document.getElementById('day-complete-state').innerText.includes('还没确认')"));
+
+        // --- r132: 键盘可达性与读屏可见性 ---
+        assertEquals("底导项都是可聚焦的按钮角色", "true", js(
+                "[...document.querySelectorAll('.nav-item')].every(e=>e.getAttribute('role')==='button'&&e.getAttribute('tabindex')==='0')"));
+        assertEquals("底导字号不低于 11px", "true", js(
+                "[...document.querySelectorAll('.nav-item>span:not(.nav-icon)')].every(e=>parseFloat(getComputedStyle(e).fontSize)>=11)"));
+        assertEquals("主按钮触控高度不小于 44px", "true", js(
+                "[...document.querySelectorAll('.btn-primary')].every(e=>!e.offsetParent||e.getBoundingClientRect().height>=44)"));
+        assertEquals("回车能激活 role=button 的餐别切换", "dinner", js(
+                "(function(){const el=document.getElementById('slot-chip-dinner');"
+                + "el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));return state.selectedMealSlot;})()"));
+        assertEquals("切换后 pressed 跟着走", "true", js(
+                "document.getElementById('slot-chip-dinner').getAttribute('aria-pressed')==='true'"
+                + "&&document.getElementById('slot-chip-lunch').getAttribute('aria-pressed')==='false'"));
+        js("selectMealSlot('lunch')");
+        js("switchTab('dashboard')");
+        assertEquals("五个弹窗都声明成对话框", "5", js(
+                "document.querySelectorAll('.modal-card[role=dialog][aria-modal=true]').length"));
+        js("openProfileModal()");
+        waitFor("document.getElementById('profile-modal').classList.contains('show')");
+        assertEquals("弹窗打开时背景被 inert 屏蔽", "true", js(
+                "document.querySelector('.bottom-nav').inert===true"
+                + "&&document.getElementById('auth-modal').getAttribute('aria-hidden')==='true'"));
+        assertEquals("焦点落在弹窗内部", "true", js(
+                "document.getElementById('profile-modal').contains(document.activeElement)"));
+        instrumentation.runOnMainSync(activity::onBackPressed);
+        waitFor("!document.getElementById('profile-modal').classList.contains('show')");
+        assertEquals("关闭后背景恢复可用", "false", js("document.querySelector('.bottom-nav').inert===true"));
+        assertEquals("缺口图有文字摘要且不依赖颜色", "true", js(
+                "['达标','未达','超支','未记录'].every(w=>document.getElementById('chart-deficit-summary').innerText.includes(w))"
+                + "||document.getElementById('chart-deficit-summary').innerText.includes('暂无')"));
+        screenshot("day-complete");
+
         // Exercise the real JavaScript -> native loopback transport with a protocol fixture.
         try(java.net.ServerSocket fixtureServer=new java.net.ServerSocket(0,2,java.net.InetAddress.getByName("127.0.0.1"))){
             int port=fixtureServer.getLocalPort();

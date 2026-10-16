@@ -9,7 +9,10 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const JS_REL = "app/src/main/assets/app.js";
-const MUTANT = process.argv.includes("--mutant");
+const MUT_ARG = process.argv.find(a => a === "--mutant" || a.startsWith("--mutant=")) || "";
+// 提交之后 HEAD 就等于当前源码，反样本必须能钉住改动前那一版，否则标定自己会过期。
+const MUT_REF = MUT_ARG.startsWith("--mutant=") ? MUT_ARG.split("=")[1] : "HEAD";
+const MUTANT = MUT_ARG !== "";
 
 // ------------------------------------------------------------------ stub 层
 function makeCtx() {
@@ -54,12 +57,20 @@ function makeCtx() {
       appendChild(c) { this._children.push(c); return c; },
       remove() {}, select() {}, focus() {}, click() { log.clicks = (log.clicks || 0) + 1 },
       querySelectorAll() { return []; },
-      querySelector() { return null; },
+      // 元素级 querySelector 以前恒返回 null，于是"弹窗里找关闭按钮"
+      // "弹窗里找可聚焦元素"这类代码在桩里永远走空分支，测不到东西。
+      querySelector(sel) { return mkEl(this.id + "|q|" + sel); },
       addEventListener() {},
+      // 弹窗绑定用 el.dataset.a11yBound 去重；桩没有 dataset 就整段抛掉。
+      dataset: {},
       // 桩缺 setAttribute 会让代码一调就抛、异常被 init 吞掉，
       // 表现成"逻辑没生效"而真因是桩少方法——这类假红上一批已经踩过一次。
       _attrs: {},
+      nodeType: 1,
       setAttribute(k, v) { this._attrs[String(k)] = String(v); },
+      hasAttribute(k) { return this._attrs[String(k)] !== undefined; },
+      // 弹窗遮罩那段会问"这个节点包含它吗"，桩没有 contains 就整段抛掉。
+      contains(other) { return other === this; },
       getAttribute(k) { const v = this._attrs[String(k)]; return v === undefined ? null : v; },
       removeAttribute(k) { delete this._attrs[String(k)]; },
     };
@@ -110,7 +121,14 @@ function makeCtx() {
     return elems.get(id);
   }
 
+  const muts = [];
   const win = {
+    // 桩里的观察器只记账不自动派发，测试自己 flush，
+    // 否则"背景被屏蔽"这类断言只能靠直接调函数糊过去。
+    MutationObserver: class {
+      constructor(cb) { this.cb = cb; }
+      observe(target) { muts.push({ target, cb: this.cb }); }
+    },
     location: { protocol: "http:", hostname: "app.test", origin: "http://app.test", hash: "", search: "" },
     addEventListener(ev, fn) { (listeners[ev] = listeners[ev] || []).push(fn); },
     AndroidBridge: {
@@ -124,16 +142,27 @@ function makeCtx() {
   };
   win.window = win;
   const listeners = {};
+  const docListeners = {};
 
   const sandbox = {
     window: win,
+    // 浏览器里 MutationObserver 是全局对象，代码里不会写 window. 前缀，
+    // 桩必须同样暴露全局名，否则测的是桩的形状而不是浏览器的形状。
+    MutationObserver: win.MutationObserver,
     document: {
       getElementById: mkEl,
       querySelector: (s) => mkEl("q" + s),
       querySelectorAll: () => [],
+      // 弹窗无障碍那段注册的是 document 级 keydown；桩以前没这个方法，
+      // 加载 app.js 会直接抛 TypeError 并被 init 吞掉，变成"逻辑没跑"的假绿。
+      addEventListener(ev, fn) { (docListeners[ev] = docListeners[ev] || []).push(fn); },
+      activeElement: null,
       createElement: (t) => newEl("dyn-" + (++dynSeq) + ":" + t),
       body: {
         appendChild() {}, removeChild() {},
+        // 把桩里出现过的元素都当作 body 的直接子节点；否则 syncDialogInert
+        // 遍历到空数组，"背景被屏蔽"这条断言会永远绿却什么都没测到。
+        get children() { return Array.from(elems.values()); },
         classList: {
           _s: new Set(),
           add(c) { this._s.add(c); },
@@ -172,12 +201,12 @@ function makeCtx() {
   };
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
-  return { context, log, sandbox, mkEl, elems, listeners };
+  return { context, log, sandbox, mkEl, elems, listeners, docListeners, muts };
 }
 
 function loadJs(context) {
   const src = MUTANT
-    ? execFileSync("git", ["show", "HEAD:" + JS_REL], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+    ? execFileSync("git", ["show", MUT_REF + ":" + JS_REL], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
     : fs.readFileSync(path.join(ROOT, JS_REL), "utf8");
   vm.runInContext(src, context, { filename: JS_REL });
   vm.runInContext("var localGuidanceRows="+fs.readFileSync(path.join(ROOT,"app/src/main/assets/guidance.json"),"utf8"),context);
@@ -498,7 +527,7 @@ try {
 // 静态判据必须与 --mutant 同源：变异模式下要读 HEAD 那份，否则永远绿
 function srcOf(rel) {
   return MUTANT
-    ? execFileSync("git", ["show", "HEAD:" + rel], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+    ? execFileSync("git", ["show", MUT_REF + ":" + rel], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
     : fs.readFileSync(path.join(ROOT, rel), "utf8");
 }
 const jsSrc = srcOf("app/src/main/assets/app.js");
@@ -814,7 +843,7 @@ const PUB_REL = "app/src/main/assets/index.html";
 // 顶层看不到 srcOf()/htmlSrc（它们声明在更早的嵌套块里），这里自己取一次，
 // 并且照样跟随 --mutant：静态判据读的必须是被测那一份，否则变异样本永远绿。
 const pubHtml = MUTANT
-  ? execFileSync("git", ["show", "HEAD:" + PUB_REL], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+  ? execFileSync("git", ["show", MUT_REF + ":" + PUB_REL], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
   : fs.readFileSync(path.join(ROOT, PUB_REL), "utf8");
 check("首页有网页独占工具卡", pubHtml.includes('id="public-tools"'), "");
 check("工具卡默认隐藏（App 里不该出现）",
@@ -936,10 +965,10 @@ const DL_NAMES = ["下载弹窗无写死体积","下载弹窗无写死版本号"
     "清单读不到时显示未知而不是回落假数","下载文件名带真实版本","不再宣称高速直链"];
 const DLN = DL_NAMES;
 const dlHtml = MUTANT
-  ? execFileSync("git", ["show", "HEAD:app/src/main/assets/index.html"], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+  ? execFileSync("git", ["show", MUT_REF + ":app/src/main/assets/index.html"], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
   : fs.readFileSync(path.join(ROOT, "app/src/main/assets/index.html"), "utf8");
 const dlJs = MUTANT
-  ? execFileSync("git", ["show", "HEAD:app/src/main/assets/app.js"], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+  ? execFileSync("git", ["show", MUT_REF + ":app/src/main/assets/app.js"], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
   : fs.readFileSync(path.join(ROOT, "app/src/main/assets/app.js"), "utf8");
 if (!/loadApkMeta/.test(dlJs)) {
   for (const nm of DLN) check(nm, false, "该版本没有对应实现");
@@ -1023,7 +1052,7 @@ check("打印样式只留复盘页",
 {
   // 判据用的 srcOf 在那个块里是块级作用域，这里自己再开一份，同样按 --mutant 取源
   const pick = (rel) => MUTANT
-    ? execFileSync("git", ["show", "HEAD:" + rel], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+    ? execFileSync("git", ["show", MUT_REF + ":" + rel], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
     : fs.readFileSync(path.join(ROOT, rel), "utf8");
   const rHtml = pick("app/src/main/assets/index.html");
   const rJs = pick("app/src/main/assets/app.js");
@@ -1188,6 +1217,135 @@ check("打印样式只留复盘页",
     sandbox.__fetchHandler = real;
   })();
   await SUITE124;
+}
+
+// ===== 14. 弹窗键盘行为、背景屏蔽与缺口文字摘要 =====
+{
+  const h14 = makeCtx();
+  loadJs(h14.context);
+  const errs14 = [];
+  (h14.listeners["DOMContentLoaded"] || []).forEach(fn => { try { fn(); } catch (e) { errs14.push(String(e && e.message)); } });
+  check("无障碍改造后初始化不抛异常", errs14.length === 0, errs14.join(" / "));
+  const d14 = h14.sandbox.document;
+  const kd = h14.docListeners["keydown"] || [];
+  check("document 上挂了键盘监听", kd.length > 0, String(kd.length));
+  let prevented = 0;
+  const fire = (ev) => { ev.preventDefault = () => { prevented++; }; ev.repeat = !!ev.repeat; kd.forEach(fn => fn(ev)); };
+  // 桩里的观察器只记账不自动派发，测试自己 flush 等价于浏览器投递变更记录
+  const flush = () => h14.muts.forEach(m => { try { m.cb([]); } catch (e) { errs14.push(String(e && e.message)); } });
+  check("五个弹窗都绑上了观察器", h14.muts.length === 5, String(h14.muts.length));
+
+  // 旧版本根本没有这些函数，直接 run 会把整台砸崩；缺实现必须逐条记红而不是"没测"。
+  const guard = (name, fn) => {
+    try { const r = fn(); check(name, !!r[0], String(r.length > 1 && r[1] !== undefined ? r[1] : "")); }
+    catch (e) { check(name, false, "缺实现或抛异常: " + String(e && e.message).slice(0, 70)); }
+  };
+  const exec = (code) => run(h14.context, code);
+
+  // 未登录时 init 会自己弹登录框，两层一起开着就没法判断谁在最上面
+  guard("清场：关掉已打开的弹窗", () => {
+    exec('openDialogs().forEach(el => el.classList.remove("show"))');
+    flush();
+    return [true];
+  });
+
+  guard("打开档案弹窗", () => { exec('openProfileModal()'); flush(); return [d14.getElementById("profile-modal").classList.contains("show")]; });
+  const prof = d14.getElementById("profile-modal");
+  const auth = d14.getElementById("auth-modal");
+  guard("弹窗开着时背景弹窗被屏蔽", () => [auth.getAttribute("aria-hidden") === "true", String(auth.getAttribute("aria-hidden"))]);
+  guard("正在打开的弹窗自己不屏蔽", () => [prof.getAttribute("aria-hidden") === null, String(prof.getAttribute("aria-hidden"))]);
+  guard("背景节点被置为 inert", () => [auth.inert === true, String(auth.inert)]);
+
+  guard("Tab 被约束在弹窗内而不是跑到背景", () => {
+    prevented = 0;
+    fire({ key: "Tab", target: d14.getElementById("prof-age"), shiftKey: false });
+    return [prevented > 0, String(prevented)];
+  });
+
+  guard("ESC 走的是弹窗自己的关闭按钮", () => {
+    const before = h14.log.clicks || 0;
+    fire({ key: "Escape", target: d14.getElementById("prof-age") });
+    return [(h14.log.clicks || 0) > before, String(h14.log.clicks)];
+  });
+
+  guard("关闭后背景解除屏蔽", () => {
+    exec('closeProfileModal()'); flush();
+    return [auth.getAttribute("aria-hidden") === null, String(auth.getAttribute("aria-hidden"))];
+  });
+  guard("关闭后 inert 复位", () => [auth.inert === false, String(auth.inert)]);
+  guard("没有弹窗时 ESC 不空点一下", () => {
+    const before = h14.log.clicks || 0;
+    fire({ key: "Escape", target: d14.getElementById("prof-age") });
+    return [(h14.log.clicks || 0) === before, String(h14.log.clicks)];
+  });
+
+  // <div role="button"> 必须和真按钮一样可键盘激活
+  const chip = d14.getElementById("slot-chip-lunch");
+  chip.setAttribute("role", "button");
+  guard("回车激活 role=button", () => {
+    const before = h14.log.clicks || 0;
+    fire({ key: "Enter", target: chip });
+    return [(h14.log.clicks || 0) > before, String(h14.log.clicks)];
+  });
+  guard("空格激活 role=button", () => {
+    const before = h14.log.clicks || 0;
+    fire({ key: " ", target: chip });
+    return [(h14.log.clicks || 0) > before, String(h14.log.clicks)];
+  });
+  guard("按住不放不重复提交", () => {
+    const before = h14.log.clicks || 0;
+    fire({ key: "Enter", target: chip, repeat: true });
+    return [(h14.log.clicks || 0) === before, String(h14.log.clicks)];
+  });
+  guard("普通输入框回车不会被抢走", () => {
+    const before = h14.log.clicks || 0;
+    fire({ key: "Enter", target: d14.getElementById("prof-age") });
+    return [(h14.log.clicks || 0) === before, String(h14.log.clicks)];
+  });
+
+  // 缺口文字摘要：达标与否必须能用文字读出来，不能只靠柱子颜色
+  const rows = [
+    { day: "10-01", deficit: 500, record_status: "complete" },
+    { day: "10-02", deficit: 100, record_status: "partial" },
+    { day: "10-03", deficit: -200, record_status: "complete" },
+    { day: "10-04", deficit: 0, record_status: "missing" },
+  ];
+  const box = d14.getElementById("chart-deficit-summary");
+  const cv = d14.getElementById("chart-deficit");
+  let desc = "";
+  guard("达标/未达/超支/未记录各算各的", () => {
+    desc = String(exec('describeDeficit(' + JSON.stringify(rows) + ', 400)'));
+    return [desc.includes("达标 1") && desc.includes("未达 1") && desc.includes("超支 1")
+      && desc.includes("未记录 1"), desc.slice(0, 150)];
+  });
+  guard("摘要真的写进了界面节点", () => [String(box.innerText || "").includes("达标"), String(box.innerText).slice(0, 140)]);
+  guard("图表 aria-label 同步成同一句话", () => [
+    String(cv.getAttribute("aria-label") || "").includes("超支"), String(cv.getAttribute("aria-label")).slice(0, 140)]);
+  guard("没有记录时不编造天数", () => {
+    const empty = String(exec('describeDeficit([], 400)'));
+    return [empty.includes("暂无真实缺口记录"), empty.slice(0, 120)];
+  });
+  guard("空数据时界面也跟着改口", () => [!String(box.innerText || "").includes("达标"), String(box.innerText).slice(0, 120)]);
+  check("flush 过程没抛异常", errs14.length === 0, errs14.join(" / "));
+}
+
+
+// ===== 15. 本机登录信息被写坏时，不能把人留在空页面上 =====
+{
+  const hBad = makeCtx();
+  loadJs(hBad.context);
+  hBad.sandbox.localStorage.setItem("QINGSU_AUTH_TOKEN", "tok");
+  hBad.sandbox.localStorage.setItem("QINGSU_AUTH_USER", "not-json");
+  let thrown = "";
+  try { run(hBad.context, "initAuthAndData()"); } catch (e) { thrown = String(e && e.message); }
+  check("损坏的登录信息不把异常抛到调用方", thrown === "", thrown);
+  check("读不出来的会话被清掉而不是留着",
+    !hBad.sandbox.localStorage.getItem("QINGSU_AUTH_TOKEN")
+    && !hBad.sandbox.localStorage.getItem("QINGSU_AUTH_USER"), "");
+  check("损坏会话弹登录框并说明原因",
+    hBad.sandbox.document.getElementById("auth-modal").classList.contains("show")
+    && hBad.log.toasts.some(t => String(t).includes("重新登录")),
+    JSON.stringify(hBad.log.toasts.slice(-3)));
 }
 
 const bad = R.filter(x => !x[1]);

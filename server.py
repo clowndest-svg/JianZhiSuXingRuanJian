@@ -192,13 +192,36 @@ init_db()
 
 
 
+_ASSET_VER_CACHE = {}
+
 def _asset_ver(path):
-    """拿文件修改时间当版本号：重新部署一次就换一个串，
-    让已经被缓存住的浏览器不得不去取新 URL。"""
+    """内容哈希当版本号：文件没变 URL 就不变，浏览器可以放心缓存一年；
+    改了一个字节 URL 立刻换一个，不会再出现「部署了但用户还停在旧 app.js」。
+    以前用 mtime，同一份内容重新部署也会换串，等于白让所有人重下一遍。"""
     try:
-        return str(int(os.path.getmtime(path)))
+        stat = os.stat(path)
+        stamp = (int(stat.st_mtime_ns), stat.st_size)
     except OSError:
         return "0"
+    cached = _ASSET_VER_CACHE.get(path)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    try:
+        with open(path, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()[:12]
+    except OSError:
+        return "0"
+    _ASSET_VER_CACHE[path] = (stamp, digest)
+    return digest
+
+
+def _asset_headers(path, wanted):
+    """只有 URL 上带了正确的内容哈希，才给一年强缓存；
+    对不上（旧链接、直接敲地址、爬虫）就退回必须回源校验，不会发错版本。"""
+    current = _asset_ver(path)
+    if wanted and current != "0" and wanted == current:
+        return {"Cache-Control": "public, max-age=31536000, immutable"}
+    return _no_cache()
 
 
 def _no_cache():
@@ -870,6 +893,12 @@ def compute_dashboard_data(user: dict) -> dict:
     c.execute("SELECT * FROM body_cycles WHERE user_id = ? ORDER BY cycle_num DESC LIMIT 1", (user["id"],))
     latest_cycle = c.fetchone()
 
+    # 完整日确认的当前状态：界面要知道今天到底确认过没有，
+    # 不然按钮只能盲猜，用户看不见自己这一步做没做。
+    # 必须在 conn.close() 之前查，放到返回字典里现查会 500。
+    today_confirmed = bool(c.execute(
+        "SELECT 1 FROM daily_reviews WHERE user_id=? AND log_date=? AND complete=1",
+        (user["id"], today)).fetchone())
     conn.close()
     latest_cycle=dict(latest_cycle) if latest_cycle else None
     if latest_cycle and latest_cycle.get("photo_url"):
@@ -919,7 +948,9 @@ def compute_dashboard_data(user: dict) -> dict:
             "week_launched": (wk["launched"] if wk else 0),
             "week_events": (wk["total"] if wk else 0),
         },
-        "public_url": public_url_for(user)
+        "public_url": public_url_for(user),
+        "today": today,
+        "today_confirmed": today_confirmed
     }
 
 @app.get("/api/dashboard")
@@ -2269,42 +2300,42 @@ def get_public_charts(username: str, k: Optional[str] = None, request: Request =
 # ==================== Public Web Dashboard & Static Delivery ====================
 
 @app.get("/style.css")
-def get_style():
+def get_style(v: str = None):
     path = os.path.join(WEB_DIR, "style.css")
     if os.path.exists(path):
-        return FileResponse(path, media_type="text/css", headers=_no_cache())
+        return FileResponse(path, media_type="text/css", headers=_asset_headers(path, v))
     raise HTTPException(status_code=404, detail="style.css not found")
 
 @app.get("/app.js")
-def get_app_js():
+def get_app_js(v: str = None):
     path = os.path.join(WEB_DIR, "app.js")
     if os.path.exists(path):
-        return FileResponse(path, media_type="application/javascript", headers=_no_cache())
+        return FileResponse(path, media_type="application/javascript", headers=_asset_headers(path, v))
     raise HTTPException(status_code=404, detail="app.js not found")
 
 # 动作关键帧表：App 从 assets 直读，网页版必须也能取到，
 # 否则网页永远只能用程序化回落，而界面看不出来差别（这条就是踩过 404 才发现的）
 @app.get("/exercise_poses.json")
-def get_exercise_poses():
+def get_exercise_poses(v: str = None):
     path = os.path.join(WEB_DIR, "exercise_poses.json")
     if os.path.exists(path):
-        return FileResponse(path, media_type="application/json", headers=_no_cache())
+        return FileResponse(path, media_type="application/json", headers=_asset_headers(path, v))
     raise HTTPException(status_code=404, detail="动作姿态表未部署")
 
 
 @app.get("/qingsu.apk")
-def download_apk():
+def download_apk(v: str = None):
     apk_path = os.path.join(WEB_DIR, "qingsu.apk")
     if os.path.exists(apk_path):
         return FileResponse(apk_path, media_type="application/vnd.android.package-archive",
-                             filename="轻塑减脂塑形_v5.0.apk", headers=_no_cache())
+                             filename="轻塑减脂塑形_v5.0.apk", headers=_asset_headers(apk_path, v))
     raise HTTPException(status_code=404, detail="APK not found")
 
 @app.get("/qr.svg")
-def get_qr_svg():
+def get_qr_svg(v: str = None):
     path = os.path.join(WEB_DIR, "qr.svg")
     if os.path.exists(path):
-        return FileResponse(path, media_type="image/svg+xml", headers=_no_cache())
+        return FileResponse(path, media_type="image/svg+xml", headers=_asset_headers(path, v))
     raise HTTPException(status_code=404, detail="qr.svg not found")
 
 @app.get("/", response_class=HTMLResponse)
@@ -2464,11 +2495,11 @@ install_features(app,globals())
 
 
 def extension_asset(name):
-    def serve():
+    def serve(v: str = None):
+        path=os.path.join(WEB_DIR,name)
         if name == "sw.js":
             headers={"Cache-Control":"no-store","Service-Worker-Allowed":"/"}
-        else:headers=_no_cache()
-        path=os.path.join(WEB_DIR,name)
+        else:headers=_asset_headers(path, v)
         if not os.path.isfile(path):raise HTTPException(404,"资源未部署")
         media={"js":"application/javascript","css":"text/css","svg":"image/svg+xml","webmanifest":"application/manifest+json","json":"application/json"}[name.rsplit(".",1)[-1]]
         return FileResponse(path,media_type=media,headers=headers)

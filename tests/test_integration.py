@@ -201,4 +201,112 @@ class Integration(unittest.TestCase):
             cycles=list(pool.map(lambda _:self.c.post('/api/cycle/measure',headers=self.auth,data={'weight_jin':150,'waist_cm':80}),range(2)))
         self.assertTrue(all(r.status_code==200 for r in cycles));self.assertEqual(len({r.json()['cycle_num'] for r in cycles}),2)
 
+
+    def shift_days(self, n):
+        """把服务器眼里的"今天"整体挪 n 天：跨午夜这类事没法等，只能拨表。"""
+        import app_modules.features as feat
+        from datetime import date as real_date, timedelta
+
+        class ShiftedDate(real_date):
+            @classmethod
+            def today(cls):
+                return real_date.today() + timedelta(days=n)
+
+        original = (self.m.date, feat.date)
+        self.m.date = feat.date = ShiftedDate
+        self.addCleanup(lambda: (setattr(self.m, 'date', original[0]),
+                                 setattr(feat, 'date', original[1])))
+        return ShiftedDate.today().isoformat()
+
+    def test_midnight_rollover_keeps_yesterday_verdict(self):
+        """注册→第一笔→同日修正→跨午夜→第二天 全链路对账（方案 10.1）。"""
+        from datetime import date, timedelta
+        day1 = date.today().isoformat()
+        self.c.post('/api/food/log', headers=self.auth, json={'slot': '午餐', 'food_name': '鸡蛋', 'cal': 300})
+        self.c.post('/api/weight/log', headers=self.auth, json={'weight_jin': 158})
+        self.c.post('/api/day/complete', headers=self.auth, json={'log_date': day1, 'complete': True})
+        d1 = self.c.get('/api/dashboard', headers=self.auth).json()
+        self.assertEqual(d1['today_consumed'], 300)
+        self.assertTrue(d1['today_confirmed'])
+
+        # 同日修正：改了体重，首页与曲线必须是同一个数
+        self.c.post('/api/weight/log', headers=self.auth, json={'weight_jin': 156})
+        self.assertEqual(self.c.get('/api/charts', headers=self.auth).json()['weight_history'][-1]['jin'], 156)
+        self.assertEqual(self.c.get('/api/dashboard', headers=self.auth).json()['profile']['weight_jin'], 156)
+        # 改了当天的记录，上一轮的完整日确认必须自动作废（设计如此，不是翻案）
+        self.assertFalse(self.c.get('/api/dashboard', headers=self.auth).json()['today_confirmed'])
+        self.c.post('/api/day/complete', headers=self.auth, json={'log_date': day1, 'complete': True})
+
+        # 跨午夜：换到第二天，昨天的摄入不能挂到今天
+        day2 = self.shift_days(1)
+        d2 = self.c.get('/api/dashboard', headers=self.auth).json()
+        self.assertEqual(d2['today'], day2)
+        self.assertEqual(d2['today_consumed'], 0)
+        self.assertFalse(d2['today_confirmed'])
+        self.assertEqual(d2['today_meals'], [])
+
+        # 昨天确认过的完整日不能因为换日就翻案
+        bars = self.c.get('/api/charts', headers=self.auth).json()['deficit_history']
+        self.assertEqual([b['record_status'] for b in bars if b['date'] == day1], ['complete'])
+        self.assertEqual([b['record_status'] for b in bars if b['date'] == day2], ['missing'])
+
+        # 30 天矩阵跟着换日整体平移，不能留下"今天还是昨天"的错位
+        matrix = self.c.get('/api/habits', headers=self.auth).json()
+        self.assertEqual(matrix['window'], 30)
+        self.assertEqual(matrix['days'][-1]['date'], day2)
+        self.assertEqual(len({row['date'] for row in matrix['days']}), 30)
+        self.assertEqual([row['record_status'] for row in matrix['days'] if row['date'] == day1], ['complete'])
+
+        # 再往后一天，第一天的记录滑出 7 天窗口但仍在 30 天矩阵里
+        self.shift_days(8)
+        week = self.c.get('/api/charts', headers=self.auth).json()['deficit_history']
+        self.assertNotIn(day1, [b['date'] for b in week])
+        matrix = self.c.get('/api/habits', headers=self.auth).json()
+        self.assertIn(day1, [row['date'] for row in matrix['days']])
+
+    def test_upload_limits_reject_oversize_and_overscan(self):
+        """字节超限和像素超限都要拒，且不能留下半条周期记录。"""
+        big = self.c.post('/api/cycle/upgrade', headers=self.auth,
+                          data={'weight_jin': '150', 'waist_cm': '80'},
+                          files={'photo': ('big.png', b'x' * (8 * 1024 * 1024 + 4096), 'image/png')})
+        self.assertEqual(big.status_code, 413)
+        from PIL import Image
+        huge = io.BytesIO()
+        Image.new('RGB', (4500, 4500)).save(huge, format='PNG')
+        over = self.c.post('/api/cycle/upgrade', headers=self.auth,
+                           data={'weight_jin': '150', 'waist_cm': '80'},
+                           files={'photo': ('huge.png', huge.getvalue(), 'image/png')})
+        self.assertEqual(over.status_code, 400)
+        # 两次失败都不许把体重/围度写进去，也不许多开一个周期
+        before = self.c.get('/api/charts', headers=self.auth).json()['weight_history']
+        d = self.c.get('/api/dashboard', headers=self.auth).json()
+        self.assertEqual(len(d['weight_history'] if 'weight_history' in d else before), len(before))
+        self.assertEqual(d['profile']['weight_jin'], 160)
+
+    def test_weigh_only_and_water_only_are_theirs_own_kind(self):
+        """只称重、只喝水、什么都没记，三者必须各有语义，不能一律当零摄入。"""
+        from datetime import date
+        day0 = date.today().isoformat()
+        # 补录不允许早于注册日，所以先拨到两天后，再把体重补到注册那天
+        self.c.post('/api/records/backfill', headers=self.auth,
+                    json={'kind': 'weight', 'log_date': day0, 'weight_jin': 157, 'request_id': 'w-only'})
+        today = self.shift_days(2)
+        self.c.post('/api/water/update', headers=self.auth, json={'cups_count': 3})
+        bars = {b['date']: b for b in self.c.get('/api/charts', headers=self.auth).json()['deficit_history']}
+
+        weigh_only = bars[day0]
+        self.assertTrue(weigh_only['has_records'], weigh_only)
+        self.assertEqual(weigh_only['record_status'], 'partial')
+        self.assertEqual(weigh_only['consumed'], 0)
+
+        water_only = bars[today]
+        self.assertTrue(water_only['has_records'], water_only)
+        self.assertEqual(water_only['record_status'], 'partial')
+        self.assertEqual(water_only['consumed'], 0)
+
+        # 中间那天真的什么都没动过，才允许算未记录
+        gap = bars[(date.fromisoformat(today) - __import__("datetime").timedelta(days=1)).isoformat()]
+        self.assertEqual(gap['record_status'], 'missing')
+        self.assertFalse(gap['has_records'])
+
 if __name__=='__main__':unittest.main(verbosity=2)

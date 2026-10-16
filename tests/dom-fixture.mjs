@@ -9,7 +9,10 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const JS_REL = "app/src/main/assets/app.js";
-const MUTANT = process.argv.includes("--mutant");
+const MUT_ARG = process.argv.find(a => a === "--mutant" || a.startsWith("--mutant=")) || "";
+// 提交之后 HEAD 就等于当前源码，反样本必须能钉住改动前那一版，否则标定自己会过期。
+const MUT_REF = MUT_ARG.startsWith("--mutant=") ? MUT_ARG.split("=")[1] : "HEAD";
+const MUTANT = MUT_ARG !== "";
 
 // ------------------------------------------------------------------ stub 层
 function makeCtx() {
@@ -54,12 +57,20 @@ function makeCtx() {
       appendChild(c) { this._children.push(c); return c; },
       remove() {}, select() {}, focus() {}, click() { log.clicks = (log.clicks || 0) + 1 },
       querySelectorAll() { return []; },
-      querySelector() { return null; },
+      // 元素级 querySelector 以前恒返回 null，于是"弹窗里找关闭按钮"
+      // "弹窗里找可聚焦元素"这类代码在桩里永远走空分支，测不到东西。
+      querySelector(sel) { return mkEl(this.id + "|q|" + sel); },
       addEventListener() {},
+      // 弹窗绑定用 el.dataset.a11yBound 去重；桩没有 dataset 就整段抛掉。
+      dataset: {},
       // 桩缺 setAttribute 会让代码一调就抛、异常被 init 吞掉，
       // 表现成"逻辑没生效"而真因是桩少方法——这类假红上一批已经踩过一次。
       _attrs: {},
+      nodeType: 1,
       setAttribute(k, v) { this._attrs[String(k)] = String(v); },
+      hasAttribute(k) { return this._attrs[String(k)] !== undefined; },
+      // 弹窗遮罩那段会问"这个节点包含它吗"，桩没有 contains 就整段抛掉。
+      contains(other) { return other === this; },
       getAttribute(k) { const v = this._attrs[String(k)]; return v === undefined ? null : v; },
       removeAttribute(k) { delete this._attrs[String(k)]; },
     };
@@ -110,7 +121,14 @@ function makeCtx() {
     return elems.get(id);
   }
 
+  const muts = [];
   const win = {
+    // 桩里的观察器只记账不自动派发，测试自己 flush，
+    // 否则"背景被屏蔽"这类断言只能靠直接调函数糊过去。
+    MutationObserver: class {
+      constructor(cb) { this.cb = cb; }
+      observe(target) { muts.push({ target, cb: this.cb }); }
+    },
     location: { protocol: "http:", hostname: "app.test", origin: "http://app.test", hash: "", search: "" },
     addEventListener(ev, fn) { (listeners[ev] = listeners[ev] || []).push(fn); },
     AndroidBridge: {
@@ -124,16 +142,27 @@ function makeCtx() {
   };
   win.window = win;
   const listeners = {};
+  const docListeners = {};
 
   const sandbox = {
     window: win,
+    // 浏览器里 MutationObserver 是全局对象，代码里不会写 window. 前缀，
+    // 桩必须同样暴露全局名，否则测的是桩的形状而不是浏览器的形状。
+    MutationObserver: win.MutationObserver,
     document: {
       getElementById: mkEl,
       querySelector: (s) => mkEl("q" + s),
       querySelectorAll: () => [],
+      // 弹窗无障碍那段注册的是 document 级 keydown；桩以前没这个方法，
+      // 加载 app.js 会直接抛 TypeError 并被 init 吞掉，变成"逻辑没跑"的假绿。
+      addEventListener(ev, fn) { (docListeners[ev] = docListeners[ev] || []).push(fn); },
+      activeElement: null,
       createElement: (t) => newEl("dyn-" + (++dynSeq) + ":" + t),
       body: {
         appendChild() {}, removeChild() {},
+        // 把桩里出现过的元素都当作 body 的直接子节点；否则 syncDialogInert
+        // 遍历到空数组，"背景被屏蔽"这条断言会永远绿却什么都没测到。
+        get children() { return Array.from(elems.values()); },
         classList: {
           _s: new Set(),
           add(c) { this._s.add(c); },
@@ -172,12 +201,12 @@ function makeCtx() {
   };
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
-  return { context, log, sandbox, mkEl, elems, listeners };
+  return { context, log, sandbox, mkEl, elems, listeners, docListeners, muts };
 }
 
 function loadJs(context,features=false) {
   const src = MUTANT
-    ? execFileSync("git", ["show", "HEAD:" + JS_REL], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+    ? execFileSync("git", ["show", MUT_REF + ":" + JS_REL], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
     : fs.readFileSync(path.join(ROOT, JS_REL), "utf8");
   vm.runInContext(src, context, { filename: JS_REL });
   if(features)vm.runInContext(fs.readFileSync(path.join(ROOT,'app/src/main/assets/features.js'),'utf8'),context);

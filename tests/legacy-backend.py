@@ -53,11 +53,18 @@ def load_server(source_text):
 def get_source(mutant):
     if not mutant:
         return io.open(os.path.join(ROOT, SRC_REL), encoding="utf-8").read()
-    out = subprocess.run(["git", "-C", ROOT, "show", "HEAD:" + SRC_REL], capture_output=True)
+    out = subprocess.run(["git", "-C", ROOT, "show", MUT_REF + ":" + SRC_REL], capture_output=True)
     if out.returncode != 0:
         sys.exit("取 HEAD 版本失败: " + out.stderr.decode("utf-8", "replace"))
     return out.stdout.decode("utf-8")
 
+
+# 反样本基线：--mutant 默认拿 HEAD，但一旦这批改动提交，HEAD 就等于当前源码，
+# 判据会在"正反两边都绿"里失去意义。所以允许 --mutant=<ref> 钉住改动前那一版。
+MUT_REF = "HEAD"
+for _a in sys.argv:
+    if _a.startswith("--mutant="):
+        MUT_REF = _a.split("=", 1)[1]
 
 RESULTS = []
 
@@ -71,7 +78,7 @@ def body_of(r):
 
 
 def main():
-    mutant = "--mutant" in sys.argv
+    mutant = any(a == "--mutant" or a.startswith("--mutant=") for a in sys.argv)
     assert os.path.dirname(SANDBOX)==os.path.join(ROOT,"_audit_sandbox")
     shutil.rmtree(SANDBOX, ignore_errors=True)
     os.makedirs(SANDBOX, exist_ok=True)
@@ -251,17 +258,23 @@ def main():
           ('src="app.js"' not in html) and ('href="/qingsu.apk"' not in html), "")
 
     def apk_ver(txt):
-        mm = re.search(r'/qingsu\.apk\?v=(\d+)', txt)
+        mm = re.search(r'/qingsu\.apk\?v=([0-9a-f]+)', txt)
         return mm.group(1) if mm else None
 
     v1 = apk_ver(html)
-    check("APK 版本号取自真实 mtime", v1 not in (None, "0"), v1)
+    check("APK 版本号取自内容哈希", v1 not in (None, "0"), v1)
 
     # 关键一条：换了新包上线，首页给出的下载 URL 必须立刻不同，
     # 否则老浏览器会把它一直缓存住的旧包当最新的下发。
+    # 换包＝字节变了，URL 必须立刻不同；只碰 mtime 而内容不变时 URL 必须保持不变，
+    # 否则重新部署一次就逼所有老浏览器重下一遍 4.7MB。
     mk_static("qingsu.apk", "APKNEW", shift=7)
     v2 = apk_ver(body_of(m.root_dashboard()))
     check("换包后下载 URL 立即改变", v2 is not None and v2 != v1, "%s -> %s" % (v1, v2))
+
+    mk_static("qingsu.apk", "APKNEW", shift=99)
+    v3 = apk_ver(body_of(m.root_dashboard()))
+    check("内容没换只是重新部署，URL 不换", v3 == v2, "%s vs %s" % (v2, v3))
 
     rpub = pub_page(uname, uname_k)
     check("大屏页同样带版本号", 'src="app.js?v=' in body_of(rpub), "")
@@ -349,7 +362,7 @@ def main():
             return io.open(os.path.join(ROOT, "app", "src", "main", "assets", name),
                            encoding="utf-8").read()
         import subprocess
-        r = subprocess.run(["git", "show", "HEAD:app/src/main/assets/" + name],
+        r = subprocess.run(["git", "show", MUT_REF + ":app/src/main/assets/" + name],
                            cwd=ROOT, capture_output=True)
         return r.stdout.decode("utf-8")
 
@@ -357,6 +370,89 @@ def main():
     js_txt = read_asset("app.js")
     css_txt = read_asset("style.css")
     all_ids = set(re.findall(r'id="([^"]+)"', html_txt))
+    # --- 11b. 键盘可达性与读屏可见性（r131 整块漏做，本轮补）---
+    clickable_divs = re.findall(r'<div[^>]*onclick=[^>]*>', html_txt)
+    bare = [t[:60] for t in clickable_divs if 'role="button"' not in t]
+    check("可点击 div 全部声明 role=button", clickable_divs and not bare,
+          "%d 处缺: %s" % (len(bare), bare[:2]))
+    no_tab = [t[:60] for t in clickable_divs if 'tabindex="0"' not in t]
+    check("可点击 div 都能被 Tab 走到", not no_tab, no_tab[:2])
+
+    dialogs = re.findall(r'<div class="modal-card[^"]*"[^>]*>', html_txt)
+    check("五个弹窗都声明成 dialog",
+          len(dialogs) == 5 and all('role="dialog"' in d and 'aria-modal="true"' in d for d in dialogs),
+          "%d 个" % len(dialogs))
+    check("弹窗都有可读名字", all('aria-label="' in d for d in dialogs), "")
+    check("弹窗容器可被聚焦", all('tabindex="-1"' in d for d in dialogs), "")
+
+    # 每个 <label> 要么 for 指向控件，要么真的把控件包在里面；
+    # 只数"没 for 的有几个"测不出它是包着控件还是压根没关联。
+    loose = []
+    for tag, inner in re.findall(r'<label((?![^>]*for=)[^>]*)>(.*?)</label>', html_txt, re.S):
+        if not re.search('<(input|select|textarea)[ >/]', inner):
+            loose.append(inner[:40])
+    check("label 要么 for 要么真的包住输入框", not loose, loose[:3])
+    bound = re.findall(r'<label[^>]*for="([^"]+)"', html_txt)
+    # 只查"绑出去的都对"证明不了"该绑的都绑了"，掉出清单也会绿，所以补正向条数
+    check("至少 17 个 label 用 for 绑到控件", len(bound) >= 17, len(bound))
+    dangling = sorted({i for i in re.findall(r'<label[^>]*for="([^"]+)"', html_txt) if i not in all_ids})
+    check("label for 指向真实存在的 id", not dangling, dangling[:3])
+    check("界面上不再有悬空 label", '<label class="form-label" style="margin-bottom: 0;">挑选目标身材形态' not in html_txt, "")
+
+    check("图表都有无障碍名字", html_txt.count('role="img"') >= 3, html_txt.count('role="img"'))
+    check("缺口图配了文字摘要节点", 'id="chart-deficit-summary"' in html_txt, "")
+    check("摘要由 JS 生成而不是写死", 'function describeDeficit' in js_txt
+          and 'chart-deficit-summary' in js_txt, "")
+    check("达标状态用文字而不只是颜色", all(w in js_txt for w in ("达标 ", "未达 ", "超支 ", "未记录 ")), "")
+    check("注册了键盘监听", 'document.addEventListener("keydown"' in js_txt, "")
+    check("弹窗打开时屏蔽背景内容", 'setAttribute("aria-hidden"' in js_txt and "node.inert = true" in js_txt, "")
+    check("ESC 走的是各弹窗自己的关闭入口", "closeTopDialog" in js_txt
+          and ".modal-close-btn, .exd-close" in js_txt, "")
+
+    # aria-pressed 只该出现在可切换控件上；瞬时动作按钮挂 pressed 会念成"已按下"
+    pressed = re.findall(r'<(?:div|button|span)[^>]*aria-pressed[^>]*>', html_txt)
+    check("pressed 只用在餐别这类可切换项",
+          len(pressed) == 4 and all("meal-slot-chip" in t for t in pressed),
+          "%d 处: %s" % (len(pressed), [t[:40] for t in pressed if "meal-slot" not in t][:2]))
+    check("切换餐别会同步 pressed",
+          "setAttribute(\"aria-pressed\", \"true\")" in js_txt
+          and "setAttribute(\"aria-pressed\", \"false\")" in js_txt, "")
+    # 服务端还没升级时不能只把按钮灰着：那等于把故障洗成没测
+    check("服务端不支持时说明原因", "服务端未支持" in js_txt, "")
+    # 完整日确认：后端接口和界面入口必须同时存在，只有接口等于没做
+    check("界面上有完整日确认按钮", 'id="day-complete-btn"' in html_txt
+          and "toggleDayComplete()" in html_txt, "")
+    check("按钮真的打 /api/day/complete", "/api/day/complete" in js_txt
+          and "function toggleDayComplete" in js_txt, "")
+    check("确认状态回读自服务端而不是本地猜测", "today_confirmed" in js_txt
+          and '"today_confirmed"' in get_source(mutant), "")
+    check("没取到日期时按钮禁用而不是能点了没反应",
+          "btn.disabled = true;" in js_txt, "")
+    nav_px = [float(x) for x in re.findall(r'\.nav-item[^{]*\{[^}]*?font-size:\s*([0-9.]+)px', css_txt, re.S)]
+    check("底导字号不低于 11px", bool(nav_px) and min(nav_px) >= 11.0, nav_px)
+    btn_h = re.search(r'\.btn-primary\s*\{[^}]*min-height:\s*(\d+)px', css_txt, re.S)
+    check("主按钮有最小触控高度", bool(btn_h) and int(btn_h.group(1)) >= 44, btn_h and btn_h.group(1))
+    check("样式表支持减少动画", "prefers-reduced-motion" in css_txt, "")
+    check("焦点框可见", ":focus-visible" in css_txt, "")
+    # 内容哈希强缓存：只有 URL 上带对哈希才敢给一年，带错必须回源校验。
+    # 旧版本没有 v 参数，调用会抛——那必须记成红，不能让它把整台判据砸崩。
+    def cache_of(**kw):
+        return (m.get_app_js(**kw).headers or {}).get("Cache-Control", "")
+
+    try:
+        good = m._asset_ver(os.path.join(m.WEB_DIR, "app.js"))
+        h_ok = cache_of(v=good)
+        check("哈希对得上给一年强缓存",
+              "immutable" in h_ok and "max-age=31536000" in h_ok, h_ok)
+        h_bad = cache_of(v="000000000000")
+        check("哈希对不上必须回源", "no-cache" in h_bad, h_bad)
+        h_nov = cache_of()
+        check("不带哈希必须回源", "no-cache" in h_nov, h_nov)
+    except TypeError as exc:
+        check("哈希对得上给一年强缓存", False, "缺实现: " + type(exc).__name__)
+        check("哈希对不上必须回源", False, "缺实现")
+        check("不带哈希必须回源", False, "缺实现")
+
     # 绑定方式有两种：直接 getElementById，以及经 setText(id, ...) 间接写
     bound = set(re.findall(r'getElementById\(\s*"([^"]+)"', js_txt)) \
         | set(re.findall(r'setText\(\s*"([^"]+)"', js_txt))

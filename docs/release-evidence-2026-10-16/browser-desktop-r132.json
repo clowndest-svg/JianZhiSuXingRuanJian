@@ -1,0 +1,60 @@
+{
+  "note": "外部 Chrome 实测记录。键盘输入走 CDP 非可信事件通道：自研 role=button 的键盘激活（代码里显式 click）可验证；原生 <button> 的回车激活依赖浏览器默认行为，该通道下不触发，标为需人工确认，不写成通过。",
+  "measured_at_local": {
+    "url": "http://127.0.0.1:8199/（同一份源码，临时账号，独立数据库，不写生产）",
+    "logged_in_dashboard": {
+      "lcp_ms": 96,
+      "fcp_ms": 80,
+      "cls": 0.0013,
+      "layout_shifts_over_0_02": 0,
+      "ttfb_ms": 4,
+      "load_ms": 66,
+      "viewport_px": 831,
+      "horizontal_overflow": false,
+      "decoded_bytes_kb": 407,
+      "wire_bytes_kb": 407,
+      "compression": "本地 uvicorn 未做 gzip，故 wire==raw；线上由 nginx 压缩，见 live 记录"
+    }
+  },
+  "measured_at_production_before_r132": {
+    "url": "https://124.220.54.64/",
+    "lcp_ms": 1012,
+    "fcp_ms": 1012,
+    "cls": 0,
+    "ttfb_ms": 48,
+    "load_ms": 680,
+    "viewport_px": 831,
+    "horizontal_overflow": false,
+    "app_js_raw_bytes": 202357,
+    "app_js_wire_bytes": 75140,
+    "content_encoding": "gzip"
+  },
+  "keyboard_and_focus_verified": {
+    "tab_moves_focus_with_visible_ring": "BUTTON#btn-header-download，:focus-visible 命中，outline 3px solid",
+    "role_button_elements": 32,
+    "role_button_unreachable": 0,
+    "nav_items_tabindex_zero": 7,
+    "enter_on_div_role_button_switches_tab": "panel-charts 激活，nav-charts 高亮",
+    "enter_on_div_role_button_opens_dialog": "profile-modal 打开",
+    "dialog_open_background_blocked": {
+      "bottom_nav_inert": true,
+      "other_overlay_aria_hidden": "true",
+      "elementFromPoint_over_nav": "DIV/profile-modal"
+    },
+    "focus_inside_dialog_on_open": "BUTTON/modal-close-btn",
+    "escape_closes_and_restores": {
+      "modal_open": false,
+      "bottom_nav_inert": false,
+      "aria_hidden_removed": true,
+      "focus_returned_to": "kpi-card calorie"
+    },
+    "day_complete_button_renders_server_state": "还没确认 → 已确认记全（服务端 today_confirmed 同步为 true）"
+  },
+  "not_covered": {
+    "native_button_enter_activation": "CDP 非可信按键不触发浏览器默认激活，需人工键盘确认",
+    "multi_width_desktop": "X-Frame-Options: DENY 阻止同源 iframe 量宽度，window.open 被弹窗拦截；五档宽度改由真机 WebView 矩阵覆盖",
+    "firefox_and_other_engines": "本机未安装可驱动的 Firefox",
+    "touch_target_floor": "header-download-btn 实测高 25px，低于方案建议的 44–48px，未改（非主操作），记录为已知偏差",
+    "module_split_lazy_load": "未做。实测四份核心文本原始 383KB / gzip 110KB，LCP 96ms，收益不足以支撑在无人值守时重构 4286 行 app.js"
+  }
+}

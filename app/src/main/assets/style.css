@@ -380,6 +380,7 @@ body {
 
 /* 按钮样式体系 */
 .btn-primary {
+    min-height: 44px;
     background: linear-gradient(135deg, #10B981 0%, #059669 100%);
     color: #FFFFFF;
     border: none;
@@ -705,7 +706,7 @@ body {
     align-items: center;
     justify-content: center;
     color: var(--text-light);
-    font-size: 10.5px;
+    font-size: 11.5px;
     cursor: pointer;
     padding: 6px 0;
     transition: all 0.2s ease;
@@ -1910,11 +1911,23 @@ body.has-floating-dl #app-main { padding-bottom: 140px; }
 #input-weight { flex: 1 1 auto; min-width: 0; width: auto; }
 #weight-unit { flex: 0 0 auto; }
 
+/* 键盘可达性：自定义按钮与弹窗拿到焦点时必须看得见焦点框。 */
+[role=button]:focus-visible, .modal-card:focus-visible, .modal-close-btn:focus-visible,
+button:focus-visible, input:focus-visible, select:focus-visible {
+    outline: 2px solid var(--primary-dark); outline-offset: 2px;
+}
+.chart-text-summary { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important; transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important; }
+}
+
 /* 底部七个导航项：等宽收缩 + 文字缩一档，避免横向溢出 */
 .bottom-nav { gap: 0; }
 .nav-item { min-width: 0; flex: 1 1 0; padding-left: 2px; padding-right: 2px; }
 .nav-item > span:not(.nav-icon) {
-    font-size: 9.5px;
+    font-size: 11px;
     max-width: 100%;
     overflow: hidden;
     white-space: nowrap;
@@ -3060,3 +3073,8 @@ body.kiosk-mode .pub-tools-note,
 body.kiosk-mode .callout {
     display: none !important;
 }
+
+.day-complete-card .day-complete-hint { font-size: 11.5px; color: var(--text-muted); line-height: 1.6; margin-bottom: 8px; }
+.day-complete-state { font-size: 11.5px; color: #D97706; font-weight: 700; }
+.day-complete-state.done { color: var(--primary-dark); }
+

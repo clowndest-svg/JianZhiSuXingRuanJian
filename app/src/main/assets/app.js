@@ -191,8 +191,20 @@ async function initAuthAndData() {
     const savedUser = localStorage.getItem(USER_KEY);
 
     if (savedToken && savedUser) {
+        let saved = null;
+        try { saved = JSON.parse(savedUser); } catch (e) { saved = null; }
+        if (!saved || !saved.username) {
+            // 存的东西读不出来时不能继续往下走：那会让人停在"看着像登录了
+            // 但一格数据都没有"的页面上，且永远不报错。清掉并明说。
+            localStorage.removeItem(TOKEN_KEY);
+            localStorage.removeItem(USER_KEY);
+            updateUserUI(null);
+            openAuthModal();
+            callNativeToast("本机登录信息读不出来，请重新登录");
+            return;
+        }
         state.token = savedToken;
-        state.user = JSON.parse(savedUser);
+        state.user = saved;
         updateUserUI(state.user.username);
         await syncRemoteDashboard();
         await syncRemoteCharts();
@@ -430,6 +442,7 @@ function applyDashboardData(data) {
 
     renderDashboard();
     renderRealStats(data);
+    renderDayComplete(data);
     renderMealDiary();
     renderWaterCups();
     switchShapeGender(data.profile.gender || "female", false);
@@ -701,9 +714,15 @@ function checkConsecutiveAlerts() {
 // ==========================================
 function selectMealSlot(slotKey) {
     state.selectedMealSlot = slotKey;
-    document.querySelectorAll(".meal-slot-chip").forEach(c => c.classList.remove("selected"));
+    document.querySelectorAll(".meal-slot-chip").forEach(c => {
+        c.classList.remove("selected");
+        c.setAttribute("aria-pressed", "false");
+    });
     const el = document.getElementById("slot-chip-" + slotKey);
-    if (el) el.classList.add("selected");
+    if (el) {
+        el.classList.add("selected");
+        el.setAttribute("aria-pressed", "true");
+    }
 }
 
 async function logNaturalMeal() {
@@ -1111,6 +1130,7 @@ function drawDeficitChart() {
         ctx.font = "12px sans-serif";
         ctx.textAlign = "center";
         ctx.fillText("暂无真实缺口记录，记饮食与运动后生成真实柱状图", w / 2, h / 2);
+        describeDeficit([], 0);
         return;
     }
 
@@ -1121,6 +1141,7 @@ function drawDeficitChart() {
     const barW = (chartW / data.length) * 0.55;
     const step = chartW / data.length;
     const targetDeficit = Math.abs(state.calculated.deficitTarget || 420);
+    describeDeficit(data, targetDeficit);
     const targetY = padding.top + chartH * (1 - Math.min(1.0, targetDeficit / 600));
 
     // 目标缺口辅助虚线
@@ -4284,3 +4305,185 @@ function onDirectDownloadClick() {
     callNativeVibrate(50);
 }
 
+// ============================================================
+// 无障碍：弹窗焦点约束、ESC 关闭、自定义按钮键盘激活
+// ============================================================
+const DIALOG_OVERLAY_IDS = ["profile-modal", "intercept-modal", "auth-modal",
+    "download-apk-modal", "ex-detail-modal"];
+let dialogReturnFocus = null;
+
+function openDialogs() {
+    return DIALOG_OVERLAY_IDS.map(id => document.getElementById(id))
+        .filter(el => el && el.classList.contains("show"));
+}
+
+function topDialog() {
+    const list = openDialogs();
+    return list.length ? list[list.length - 1] : null;
+}
+
+function dialogPanel(overlay) {
+    return overlay ? overlay.querySelector(".modal-card") : null;
+}
+
+function dialogFocusables(root) {
+    if (!root) return [];
+    const sel = 'a[href],button:not([disabled]),input:not([disabled]),'
+        + 'select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+    return Array.prototype.slice.call(root.querySelectorAll(sel))
+        .filter(el => !el.hasAttribute("hidden") && el.type !== "hidden");
+}
+
+function syncDialogInert() {
+    const top = topDialog();
+    // 弹窗开着的时候，背景内容既不该被读屏念到，也不该被 Tab 走到。
+    Array.prototype.forEach.call(document.body.children, node => {
+        if (node.nodeType !== 1) return;
+        const inDialog = !!top && (node === top || node.contains(top));
+        if (top && !inDialog) {
+            node.setAttribute("aria-hidden", "true");
+            try { node.inert = true; } catch (e) {}
+        } else {
+            node.removeAttribute("aria-hidden");
+            try { node.inert = false; } catch (e) {}
+        }
+    });
+}
+
+function onDialogOpened(overlay) {
+    if (!dialogReturnFocus) dialogReturnFocus = document.activeElement;
+    syncDialogInert();
+    const panel = dialogPanel(overlay);
+    const items = dialogFocusables(panel);
+    const target = items.length ? items[0] : panel;
+    if (target && target.focus) { try { target.focus({ preventScroll: true }); } catch (e) {} }
+}
+
+function onDialogClosed() {
+    syncDialogInert();
+    if (!topDialog() && dialogReturnFocus && dialogReturnFocus.focus) {
+        try { dialogReturnFocus.focus({ preventScroll: true }); } catch (e) {}
+        dialogReturnFocus = null;
+    }
+}
+
+function installDialogAccessibility() {
+    if (!window.MutationObserver) return;
+    DIALOG_OVERLAY_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el || el.dataset.a11yBound) return;
+        el.dataset.a11yBound = "1";
+        new MutationObserver(() => {
+            if (el.classList.contains("show")) onDialogOpened(el); else onDialogClosed();
+        }).observe(el, { attributes: true, attributeFilter: ["class"] });
+    });
+}
+
+function closeTopDialog() {
+    const top = topDialog();
+    if (!top) return false;
+    const btn = top.querySelector(".modal-close-btn, .exd-close");
+    if (btn) { btn.click(); return true; }
+    top.classList.remove("show");
+    return true;
+}
+
+document.addEventListener("keydown", e => {
+    if (e.key === "Escape") { if (closeTopDialog()) e.preventDefault(); return; }
+    if (e.key === "Tab") {
+        const panel = dialogPanel(topDialog());
+        if (!panel) return;
+        const items = dialogFocusables(panel);
+        if (!items.length) { e.preventDefault(); return; }
+        const first = items[0], last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault(); last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault(); first.focus();
+        } else if (!panel.contains(document.activeElement)) {
+            e.preventDefault(); first.focus();
+        }
+        return;
+    }
+    // <div role="button"> 必须和真按钮一样能被回车/空格激活
+    const t = e.target;
+    if ((e.key === "Enter" || e.key === " ") && t && t.getAttribute
+        && t.getAttribute("role") === "button" && !e.repeat) {
+        e.preventDefault();
+        t.click();
+    }
+});
+
+function describeDeficit(rows, targetDeficit) {
+    let ok = 0, low = 0, over = 0, missing = 0;
+    (rows || []).forEach(d => {
+        if (d.record_status === "missing") { missing++; return; }
+        if (!(d.deficit > 0)) { over++; return; }
+        if (d.deficit >= targetDeficit) { ok++; return; }
+        low++;
+    });
+    const n = rows ? rows.length : 0;
+    const text = n
+        ? ("近" + n + "天：达标 " + ok + " 天 · 未达 " + low + " 天 · 超支 " + over
+           + " 天 · 未记录 " + missing + " 天（目标缺口 " + Math.round(targetDeficit)
+           + " kcal；* 表示当天只记了部分）")
+        : "暂无真实缺口记录，记饮食与运动后生成真实柱状图";
+    const box = document.getElementById("chart-deficit-summary");
+    if (box) box.innerText = text;
+    const cv = document.getElementById("chart-deficit");
+    if (cv) cv.setAttribute("aria-label", "热量缺口柱状图：" + text);
+    return text;
+}
+
+window.addEventListener("load", installDialogAccessibility);
+installDialogAccessibility();
+
+// ============================================================
+// 今日记录完整性确认：后端 /api/day/complete 早就有，界面上一直没有入口
+// ============================================================
+function renderDayComplete(data) {
+    const btn = document.getElementById("day-complete-btn");
+    const tag = document.getElementById("day-complete-state");
+    if (!btn || !tag) return;
+    const day = data && data.today ? data.today : (state.dayComplete || {}).date;
+    const done = !!(data && data.today_confirmed);
+    state.dayComplete = { date: day, confirmed: done };
+    if (!day) {
+        // 老服务端不返回 today。这时候只把按钮灰着、标签停在"状态读取中"，
+        // 用户看到的是"这功能坏了但没人告诉我"。得说清楚是服务端还没升级。
+        tag.innerText = "服务端未支持";
+        tag.className = "day-complete-state";
+        btn.innerText = "确认今天记完整了";
+        btn.disabled = true;
+        return;
+    }
+    tag.innerText = done ? "已确认记全" : "还没确认";
+    tag.className = "day-complete-state" + (done ? " done" : "");
+    btn.innerText = done ? "取消这个确认" : "确认今天记完整了";
+    btn.dataset.done = done ? "1" : "0";
+    btn.disabled = false;
+}
+
+async function toggleDayComplete() {
+    const btn = document.getElementById("day-complete-btn");
+    if (!btn || btn.disabled) return;
+    const day = (state.dayComplete || {}).date;
+    if (!day) { callNativeToast("今天几号还没取到，先刷新一下"); return; }
+    const done = btn.dataset.done === "1";
+    btn.disabled = true;
+    try {
+        await postApi("/api/day/complete", { log_date: day, complete: !done });
+        if (done) {
+            state.dayComplete = { date: day, confirmed: false };
+            renderDayComplete({ today: day, today_confirmed: false });
+            callNativeToast("已取消确认，这一天重新按部分记录算");
+        } else {
+            await syncRemoteDashboard();
+            callNativeToast("已确认：周报会把今天算作完整日");
+        }
+        callNativeVibrate(50);
+    } catch (e) {
+        btn.disabled = false;
+        reportWriteFailure(e, "完整日确认");
+    }
+}
