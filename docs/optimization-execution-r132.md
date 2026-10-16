@@ -64,7 +64,18 @@
 7. **app.js 按模块拆分**：未做。实测四份核心文本原始 383KB / gzip 110KB，LCP 96ms，收益不足以支撑在无人值守时重构 4286 行单文件；`.btn-header-download` 高 25px 低于 44px 建议值，属非主操作，一并留档。
 8. **外部值守告警**：仍落在 systemd/journal，未接第三方通知渠道。
 
-## 6. 清理
+## 6. CI
+
+首次推送后 `integration` 全绿，`android` 失败。定位过程：
+
+- 用 jobs API 取到失败步骤是 `bash gradlew assembleRelease lintRelease`，该步**只跑了 27 秒**（作业共 46 秒），而同一工作流在 16:43 的那次成功跑了约 183 秒。27 秒连下载 Gradle 分发包都不够，不可能是编译错误。
+- 本地按 CI 的同一条件重跑 `gradlew clean assembleRelease lintRelease --no-daemon --rerun-tasks`，45 个任务全部重新执行，BUILD SUCCESSFUL（含 `lintRelease`），日志见 `release-evidence-2026-10-16/ci-clean-local-r132.log`。
+- 该作业的日志端点需要鉴权（未登录取回 403），拿不到原始输出；工作流配置在失败与上一次成功之间没有改动。
+- 历史同型：`fb9d392` 也曾在 32 秒内快速失败，随后 `c67d14a` 显式声明 SDK 包才修好，说明这条作业对 runner 环境敏感。
+
+结论按"疑似环境抖动、尚未证实"处理：补一次真实提交重新触发 CI，并把结果记在这里。若再次快速失败即说明可复现，需要拿带权限的日志继续查，不把它当作已通过。
+
+## 7. 清理
 
 `_audit_sandbox/`（91MB 的一次性审计产物：旧包、暂存 tar、截图、临时脚本）与各级 `__pycache__` 已删除。其中 `deploy-key.pem` 删不掉——它的 ACL 是显式只读（当前用户仅 `Read, Synchronize`），强删等于破坏既有保护。已用公钥指纹确认它与 `qingsu-signing/backup-access.pem` 是同一把钥匙（`SHA256:0YPT9XZWMI6LPyd9/7d+ZUeE3P8El/E16uj/MSitJZY`），属冗余副本，机主想删执行：
 
