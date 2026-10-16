@@ -1,13 +1,13 @@
 # 轻塑：Android 与网页记录工具
 
-当前版本：r132 / Android **1.6.0（15）**。
+当前版本：r134 / Android **1.7.0（17）**。
 
 - 网页：https://124.220.54.64/
 - 安装包：https://124.220.54.64/qingsu.apk
 - 版本与指纹：https://124.220.54.64/version.json
 - 就绪检查：https://124.220.54.64/health/ready
 
-支持本人饮食、体重、训练、饮水和周期记录；提供历史修正/删除/补录、份量确认、分享权限与撤销、完整日确认、离线草稿、Android 每日提醒及 CSV 保存。所有热量、预算、宏量和消耗均为估算；系统不分析照片，也不提供个人诊疗或营养处方。
+支持本人饮食、体重、训练、饮水和周期记录；训练动作配 3D 骨骼人体演示（模型与 Three.js 随包离线分发，拿不到 WebGL 或模型加载失败时退回 2D 示意并写明原因）；提供历史修正/删除/补录、份量确认、分享权限与撤销、完整日确认、离线草稿、Android 每日提醒及 CSV 保存。所有热量、预算、宏量和消耗均为估算；系统不分析照片，也不提供个人诊疗或营养处方。
 
 ## 构建与测试
 
@@ -48,7 +48,7 @@ python scripts/package-release.py --output release.tar
 - 服务器使用专用账号、SQLite WAL、原子限流和有界 Redis 降级；8000不对公网提供服务。
 - IP 可信证书采用短有效期证书，每日两次检查续期。数据库/媒体每日备份，服务器保留14天；本机每日拉取加密副本并恢复验证，保留30天。
 
-详细操作见 [运维手册](docs/operations.md)；变更与验收见 [r132 执行记录](docs/optimization-execution-r132.md)、[r131 执行记录](docs/optimization-execution-2026-10-16.md) 和 [原始审查方案](docs/optimization-plan-2026-10-16.md)。原审查证据与 r130/r131 记录属于历史快照，不能当作 r132 当前状态。
+详细操作见 [运维手册](docs/operations.md)；变更与验收见 [r134 执行记录](docs/optimization-execution-r134.md)、[r132 执行记录](docs/optimization-execution-r132.md)、[r131 执行记录](docs/optimization-execution-2026-10-16.md) 和 [原始审查方案](docs/optimization-plan-2026-10-16.md)。原审查证据与 r130/r131 记录属于历史快照，不能当作 r132 当前状态。
 
 ## 验证边界
 

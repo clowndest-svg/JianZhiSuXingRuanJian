@@ -977,7 +977,10 @@ body {
 }
 
 .chat-input-bar input {
-    flex: 1;
+    flex: 1 1 0;
+    /* 表单控件的自动最小宽度是它的固有宽度（约 324px），flex:1 单独压不住：
+       320 视口下它把整页布局视口顶到 410，窄屏排版全部假通过。 */
+    min-width: 0;
     padding: 8px 12px;
     border: 1px solid var(--border);
     border-radius: var(--radius-full);
@@ -2504,13 +2507,14 @@ header *, .header-tools, .header-row-1 {
     aspect-ratio: 340 / 360;
     margin: 0 auto;
 }
-/* 竖排在左上角：横排到右上角时，会被手机厂商的悬浮侧栏（返回/音量条）压住 */
+/* 竖排在左上角：横排到右上角时，会被手机厂商的悬浮侧栏（返回/音量条）压住。
+   宽度扣掉 left 的 8px，右边界才恒等于 64%（否则画布越窄，偏移占比越大，右侧留给侧栏的空间越小）。 */
 .exd-viewport-overlay {
     position: absolute;
     top: 8px;
     left: 8px;
     right: auto;
-    max-width: min(64%, calc(100% - 16px));
+    max-width: min(calc(64% - 8px), calc(100% - 24px));
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -3091,3 +3095,23 @@ body.kiosk-mode .callout {
 .day-complete-state { font-size: 11.5px; color: #D97706; font-weight: 700; }
 .day-complete-state.done { color: var(--primary-dark); }
 
+
+.exd-hud-foot {
+    position: absolute;
+    left: 10px;
+    bottom: 8px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: rgba(148, 163, 184, 0.9);
+    pointer-events: none;
+    max-width: calc(100% - 20px);
+}
+
+/* 叠在 2D 画布上：透明背景、不吃指针，拖拽旋转仍然由下层画布接收 */
+.exd-body-canvas {
+    position: absolute;
+    left: 0; top: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    display: block;
+}

@@ -1,4 +1,4 @@
-const CACHE='qingsu-shell-r133-1';
+const CACHE='qingsu-shell-r134-1';
 const SHELL=['/','/app.js','/style.css','/features.js','/features.css','/exercise_poses.json','/manifest.webmanifest','/guidance.json'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL))));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('qingsu-shell-')&&k!==CACHE).map(k=>caches.delete(k))))));

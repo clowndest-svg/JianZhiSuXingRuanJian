@@ -2522,5 +2522,37 @@ def extension_asset(name):
         media={"js":"application/javascript","css":"text/css","svg":"image/svg+xml","webmanifest":"application/manifest+json","json":"application/json"}[name.rsplit(".",1)[-1]]
         return FileResponse(path,media_type=media,headers=headers)
     return serve
-for asset in ("features.js","features.css","sw.js","manifest.webmanifest","app-icon.svg","guidance.json"):
+
+# 3D 依赖与模型：体积大且按版本发布，同样走内容哈希强缓存。
+# 路径必须限定在 vendor/ 与 models/ 白名单里，绝不能变成任意文件读取。
+_STATIC_SUBDIRS = {
+    "vendor": {"three.module.js", "GLTFLoader.js", "BufferGeometryUtils.js"},
+    "models": {"cesium_man.glb", "CREDITS.md"},
+}
+_SUBDIR_MEDIA = {
+    ".js": "application/javascript",
+    ".glb": "model/gltf-binary",
+    ".md": "text/markdown; charset=utf-8",
+}
+
+def static_subdir(folder, name):
+    allowed = _STATIC_SUBDIRS.get(folder)
+    if not allowed or name not in allowed:
+        raise HTTPException(status_code=404, detail="资源未部署")
+    path = os.path.join(WEB_DIR, folder, name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="资源未部署")
+    ext = name[name.rfind("."):].lower()
+    return FileResponse(path, media_type=_SUBDIR_MEDIA.get(ext, "application/octet-stream"),
+                        headers=_asset_headers(path, None))
+
+@app.get("/vendor/{name}")
+def get_vendor(name: str):
+    return static_subdir("vendor", name)
+
+@app.get("/models/{name}")
+def get_models(name: str):
+    return static_subdir("models", name)
+
+for asset in ("features.js","features.css","sw.js","manifest.webmanifest","app-icon.svg","guidance.json","body3d.js"):
     app.get("/"+asset)(extension_asset(asset))

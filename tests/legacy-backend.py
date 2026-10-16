@@ -450,6 +450,52 @@ def main():
     ov_css = css_txt[css_txt.find(".exd-viewport-overlay {"):css_txt.find("}", css_txt.find(".exd-viewport-overlay {"))]
     check("画面信息标签靠左竖排，不给系统悬浮侧栏留遮挡位",
           "flex-direction: column" in ov_css and "right: auto" in ov_css, ov_css[:80])
+    # 模拟器上画布比 vivo 窄，left 偏移在百分比里占比更大，实测右边界漂到 69%。
+    # 宽度必须扣掉 left 的 8px，右边界才恒等于 64%，不随画布宽度变。
+    check("信息标签右边界不随画布宽度漂移（宽度已扣掉 left 偏移）",
+          "min(calc(64% - 8px)" in ov_css, ov_css[:120])
+    # 真机 320 档实测：聊天输入框把布局视口顶到 410，窄屏判据全部假通过。
+    # flex:1 不等于能缩到固有宽度以下，表单控件必须显式 min-width:0。
+    chat_css = css_txt[css_txt.find(".chat-input-bar input {"):css_txt.find("}", css_txt.find(".chat-input-bar input {"))]
+    check("聊天输入框允许压到视口宽度以内", "min-width: 0" in chat_css, chat_css[:90])
+    # --- 11c. 3D 骨骼演示层 ---
+    body3d_txt = read_asset("body3d.js")
+    check("3D 层以 ES 模块方式被页面加载",
+          "import * as THREE" in body3d_txt
+          and 'type="module" src="body3d.js"' in html_txt, "")
+    # 少发一个文件，线上就只剩画块兜底，看着像"3D 没生效"而不是"漏发文件"
+    pkg_txt = io.open(os.path.join(ROOT, "scripts", "package-release.py"), encoding="utf-8").read()
+    check("发布归档包含 vendor 与 models", "vendor" in pkg_txt and "models" in pkg_txt, "")
+    vend = os.path.join(ROOT, "app", "src", "main", "assets", "vendor")
+    for need in ("three.module.js", "GLTFLoader.js", "BufferGeometryUtils.js"):
+        check("3D 依赖已入库 " + need, os.path.isfile(os.path.join(vend, need)), need)
+    check("模型已入库",
+          os.path.isfile(os.path.join(ROOT, "app", "src", "main", "assets",
+                                      "models", "cesium_man.glb")), "")
+    check("模型授权说明随包附带",
+          os.path.isfile(os.path.join(ROOT, "app", "src", "main", "assets",
+                                      "models", "CREDITS.md")), "")
+    # 依赖必须全部本地化：裸 'three' 说明符在 APK 里解析不到，等于线上必挂
+    loader_txt = io.open(os.path.join(vend, "GLTFLoader.js"), encoding="utf-8").read()
+    utils_txt = io.open(os.path.join(vend, "BufferGeometryUtils.js"), encoding="utf-8").read()
+    check("vendor 内没有裸 three 说明符",
+          "from 'three'" not in loader_txt and "from 'three'" not in utils_txt, "")
+    # 服务端只能下发白名单文件，绝不能变成任意路径读取
+    srv_src = get_source(mutant)
+    check("静态子目录走白名单而不是任意路径",
+          "_STATIC_SUBDIRS" in srv_src and "name not in allowed" in srv_src, "")
+    # 兜底不能被删：WebGL 不可用时必须还能画
+    check("3D 不可用时保留画块兜底",
+          'Body3D.status === "ready"' in js_txt and '"blocks"' in js_txt, "")
+    # 一根骨都没驱动时必须退回，而不是画个站桩模型冒充动画
+    check("零驱动时不冒充动画生效", "State.solved === 0" in body3d_txt, "")
+    # 绑定姿态要自检：头在骨盆上方、膝在髋踝之间，映射或朝向错了要当场失败
+    check("初始化会自检绑定姿态",
+          "bj.head.y > bj.pelvis.y" in body3d_txt and "bj.r_knee.y < bj.r_hip.y" in body3d_txt, "")
+    # 文案必须跟着实际渲染方式走，不能真模型还写"程序化体块"
+    check("说明文案区分两种渲染模式",
+          "3D 人体模型按关键帧驱动" in js_txt and "程序按关键帧算出来的立体体块" in js_txt, "")
+
     # 就绪上报必须是"读出来的"，不能是写死的：写死时部署脚本拿同一个字自比，
     # 发错版本也照样判就绪。
     try:

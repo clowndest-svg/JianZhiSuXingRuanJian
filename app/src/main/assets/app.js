@@ -3022,6 +3022,42 @@ function bindCanvas3DInteractions(cv) {
  * 绘制高科技地台网格、动态柔和接触阴影、圆柱体肌纤维渐变肌肉体块、
  * 关节镀铬金属球铰链、3D高光头部视向、受力肌群发力全息脉冲与运动阶段HUD。
  */
+/** 相位与发力提示：以前只有画块法会更新，换成真模型后这两行就永远不动了，
+    所以抽出来给两条路共用。 */
+function updateExerciseHud(arch, t, mode) {
+    const isConcentric = (t % 1.0) < 0.5;
+    const phaseEl = document.getElementById("ex-phase-text");
+    if (phaseEl) {
+        // 关键帧表里没写哪个半程是向心，硬贴"向心/离心"就是编；只报屏上真看得见的相位
+        phaseEl.textContent = isConcentric ? "前半程（起身/推起方向）" : "后半程（还原方向）";
+    }
+    const phaseBadge = document.getElementById("ex-phase-badge");
+    if (phaseBadge) {
+        phaseBadge.style.color = isConcentric ? "#34D399" : "#38BDF8";
+        phaseBadge.style.borderColor = isConcentric ? "rgba(16, 185, 129, 0.4)" : "rgba(56, 189, 248, 0.4)";
+    }
+    const foot = document.getElementById("ex-hud-foot");
+    const note = document.getElementById("ex-render-note");
+    if (note) note.textContent = mode === "model"
+        ? "画面是 3D 人体模型按关键帧驱动的真实骨骼动作，用来看发力顺序与幅度；不是真人示范视频，也不是动作医学判断。按住拖拽可转动视角。"
+        : "画面是程序按关键帧算出来的立体体块，用来看发力顺序与幅度，不是真人示范视频，也不是动作医学判断；按住拖拽可转动视角。";
+    if (foot) foot.textContent = ex3dCaption();
+}
+
+/** 说明文案必须跟着实际渲染方式变：真模型还写"程序化体块"就是撒谎。 */
+function ex3dCaption() {
+    const meta = EX_ARCHETYPES[(typeof exActiveArch === "undefined" ? "" : exActiveArch)] || null;
+    const name = meta ? meta.cn + " · " : "";
+    return ex3DMode === "model"
+        ? name + "3D 人体模型演示 · 非真人实拍，也不是动作医学判断"
+        : name + "程序化体块示意 · 非真人实拍";
+}
+
+/** 关键帧表只给了 2D 点，平面决定这些点在三维里怎么摆。 */
+function posePlane(key) {
+    const e = (EX_POSES || {})[key];
+    return (e && e.plane === "frontal") ? "frontal" : "sagittal";
+}
 function drawFrame(g, W, H, pose, arch, t) {
     // 摄像机平滑阻尼插值
     ex3DCamera.yaw += (ex3DCamera.targetYaw - ex3DCamera.yaw) * 0.16;
@@ -3035,6 +3071,21 @@ function drawFrame(g, W, H, pose, arch, t) {
     bgGrd.addColorStop(1, "#020617");
     g.fillStyle = bgGrd;
     g.fillRect(0, 0, W, H);
+
+    // 真骨骼模型优先：能画就完全不进下面的画块流程，画块法整体退居兜底
+    if (window.Body3D && Body3D.status === "ready") {
+        const cfg = ACTIVE_MUSCLES[arch] || { targets: [] };
+        let ok = false;
+        try { ok = Body3D.setPose(pose, posePlane(exActivePoseKey), ex3DCamera.yaw, cfg.targets); }
+        catch (e) { ok = false; console.warn("[Body3D] 这一帧没画成：" + e); }
+        if (ok) {
+            if (ex3DMode !== "model") { ex3DMode = "model"; }
+            exActiveArch = arch;
+            updateExerciseHud(arch, t, "model");
+            return;
+        }
+        ex3DMode = "blocks";
+    }
 
     const isSideArch = (arch === "pushup" || arch === "plank" || arch === "bridge");
     const activeCfg = ACTIVE_MUSCLES[arch] || { name: "背阔肌 · 上背肌群", targets: ["chest", "arm_l", "arm_r"] };
@@ -3354,26 +3405,17 @@ function drawFrame(g, W, H, pose, arch, t) {
         drawJointSphere(pel, 8, true);
     }
 
-    // 11. HUD 文本状态反馈：实时更新相位与发力肌群
-    const phaseEl = document.getElementById("ex-phase-text");
-    if (phaseEl) {
-        // 关键帧表里没写哪个半程是向心，硬贴"向心/离心"就是编；只报屏上真看得见的相位
-        phaseEl.textContent = isConcentric ? "前半程（起身/推起方向）" : "后半程（还原方向）";
-    }
-    const phaseBadge = document.getElementById("ex-phase-badge");
-    if (phaseBadge) {
-        phaseBadge.style.color = isConcentric ? "#34D399" : "#38BDF8";
-        phaseBadge.style.borderColor = isConcentric ? "rgba(16, 185, 129, 0.4)" : "rgba(56, 189, 248, 0.4)";
-    }
-
-    // 画布内置 HUD 辅助信息
+    // 11. HUD 文本状态反馈（相位、发力部位、说明）——模型法与画块法共用同一份
+    updateExerciseHud(arch, t, "blocks");
     g.fillStyle = "rgba(148, 163, 184, 0.85)";
     g.font = "11px system-ui, -apple-system, sans-serif";
     const meta = EX_ARCHETYPES[arch] || EX_ARCHETYPES.plank;
-    g.fillText(meta.cn + " · 程序化体块示意 · 非真人实拍", 12, H - 12);
-}
+    g.fillText(meta.cn + " · " + ex3dCaption(), 12, H - 12);}
 
 let exAnim = null;
+let exActivePoseKey = null;
+let exActiveArch = "";
+let ex3DMode = "";
 
 // 真数据优先：仓库里带了一份 32 动作 × 4 关键帧的姿态表（按固定骨长生成，
 // 已核过骨长恒定与肘膝不反折）。取不到时回落到上面的程序化原型，而不是画一张静图。
@@ -3450,6 +3492,8 @@ function openExerciseDetail(idx) {
     const meta = EX_STEPS[key] || {};
     const arch = detectArchetype(meta, item);
     const poseKey = currentExKey(idx);
+    exActivePoseKey = poseKey;
+    exActiveArch = arch;
     const nameEl = document.getElementById("ex-detail-name");
     const repsEl = document.getElementById("ex-detail-reps");
     const targetMuscleEl = document.getElementById("ex-detail-target-muscle");
@@ -3500,6 +3544,16 @@ function openExerciseDetail(idx) {
     const modal = document.getElementById("ex-detail-modal");
     modal.classList.add("show");
 
+    // 第一次打开演示才付模型与 Three.js 的加载成本，不拖慢首屏
+    if (window.Body3D && Body3D.status === "idle") {
+        const bodyCv = document.getElementById("ex-body-canvas");
+        Body3D.init(bodyCv || cv).then(function (st) {
+            if (st === "ready") Body3D.resize(bodyCv || cv);
+            else if (st === "unavailable") console.warn("[Body3D] 退回画块演示：" + Body3D.reason);
+        });
+    } else if (window.Body3D && Body3D.status === "ready") {
+        Body3D.resize(document.getElementById("ex-body-canvas") || cv);
+    }
     const g = cv.getContext("2d");
     if (!g) { callNativeToast("这台设备的画布不可用，动画放不出来"); return; }
     if (exAnim) cancelAnimationFrame(exAnim.raf);

@@ -1305,6 +1305,9 @@
             <!-- 3D 动作视口容器 -->
             <div class="exd-viewport-box">
                 <canvas id="ex-detail-canvas" class="exd-canvas" width="340" height="360"></canvas>
+                <!-- 真模型画在独立的 WebGL 画布上：同一个 canvas 不能既要 2d 又要 webgl，
+                     抢了之后 getContext("2d") 直接返回 null，动画循环根本起不来 -->
+                <canvas id="ex-body-canvas" class="exd-body-canvas"></canvas>
                 
                 <!-- 3D 悬浮视口提示与 HUD -->
                 <div class="exd-viewport-overlay">
@@ -1317,6 +1320,8 @@
                         <span id="ex-phase-text">相位未开始</span>
                     </div>
                 </div>
+                <!-- 说明跟着实际渲染方式变：真模型不能再写"程序化体块" -->
+                <div class="exd-hud-foot" id="ex-hud-foot"></div>
 
             </div>
             <!-- 视角工具栏放在画面下方正常流里：以前它 absolute 浮在画布上，
@@ -1334,7 +1339,7 @@
                     <button type="button" class="btn-exd-ctl" id="ex-detail-play" onclick="toggleExDetailPlay()">⏸️ 暂停</button>
                     <button type="button" class="btn-secondary" id="ex-detail-slow" onclick="toggleExDetailSlow()">慢放：关</button>
                 </div>
-                <span class="exd-note">画面是程序按关键帧算出来的立体体块，用来看发力顺序与幅度，不是真人示范视频，也不是动作医学判断；按住拖拽可转动视角。</span>
+                <span class="exd-note" id="ex-render-note">画面是程序按关键帧算出来的立体体块，用来看发力顺序与幅度，不是真人示范视频，也不是动作医学判断；按住拖拽可转动视角。</span>
             </div>
 
             <!-- 动作规范分解步骤 -->
@@ -1354,6 +1359,7 @@
         </div>
     </div>
 
+    <script type="module" src="body3d.js"></script>
     <script src="app.js"></script>
     <script src="features.js"></script>
 </body>
