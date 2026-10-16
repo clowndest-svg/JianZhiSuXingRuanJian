@@ -78,7 +78,23 @@
 
 ## 5. 发布与线上对账
 
-（部署完成后补数字。）
+- 线上提交：`b367fcc15d16a00927736f289376238c040ac08e`，`GET /health/ready` 逐字回读到它，
+  `release` 为 `r135`。回退快照 `/opt/qingsu/backups/release-20261017-065153`。
+- `qingsu.apk`：5318625 字节，MD5 `9cdea15b959e722f54c3e72193f73250`；
+  从公网回读同一份安装包比 MD5 一致，`/version.json` 的 size/md5 也是现算的。
+- 归档两端 MD5 一致（`b31209c9da507adc703ea9b4ebd7e572`）。
+- 3D 资产逐个比 SHA-256 前 12 位，本地与线上一致：`body3d.js`、
+  `vendor/three.module.js`、`vendor/GLTFLoader.js`、`vendor/BufferGeometryUtils.js`、
+  `models/cesium_man.glb` 共 5 个 MATCH，0 个 DIFF。
+- `scripts/verify_live.py` 七项全过（双会话、新账号与分享链接、分享访问边界、
+  当日最新体重、训练幂等、清单持久化、会话撤销）。
+- 浏览器实测线上页：4 个动作逐个 `selfTest`，`orphan` 全 0、`ndcMax` 0.784~0.900、
+  `fill` 80.4~85.6、`nanBones=0`、`badFrame=null`、单帧 0.2ms，控制台 0 条消息。
+  数字与本机、真机三方一致，不是"线上看着像就行"。
+- 生产数据收尾：本轮真机产生的 8 个 `usbqa*` 与线上验收用的 1 个 `live135*`
+  按 id 逐个删除（先断言"要删的正好是这 9 个、剩下的正好是 2 和 3"才动手），
+  删后 `users` 只剩 `tiangang`、`木木`，`foreign_key_check` 0 条，
+  两个真实账号在各表行数删前后逐项相同。VERDICT=OK。
 
 ## 6. 没做到的 / 换模型的接口
 
