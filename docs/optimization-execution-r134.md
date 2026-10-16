@@ -55,14 +55,16 @@
 本地三套（`.venv` 的 Python 3.12，不是系统 3.14）：
 
 - `tests/test_integration.py`：25 组全过。
-- `tests/legacy-backend.py`：289 条，绿 289，红 0。
+- `tests/legacy-backend.py`：290 条，绿 290，红 0。
 - `tests/legacy-frontend.mjs`：225 条，绿 225，红 0。
 
 反样本标定（`--mutant=d9591c9`，即 r133、本轮改动前那一版）：
 
-- 后端 289 条里红 9 条，正好是本轮新增的 9 条：3D 模块加载、画块兜底、
+- 后端 290 条里红 9 条，正好是本轮新增里能对旧版判定的 9 条：3D 模块加载、画块兜底、
   零驱动不冒充、绑定姿态自检、文案区分两种渲染模式、静态子目录白名单、
   信息标签右边界不漂移、聊天输入框 `min-width:0`、部署脚本会搬 web 子目录。
+- 本轮还有 1 条不参与该标定："更新说明只讲当前这一版"拿磁盘上的 CHANGELOG 与清单
+  现比，属于防今后漂移的一致性判据，在旧版上同样会绿，别当成反样本已验证。
 - 前端 225 条在反样本上全绿：**本轮没有给前端加新判据**，3D 的正确性只由真机
   仪表测试和浏览器实测覆盖（见下）。这条要如实记着，不能算标定通过。
 
@@ -86,13 +88,33 @@
 - 4 个动作逐个 `selfTest`：`fill` 71.9~83.5、`ndcMax` 0.699~0.775、`ok` 全 true。
 - 3D 初始化耗时（含模型下载与解析）在本地回环下 < 2 秒；公网时延未测。
 
-## 4. 发布物
+## 4. 发布物与线上对账
 
-见下一节（部署完成后补线上对账数字）。
-
-- `qingsu.apk`：5314529 字节，MD5 `7fcd9db9...`（完整值见 `web_version.json`，
-  由 `make_version_json.py` 现算，不手抄）。
-- 包内资产与源码逐字节核对通过；`vendor/` 三个文件与 `models/` 两个文件都在归档里。
+- 提交：`08f61d6ce06511ebd3195575c8fac80768445399`（本轮共三个提交：
+  `68cd915` 3D 与窄屏整改、`352a9cd` 部署脚本补搬子目录、`08f61d6` 更新说明截断）。
+- `qingsu.apk`：5314529 字节，MD5 `7fcd9db9a216ca619ab5e7e16873f6a1`，
+  SHA-256 `82192ea029de095dc92ce882ce1883d3811f93af8f54e4c9095ef9338b8b6dd8`。
+  线上回读同一份安装包，前 12 位一致（`82192ea029de`）。
+- 归档 `release.tar` 上传后两端 MD5 一致（`e67be44a...`），解压后
+  `chown -R root:root`；回退快照 `/opt/qingsu/backups/release-20261017-055335`。
+- `GET /health/ready` → `{"release":"r134","source_revision":"08f61d6…","status":"ok"}`，
+  与本次提交逐字相同，不是脚本自己跟自己比出来的。
+- 3D 依赖逐个比哈希（本地 vs 线上，全部 MATCH）：`body3d.js` `8e49f905e3b5`、
+  `vendor/three.module.js` `76dea8151bc9`、`vendor/GLTFLoader.js` `1f9b02acfbf2`、
+  `vendor/BufferGeometryUtils.js` `3a6701d824ad`、`models/cesium_man.glb` `659349b0a374`、
+  `models/CREDITS.md` `f4666e2c34d8`。
+- 缓存：带正确哈希 → `public, max-age=31536000, immutable`；带错哈希 → `no-cache, must-revalidate`；
+  无哈希的 `/vendor/*` → `no-cache` 且 `x-content-type-options: nosniff`。
+- 路径白名单：`/vendor/requirements.txt`、`/vendor/../../etc/passwd`、
+  `/models/%2e%2e/server.py` 全部 404。
+- HTTP 入口仍 `308 → https://124.220.54.64/`。
+- 浏览器实测线上页（不是本机回环）：登录后 4 个动作逐个 `selfTest`，
+  `fill` 71.9~83.5、`ndcMax` 0.699~0.775、`ok` 全 true，
+  `solvedBones=13`、`nanBones=0`、`badFrame=null`、单帧 0.5ms，控制台 0 条消息。
+- 生产数据收尾：本轮真机与线上验收产生的 23 个 `usbqa*/probe*` 测试账号和
+  1 个 `live134*` 账号按 id 逐个删除（含各 user_id 子表），
+  删后 `users` 只剩 `tiangang`、`木木`，`pragma foreign_key_check` 0 条，
+  两个真实账号在各表的行数删前删后逐项相同。
 
 ## 5. 仍未覆盖（不写成通过）
 
