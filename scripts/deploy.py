@@ -28,7 +28,15 @@ run('python3',str(root/'backup.py'))
 def copy_files(src,dst):
     dst.mkdir(exist_ok=True)
     for file in src.iterdir():
-        if file.is_file():
+        if file.is_dir():
+            # web/vendor 与 web/models 是 3D 的子目录：只拷文件会静默少一整个目录，
+            # 页面退回 2D 画块，而部署本身照样报成功。先整体落到临时名再换。
+            temp=dst/(file.name+'.new')
+            if temp.exists():shutil.rmtree(temp)
+            shutil.copytree(file,temp)
+            if (dst/file.name).exists():shutil.rmtree(dst/file.name)
+            os.replace(temp,dst/file.name)
+        elif file.is_file():
             temp=dst/(file.name+'.new');shutil.copy2(file,temp);os.replace(temp,dst/file.name)
 
 def protect_code(path):

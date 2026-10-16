@@ -522,6 +522,10 @@ def main():
     check("部署脚本按提交号对账而不是按标签自比",
           "source_revision')==args.revision" in dep.replace(" ", ""),
           dep.count("args.revision"))
+    # copy_files 原来只搬 is_file()：web/vendor、web/models 整目录会被跳过，
+    # 线上 3D 静默退回 2D，而部署流程一路绿灯。子目录必须显式搬。
+    cf = dep[dep.find("def copy_files"):dep.find("def protect_code")]
+    check("部署脚本会搬 web 下的子目录", "is_dir()" in cf and "copytree" in cf, cf[:120])
 
     # 内容哈希强缓存：只有 URL 上带对哈希才敢给一年，带错必须回源校验。
     # 旧版本没有 v 参数，调用会抛——那必须记成红，不能让它把整台判据砸崩。
