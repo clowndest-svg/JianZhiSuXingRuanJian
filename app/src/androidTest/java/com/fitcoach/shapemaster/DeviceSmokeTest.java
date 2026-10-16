@@ -105,7 +105,20 @@ public class DeviceSmokeTest {
             assertEquals(tab+" panel visible","true",js("document.getElementById('panel-"+tab+"').classList.contains('active')"));
             assertEquals(tab+" horizontal overflow","true",js("document.documentElement.scrollWidth<=window.innerWidth+1"));
         }
-        js("switchTab('workout');openExerciseDetail(0)");Thread.sleep(500);screenshot("exercise");js("closeExerciseDetail()");
+        js("switchTab('workout');openExerciseDetail(0)");Thread.sleep(700);
+        // 用户报的 bug：3D 视角工具栏叠在画布上把人体遮住。这里用几何量出来，
+        // 不靠"看着好像没挡"。overlap>0 就是真挡住了。
+        String geo = js("JSON.stringify((function(){            var c=document.getElementById('ex-detail-canvas').getBoundingClientRect();            var b=document.querySelector('.exd-camera-bar').getBoundingClientRect();            var bs=[].slice.call(document.querySelectorAll('.exd-cam-btn')).map(function(x){return Math.round(x.getBoundingClientRect().top);});            var ov=document.querySelector('.exd-viewport-overlay').getBoundingClientRect();            return {canvasBottom:Math.round(c.bottom),barTop:Math.round(b.top),                overlap:Math.max(0,Math.round(c.bottom-b.top)),                barHeight:Math.round(b.height),rowTops:bs,                overlayRightFrac:+(ov.right/c.width).toFixed(2),barWidthFrac:+(b.width/c.width).toFixed(2)};            })())");
+        org.json.JSONObject g = new org.json.JSONObject(new org.json.JSONArray("[" + geo + "]").getString(0));
+        assertEquals("视角工具栏与画布零重叠（不遮人体）: " + geo, 0, g.getInt("overlap"));
+        org.json.JSONArray tops = g.getJSONArray("rowTops");
+        int lo = Integer.MAX_VALUE, hi = Integer.MIN_VALUE;
+        for (int k = 0; k < tops.length(); k++) { int t = tops.getInt(k); lo = Math.min(lo, t); hi = Math.max(hi, t); }
+        assertTrue("四个视角按钮仍在同一行: " + geo, hi - lo <= 2);
+        assertTrue("工具栏不宽于画布: " + geo, g.getDouble("barWidthFrac") <= 1.0);
+        assertTrue("信息标签靠左，右上角留给系统侧栏: " + geo, g.getDouble("overlayRightFrac") <= 0.68);
+        screenshot("exercise");
+        js("closeExerciseDetail()");
         js("switchTab('gemini');document.getElementById('chat-input').value='我现在多重';sendChatMessage();");
         waitFor("document.getElementById('chat-messages-box').innerText.includes('150')");screenshot("chat");
         js("openReminderSettings()");waitFor("!!document.getElementById('reminder-enabled')");screenshot("reminders");

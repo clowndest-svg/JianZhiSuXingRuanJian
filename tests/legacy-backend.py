@@ -434,6 +434,22 @@ def main():
     check("主按钮有最小触控高度", bool(btn_h) and int(btn_h.group(1)) >= 44, btn_h and btn_h.group(1))
     check("样式表支持减少动画", "prefers-reduced-motion" in css_txt, "")
     check("焦点框可见", ":focus-visible" in css_txt, "")
+    # 3D 视角工具栏曾经 absolute 浮在画布上、窄屏折成三行，把人体整个盖住。
+    # 结构判据：它必须是视口框的兄弟节点，且样式不再 absolute。
+    box_at = html_txt.find('class="exd-viewport-box"')
+    bar_at = html_txt.find('class="exd-camera-bar"')
+    box_close = html_txt.find('<!-- 视角工具栏放在画面下方正常流里', box_at)
+    check("视角工具栏在画布之外而不是叠在上面",
+          -1 < box_at < box_close < bar_at, (box_at, box_close, bar_at))
+    bar_css = css_txt[css_txt.find(".exd-camera-bar {"):css_txt.find("}", css_txt.find(".exd-camera-bar {"))]
+    check("视角工具栏不再 absolute 浮层", "position: absolute" not in bar_css, bar_css[:80])
+    check("视角工具栏四键等宽单行",
+          "flex-wrap: nowrap" in bar_css
+          and "flex: 1 1 0" in css_txt[css_txt.find(".exd-cam-btn {"):css_txt.find("}", css_txt.find(".exd-cam-btn {"))],
+          "")
+    ov_css = css_txt[css_txt.find(".exd-viewport-overlay {"):css_txt.find("}", css_txt.find(".exd-viewport-overlay {"))]
+    check("画面信息标签靠左竖排，不给系统悬浮侧栏留遮挡位",
+          "flex-direction: column" in ov_css and "right: auto" in ov_css, ov_css[:80])
     # 就绪上报必须是"读出来的"，不能是写死的：写死时部署脚本拿同一个字自比，
     # 发错版本也照样判就绪。
     try:

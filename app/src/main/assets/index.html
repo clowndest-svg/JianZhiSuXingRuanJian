@@ -1318,13 +1318,14 @@
                     </div>
                 </div>
 
-                <!-- 3D 视角快速切换工具栏 -->
-                <div class="exd-camera-bar">
-                    <button type="button" class="exd-cam-btn active" id="cam-btn-3d" onclick="setEx3DAngle('3d')">📐 立体视角</button>
-                    <button type="button" class="exd-cam-btn" id="cam-btn-front" onclick="setEx3DAngle('front')">🎯 正面</button>
-                    <button type="button" class="exd-cam-btn" id="cam-btn-side" onclick="setEx3DAngle('side')">🔍 侧面</button>
-                    <button type="button" class="exd-cam-btn" id="cam-btn-reset" onclick="resetEx3DAngle()">🔄 重置</button>
-                </div>
+            </div>
+            <!-- 视角工具栏放在画面下方正常流里：以前它 absolute 浮在画布上，
+                 窄屏还会折成三行，正好把人体整个盖住 -->
+            <div class="exd-camera-bar">
+                <button type="button" class="exd-cam-btn active" id="cam-btn-3d" onclick="setEx3DAngle('3d')">📐 立体</button>
+                <button type="button" class="exd-cam-btn" id="cam-btn-front" onclick="setEx3DAngle('front')">🎯 正面</button>
+                <button type="button" class="exd-cam-btn" id="cam-btn-side" onclick="setEx3DAngle('side')">🔍 侧面</button>
+                <button type="button" class="exd-cam-btn" id="cam-btn-reset" onclick="resetEx3DAngle()">🔄 重置</button>
             </div>
 
             <!-- 播放控制栏 -->

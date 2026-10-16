@@ -2504,20 +2504,27 @@ header *, .header-tools, .header-row-1 {
     aspect-ratio: 340 / 360;
     margin: 0 auto;
 }
+/* 竖排在左上角：横排到右上角时，会被手机厂商的悬浮侧栏（返回/音量条）压住 */
 .exd-viewport-overlay {
     position: absolute;
-    top: 10px;
-    left: 10px;
-    right: 10px;
+    top: 8px;
+    left: 8px;
+    right: auto;
+    max-width: min(64%, calc(100% - 16px));
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
     pointer-events: none;
 }
 .exd-view-indicator {
     display: flex;
     align-items: center;
     gap: 5px;
+    max-width: 100%;
+    white-space: normal;
+    line-height: 1.35;
+    text-align: left;
     background: rgba(15, 23, 42, 0.75);
     backdrop-filter: blur(6px);
     border: 1px solid rgba(255, 255, 255, 0.12);
@@ -2531,6 +2538,9 @@ header *, .header-tools, .header-row-1 {
     display: flex;
     align-items: center;
     gap: 6px;
+    max-width: 100%;
+    white-space: normal;
+    line-height: 1.35;
     background: rgba(16, 185, 129, 0.2);
     border: 1px solid rgba(16, 185, 129, 0.4);
     backdrop-filter: blur(6px);
@@ -2554,31 +2564,34 @@ header *, .header-tools, .header-row-1 {
 }
 
 /* 3D 视角切换栏 */
+/* 视角工具栏：以前 absolute 浮在画布底部，窄屏折成三行后把人体整个盖住。
+   现在走正常流放在画面下方，四个按钮等宽单行，不再和画布抢位置。 */
 .exd-camera-bar {
-    position: absolute;
-    bottom: 10px;
-    left: 50%;
-    transform: translateX(-50%);
     display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    max-width: calc(100% - 14px);
+    flex-wrap: nowrap;
+    align-items: stretch;
     gap: 6px;
-    background: rgba(15, 23, 42, 0.82);
-    backdrop-filter: blur(8px);
-    padding: 4px 6px;
-    border-radius: 99px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    width: 100%;
+    margin: -6px 0 12px;
+    background: #0F172A;
+    padding: 5px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
     z-index: 5;
 }
 .exd-cam-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    white-space: nowrap;
+    padding: 7px 4px;
+    border-radius: 10px;
+    justify-content: center;
+    text-align: center;
     background: transparent;
     border: none;
     color: #94A3B8;
     font-size: 11px;
     font-weight: 700;
-    padding: 4px 10px;
-    border-radius: 99px;
     cursor: pointer;
     transition: all 0.2s;
 }
