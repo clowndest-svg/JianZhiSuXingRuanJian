@@ -2,7 +2,13 @@
 import argparse,json,os,shutil,sqlite3,subprocess,time,urllib.request
 from datetime import datetime
 from pathlib import Path
-p=argparse.ArgumentParser();p.add_argument('--stage',required=True);p.add_argument('--revision',required=True);args=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--stage',required=True);p.add_argument('--revision',required=True)
+p.add_argument('--release',default=None,help='发布标签；默认取 --stage 目录名（例如 releases/r132 -> r132）')
+args=p.parse_args()
+RELEASE=args.release or stage.name
+if not RELEASE.startswith('r'):raise SystemExit('无法确定发布标签，请显式传 --release')
+# 先落盘再重启：服务必须能上报自己跑的是哪个提交，门禁才有东西可对账
+(root/'release.json').write_text(json.dumps({'release':RELEASE,'source_revision':args.revision}))
 root=Path('/opt/qingsu');stage=Path(args.stage).resolve()
 if os.geteuid()!=0 or stage.parent!=root/'releases' or not (stage/'server.py').is_file():raise SystemExit('Expected root and a prepared release directory')
 def run(*cmd):return subprocess.run(cmd,check=True,capture_output=True,text=True).stdout.strip()
@@ -49,7 +55,8 @@ try:
     for _ in range(20):
         try:
             with opener.open('http://172.17.0.1:8000/health',timeout=2) as r:
-                if json.load(r)['release']=='r131':break
+                body=json.load(r)
+                if body.get('source_revision')==args.revision and body.get('release')==RELEASE:break
         except Exception:time.sleep(.5)
     else:raise RuntimeError('Candidate readiness failed')
     # Keep QA routing until its final smoke test has completed; remove explicitly afterwards.
@@ -70,7 +77,9 @@ try:
     if 'access_log off;' not in redirected:redirected=redirected.replace('server {','server {\n    access_log off;',1)
     http_file=root/'tls-http.conf';http_file.write_text(redirected)
     run('docker','cp',str(http_file),'xiaoye-release:/etc/nginx/conf.d/default.conf');run('docker','exec','xiaoye-release','nginx','-t');run('docker','exec','xiaoye-release','nginx','-s','reload')
-    with opener.open('https://124.220.54.64/health/ready',timeout=10) as r:assert json.load(r)['release']=='r131'
+    with opener.open('https://124.220.54.64/health/ready',timeout=10) as r:live=json.load(r)
+    assert live.get('source_revision')==args.revision,'线上提交与本次部署不符: %s'%live
+    assert live.get('release')==RELEASE,'线上发布标签与本次部署不符: %s'%live
     for kind,text in {'service':'''[Unit]
 Description=Qingsu operational checks
 [Service]
@@ -87,8 +96,8 @@ Persistent=true
 WantedBy=timers.target
 '''}.items():Path('/etc/systemd/system/qingsu-monitor.'+kind).write_text(text)
     run('systemctl','daemon-reload');run('systemctl','enable','--now','qingsu-monitor.timer')
-    (root/'release.json').write_text(json.dumps({'release':'r131','source_revision':args.revision,'backup':str(backup)}))
-    print(json.dumps({'deployed':'r131','backup':str(backup),'source_revision':args.revision}))
+    (root/'release.json').write_text(json.dumps({'release':RELEASE,'source_revision':args.revision,'backup':str(backup)}))
+    print(json.dumps({'deployed':RELEASE,'backup':str(backup),'source_revision':args.revision}))
 except Exception:
     shutil.copy2(backup/'server.py',root/'server.py')
     if (backup/'app_modules').exists():

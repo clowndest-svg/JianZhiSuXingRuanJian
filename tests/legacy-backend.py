@@ -434,6 +434,28 @@ def main():
     check("主按钮有最小触控高度", bool(btn_h) and int(btn_h.group(1)) >= 44, btn_h and btn_h.group(1))
     check("样式表支持减少动画", "prefers-reduced-motion" in css_txt, "")
     check("焦点框可见", ":focus-visible" in css_txt, "")
+    # 就绪上报必须是"读出来的"，不能是写死的：写死时部署脚本拿同一个字自比，
+    # 发错版本也照样判就绪。
+    try:
+        ident = m.release_identity()
+        check("没有落盘清单时如实报 unknown 而不是编一个版本号",
+              ident.get("release") == "unknown" and ident.get("source_revision") == "unknown", ident)
+    except AttributeError:
+        check("没有落盘清单时如实报 unknown 而不是编一个版本号",
+              False, "缺实现：服务端根本不上报自己是谁")
+    check("服务端源码里没有写死的发布标签",
+          not re.search(r'"release"\s*:\s*"r[0-9]', get_source(mutant)), "")
+    if not mutant:
+        dep = io.open(os.path.join(ROOT, "scripts", "deploy.py"), encoding="utf-8").read()
+    else:
+        dep = subprocess.run(["git", "show", MUT_REF + ":scripts/deploy.py"],
+                             cwd=ROOT, capture_output=True).stdout.decode("utf-8")
+    hard = re.findall(r'["\']r[0-9]{2,}["\']', dep)
+    check("部署脚本源码里没有写死的发布标签", not hard, hard[:2])
+    check("部署脚本按提交号对账而不是按标签自比",
+          "source_revision')==args.revision" in dep.replace(" ", ""),
+          dep.count("args.revision"))
+
     # 内容哈希强缓存：只有 URL 上带对哈希才敢给一年，带错必须回源校验。
     # 旧版本没有 v 参数，调用会抛——那必须记成红，不能让它把整台判据砸崩。
     def cache_of(**kw):

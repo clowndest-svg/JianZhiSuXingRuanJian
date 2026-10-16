@@ -2429,6 +2429,22 @@ def delete_latest_photo(user:dict=Depends(get_current_user)):
         try:os.unlink(os.path.join(UPLOAD_DIR,name))
         except FileNotFoundError:pass
     return {'code':0,'msg':'当前照片已删除；加密备份中的历史副本按保留期轮换'}
+def release_identity():
+    """上报"现在跑的是哪一版"，取自部署脚本落盘的 release.json。
+
+    以前这里直接 return "r131"，而部署脚本又拿同一个死字去比对——两边都硬编码，
+    发错版本也照样"就绪"，等于没有门禁。
+    """
+    for candidate in (os.path.join(os.path.dirname(os.path.abspath(__file__)), "release.json"),
+                      "/opt/qingsu/release.json"):
+        try:
+            with open(candidate, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return {"release": str(data.get("release", "unknown")),
+                    "source_revision": str(data.get("source_revision", "unknown"))}
+        except Exception:
+            continue
+    return {"release": "unknown", "source_revision": "unknown"}
 
 @app.get("/health/live")
 def liveness():
@@ -2440,7 +2456,9 @@ def health():
     conn=get_db()
     try: conn.execute("SELECT 1").fetchone()
     finally: conn.close()
-    return {"status":"ok","release":"r131"}
+    info = release_identity()
+    info["status"] = "ok"
+    return info
 
 
 class RecordChangeReq(ValidatedModel):
