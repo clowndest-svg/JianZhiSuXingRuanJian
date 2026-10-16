@@ -316,29 +316,38 @@
                 </button>
             </div>
 
-            <!-- 本周外卖配额计数器 -->
-            <div class="card">
+            <!-- 本周外卖真实记录与使用情况监测 (市面主流健身/健康App卡片流排版) -->
+            <div class="card takeout-record-card">
                 <div class="card-title">
                     <span class="title-left">🛡️ 本周外卖真实记录</span>
-                    <span id="takeout-quota-badge" style="font-size: 11.5px; color: var(--primary-dark); font-weight: 700;">本周点单 0 次</span>
+                    <span id="takeout-quota-badge" class="takeout-badge-pill">本周点单 0 次</span>
                 </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12.5px;">
-                    <div id="takeout-quota-rule">系统不设次数配额，只如实记录你点了几次、拦了几次</div>
 
-                    <!-- 真实使用情况：读系统使用记录，不是本 App 自己数按钮 -->
-                    <div class="usage-box">
-                        <div class="usage-head">
-                            <span class="usage-title">今天外卖 App 的真实使用情况</span>
-                            <span id="usage-state" class="usage-state">检测中</span>
-                        </div>
-                        <div id="usage-detail" class="usage-detail">需要「使用情况访问权限」，没给就只显示未授权，不会假称 0 次。</div>
-                        <button id="usage-grant-btn" class="btn-secondary" style="display:none;" onclick="requestUsageAccess()">去系统里授权</button>
-                        <div class="usage-honest">它拦不住手机上的美团或饿了么。它能做的是让你看见今天到底打开了几次、待了多久。</div>
-                    </div>
-                    <div style="color: var(--text-muted); font-size: 11px;">自制控油餐更有保障</div>
+                <!-- 顶层副标与倡导栏：清晰横向排列，自适应换行，绝不竖排挤字 -->
+                <div class="takeout-summary-header">
+                    <div id="takeout-quota-rule" class="takeout-quota-rule">系统不设次数配额，只如实记录你点了几次、拦了几次</div>
+                    <div class="takeout-tip-pill">🥗 自制控油餐更有保障</div>
                 </div>
-                <div style="margin-top: 10px; background: #F1F5F9; border-radius: var(--radius-full); height: 8px; overflow: hidden;">
-                    <div id="takeout-quota-bar" style="width: 0%; height: 100%; background: var(--danger); transition: width 0.3s;"></div>
+
+                <!-- 真实使用情况：卡片式独立聚焦展示，不再左右挤压 -->
+                <div class="usage-box">
+                    <div class="usage-head">
+                        <div class="usage-head-title-wrap">
+                            <span class="usage-icon">📱</span>
+                            <span class="usage-title">今天外卖 App 的真实使用情况</span>
+                        </div>
+                        <span id="usage-state" class="usage-state">检测中</span>
+                    </div>
+                    <div id="usage-detail" class="usage-detail">需要「使用情况访问权限」，没给就只显示未授权，不会假称 0 次。</div>
+                    <button id="usage-grant-btn" class="btn-secondary usage-grant-btn" style="display:none;" onclick="requestUsageAccess()">去系统里授权</button>
+                    <div class="usage-honest">它拦不住手机上的美团或饿了么。它能做的是让你看见今天到底打开了几次、待了多久。</div>
+                </div>
+
+                <!-- 进度指示条 -->
+                <div class="takeout-progress-wrap">
+                    <div class="takeout-progress-track">
+                        <div id="takeout-quota-bar" style="width: 0%; height: 100%; background: var(--danger); transition: width 0.3s;"></div>
+                    </div>
                 </div>
             </div>
 
@@ -568,6 +577,23 @@
                 </div>
                 <div id="wb-report" class="wb-report"></div>
             </div>
+
+            <div class="wb-block">
+                <div class="wb-h">④ 30天自律习惯热力矩阵：打卡轨迹可视化复盘</div>
+                <div class="wb-row" style="margin-bottom: 6px;">
+                    <span style="font-size: 11px; color: var(--text-muted);">方块颜色代表当日自律综合达成度（绿越深自律越满）</span>
+                    <button type="button" class="btn-secondary" onclick="renderHabitMatrix()">刷新打卡矩阵</button>
+                </div>
+                <div id="wb-habit-matrix" class="wb-habit-grid"></div>
+                <div class="wb-habit-legend">
+                    <span>未记录</span>
+                    <span class="legend-dot lvl-0"></span>
+                    <span class="legend-dot lvl-1"></span>
+                    <span class="legend-dot lvl-2"></span>
+                    <span class="legend-dot lvl-3"></span>
+                    <span>三项全满</span>
+                </div>
+            </div>
         </div>
 
         <div class="card" id="public-tools" style="display:none;">
@@ -577,9 +603,24 @@
             </div>
             <div class="pub-tools-row">
                 <button type="button" class="btn-secondary" onclick="makeProgressPoster()">生成进度海报（PNG）</button>
+                <button type="button" class="btn-secondary" onclick="toggleKioskMode()">📺 全景沉浸大屏模式</button>
                 <button type="button" class="btn-secondary" onclick="startPublicPolling(); stampPublicRefresh()">立刻刷新一次</button>
             </div>
             <div class="pub-tools-note">海报上的数字全部来自这次真实拉到的打卡流水；一条记录都没有时不会生成空海报。</div>
+
+            <div id="pub-cheer-section" class="pub-cheer-box" style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border-color);">
+                <div style="font-size: 12px; font-weight: 700; color: var(--text-main); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                    <span>👏 访客打气角（为TA的自律投递徽章）</span>
+                    <span id="pub-cheer-count" style="font-size: 11px; color: var(--primary-dark); font-weight: normal;">已收到 0 枚打气</span>
+                </div>
+                <div class="pub-cheer-btns">
+                    <button type="button" class="btn-cheer-chip" onclick="sendCheerSticker('🔥 稳步减脂')">🔥 稳步减脂</button>
+                    <button type="button" class="btn-cheer-chip" onclick="sendCheerSticker('🥗 饮食超干净')">🥗 饮食超干净</button>
+                    <button type="button" class="btn-cheer-chip" onclick="sendCheerSticker('💪 肌肉在生长')">💪 肌肉在生长</button>
+                    <button type="button" class="btn-cheer-chip" onclick="sendCheerSticker('💧 喝水达人')">💧 喝水达人</button>
+                </div>
+                <div id="pub-cheer-toast" class="pub-cheer-toast" style="display: none;"></div>
+            </div>
         </div>
 
         <!-- ================= TAB 4: 形体训练计划 ================= -->

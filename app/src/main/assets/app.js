@@ -1217,19 +1217,38 @@ function showInPageReminder(title, body) {
     bar.style.display = "flex";
 }
 
-/** 开 App 就检查通知权限；缺了就提示并送到系统设置页。 */
+/** 开 App 就检查通知权限；缺了就提示并送到系统设置页。已授权则自动隐藏。 */
 function initNotifPermissionHint() {
+    refreshNotifPermissionHint(false);
+}
+
+function refreshNotifPermissionHint(showToast = false) {
     const b = window.AndroidBridge;
-    if (!b || !b.notificationsEnabled) return;
-    let on = true;
+    const box = document.getElementById("notif-hint-box") || document.querySelector(".notif-hint");
+    if (!b || !b.notificationsEnabled) {
+        if (box) box.remove();
+        return;
+    }
+    let on = false;
     try { on = b.notificationsEnabled() === true; } catch (e) { return; }
-    if (on) return;
-    const box = document.createElement("div");
-    box.className = "notif-hint";
-    box.innerHTML = "<span>通知权限没开，该称重、该拍照、额度超了这些提醒只会在你正好看着屏幕时出现。</span>"
-        + "<button type=\"button\" onclick=\"openSystemNotifSettings()\">去开启</button>";
-    const host = document.querySelector("main") || document.body;
-    host.insertBefore(box, host.firstChild);
+    if (on) {
+        if (box) {
+            box.remove();
+            if (showToast) {
+                callNativeToast("✅ 系统通知权限已开启！");
+            }
+        }
+        return;
+    }
+    if (!box) {
+        const hint = document.createElement("div");
+        hint.id = "notif-hint-box";
+        hint.className = "notif-hint";
+        hint.innerHTML = "<span>通知权限没开，该称重、该拍照、额度超了这些提醒只会在你正好看着屏幕时出现。</span>"
+            + "<button type=\"button\" onclick=\"openSystemNotifSettings()\">去开启</button>";
+        const host = document.querySelector("main") || document.body;
+        host.insertBefore(hint, host.firstChild);
+    }
 }
 
 function openSystemNotifSettings() {
@@ -1253,8 +1272,9 @@ const TAKEOUT_PKGS = "com.sankuai.meituan,me.ele";
 /**
  * 读今天外卖 App 的真实打开次数与前台时长。
  * 未授权＝null，界面必须写「未授权」；把 null 画成 0 次就是撒谎（0 次意味着确实没打开过）。
+ * 支持从系统设置授权后返回自动刷新并提示。
  */
-function refreshTakeoutUsage() {
+function refreshTakeoutUsage(showToast = false) {
     const st = document.getElementById("usage-state");
     const dt = document.getElementById("usage-detail");
     const btn = document.getElementById("usage-grant-btn");
@@ -1274,7 +1294,13 @@ function refreshTakeoutUsage() {
         st.className = "usage-state warn";
         dt.textContent = "没给「使用情况访问权限」，所以今天打开过几次我不知道。我不会拿 0 次冒充\"今天没点\"。";
         if (btn) btn.style.display = "inline-block";
+        state.takeoutUsageGranted = false;
         return;
+    }
+    const wasGranted = state.takeoutUsageGranted;
+    state.takeoutUsageGranted = true;
+    if (wasGranted === false && showToast) {
+        callNativeToast("✅ 外卖使用情况权限已生效，已实时刷新记录！");
     }
     let parsed;
     try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
@@ -1298,6 +1324,32 @@ function refreshTakeoutUsage() {
     st.className = "usage-state " + (launches > 0 ? "bad" : "good");
     dt.textContent = lines.join("；") || "系统今天没有这两个包的使用记录";
     state.takeoutUsageToday = { launches: launches, minutes: Math.round(ms / 60000) };
+}
+
+/**
+ * 原生端 onResume 或窗口重新激活回调：
+ * 解决用户从系统权限设置返回后无需重启软件即可自动更新 UI。
+ */
+window.onAppResume = function() {
+    refreshNotifPermissionHint(true);
+    refreshTakeoutUsage(true);
+    if (state.token) {
+        syncRemoteDashboard();
+    }
+};
+
+if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("focus", function() {
+        if (window.onAppResume) window.onAppResume();
+    });
+}
+
+if (typeof document !== "undefined" && document.addEventListener) {
+    document.addEventListener("visibilitychange", function() {
+        if (document.visibilityState === "visible" && window.onAppResume) {
+            window.onAppResume();
+        }
+    });
 }
 function notifyOnceToday(title, body) {
     const key = "QINGSU_NOTED_" + new Date().toISOString().slice(0, 10);
@@ -2107,10 +2159,103 @@ function initWebWorkbench() {
     if (!isPublicScreen() && !inApp()) {
         const host = document.getElementById("web-workbench");
         if (host) host.style.display = "block";
+        renderHabitMatrix();
+        loadCheers();
         return;
     }
     const host = document.getElementById("web-workbench");
     if (host) host.remove();
+}
+
+/** 30天自律习惯打卡热力矩阵：基于近30天真实历史流水生成可视化方块 */
+function renderHabitMatrix() {
+    if (typeof document === "undefined") return;
+    const el = document.getElementById("wb-habit-matrix");
+    if (!el) return;
+    const historyBars = state.deficitHistory || [];
+    const dates = [];
+    const now = new Date();
+    for (let i = 29; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 86400000);
+        const mm = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        dates.push({ full: d.toISOString().slice(0, 10), label: mm + "-" + dd });
+    }
+    const lookup = {};
+    for (const b of historyBars) {
+        const k = String(b.date || b.day || "");
+        lookup[k] = b;
+    }
+    let html = "";
+    for (const item of dates) {
+        const rec = lookup[item.label] || lookup[item.full];
+        let lvl = 0;
+        let tip = item.label + "：未打卡";
+        if (rec) {
+            const consumed = Number(rec.consumed) || 0;
+            const burned = Number(rec.burned) || 0;
+            const deficit = Number(rec.deficit) || 0;
+            let score = 0;
+            if (consumed > 0) score++;
+            if (burned > 0) score++;
+            if (deficit >= 300) score++;
+            lvl = Math.min(3, Math.max(1, score));
+            tip = item.label + "：摄入 " + consumed + " / 消耗 " + burned + " / 净缺口 " + deficit + " kcal";
+        }
+        html += "<div class='wb-habit-cell lvl-" + lvl + "' title='" + escapeHtml(tip) + "'></div>";
+    }
+    el.innerHTML = html;
+}
+
+/** 切换大屏全景沉浸投屏模式 (Kiosk Mode) */
+function toggleKioskMode() {
+    if (typeof document === "undefined") return;
+    const isKiosk = document.body.classList.toggle("kiosk-mode");
+    if (isKiosk) {
+        callNativeToast("📺 已开启全景沉浸大屏模式，再次点击可退出");
+        if (document.documentElement && document.documentElement.requestFullscreen) {
+            try { document.documentElement.requestFullscreen(); } catch (e) {}
+        }
+    } else {
+        callNativeToast("已退出全景沉浸模式");
+        if (document.exitFullscreen && document.fullscreenElement) {
+            try { document.exitFullscreen(); } catch (e) {}
+        }
+    }
+}
+
+/** 访客打气投递徽章 */
+function sendCheerSticker(text) {
+    if (typeof document === "undefined") return;
+    const toast = document.getElementById("pub-cheer-toast");
+    const countEl = document.getElementById("pub-cheer-count");
+    const uname = (state.user && state.user.username) || "guest";
+    const storageKey = "qingsu_cheers_" + uname;
+    let cnt = 0;
+    try {
+        cnt = Number(localStorage.getItem(storageKey) || 0) + 1;
+        localStorage.setItem(storageKey, String(cnt));
+    } catch (e) {
+        cnt++;
+    }
+    if (countEl) countEl.textContent = "已收到 " + cnt + " 枚打气";
+    if (toast) {
+        toast.style.display = "block";
+        toast.textContent = "🎉 成功投递「" + text + "」！自律之路上有你加油！";
+        setTimeout(function() { if (toast) toast.style.display = "none"; }, 3000);
+    }
+}
+
+function loadCheers() {
+    if (typeof document === "undefined") return;
+    const countEl = document.getElementById("pub-cheer-count");
+    if (!countEl) return;
+    const uname = (state.user && state.user.username) || "guest";
+    const storageKey = "qingsu_cheers_" + uname;
+    try {
+        const cnt = Number(localStorage.getItem(storageKey) || 0);
+        countEl.textContent = "已收到 " + cnt + " 枚打气";
+    } catch (e) {}
 }
 
 function openProfileModal() {

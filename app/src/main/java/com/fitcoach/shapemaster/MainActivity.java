@@ -155,6 +155,28 @@ public class MainActivity extends Activity {
         Toast.makeText(this, granted
                 ? "通知已开启，到点的提醒会真的弹出来"
                 : "通知还是关着的，提醒只会在应用内出现", Toast.LENGTH_LONG).show();
+        if (webView != null) {
+            webView.post(new Runnable() {
+                @Override
+                public void run() {
+                    webView.evaluateJavascript("if (window.onAppResume) { window.onAppResume(); }", null);
+                }
+            });
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 关键：当用户从系统「通知设置」或「使用情况访问权限」授权后点返回，即时触发前端无刷新更新
+        if (webView != null) {
+            webView.post(new Runnable() {
+                @Override
+                public void run() {
+                    webView.evaluateJavascript("if (window.onAppResume) { window.onAppResume(); }", null);
+                }
+            });
+        }
     }
 
     @Override
