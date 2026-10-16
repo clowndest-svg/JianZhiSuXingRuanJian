@@ -1158,6 +1158,7 @@ def main():
         # 核的是仓库里那份将要发布的清单，对的是仓库里那个 apk——这条专门防手抄错 md5
         vpath = os.path.join(ROOT, "app", "src", "main", "web_version.json")
         apkpath = os.path.join(ROOT, "qingsu.apk")
+        vj = {}
         if os.path.exists(vpath) and os.path.exists(apkpath):
             vj = json.loads(io.open(vpath, encoding="utf-8").read())
             blob = io.open(apkpath, "rb").read()
@@ -1180,6 +1181,14 @@ def main():
         check("版本清单走 no-cache", "headers=_no_cache()" in vsrc, vsrc[:160])
         check("版本清单不写死版本号", "version_code" not in vsrc.split("def version_json")[1][:400]
               or "WEB_DIR" in vsrc, "路由里疑似硬编版本")
+        # 更新说明现读 CHANGELOG：既不能夹带下一节的正文，也要跟当前最新条目一致。
+        chg = io.open(os.path.join(ROOT, "CHANGELOG.md"), encoding="utf-8").read()
+        chg_head = next((ln[3:].strip() for ln in chg.split(chr(10)) if ln.startswith("## ")), "")
+        note = (vj.get("notes") or "") if os.path.exists(vpath) else ""
+        check("更新说明只讲当前这一版，不夹带下一节正文",
+              bool(chg_head) and note.startswith(chg_head) and "## r" not in note,
+              {"清单开头": note[:24], "CHANGELOG首条": chg_head[:24],
+               "夹带下一节": "## r" in note, "长度": len(note)})
         q("DELETE FROM kb_entries")
 
     # 评测里抓到的两条真 bug，各钉一条

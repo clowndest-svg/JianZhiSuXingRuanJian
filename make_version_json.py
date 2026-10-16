@@ -38,7 +38,14 @@ def latest_release_note():
     for i, line in enumerate(lines):
         if line.startswith("## ") and not head:
             head = line[3:].strip()
-            body = "".join(lines[i + 1:]).strip().split(NL + NL)[0].strip()
+            # 正文截到下一个 "## " 为止：CHANGELOG 里各节之间不一定有空行，
+            # 按空行切会把上一版的说明一起塞进更新弹窗。
+            rest = []
+            for later in lines[i + 1:]:
+                if later.startswith("## "):
+                    break
+                rest.append(later)
+            body = NL.join(rest).strip()
             break
     if not head or not body:
         raise SystemExit("CHANGELOG.md 里找不到最新版本条目，拒绝生成没有说明的版本清单")
