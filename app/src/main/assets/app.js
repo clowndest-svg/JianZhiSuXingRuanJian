@@ -150,6 +150,7 @@ window.addEventListener("DOMContentLoaded", () => {
     initViewMode();
     // 开 App 先查通知权限；外卖真实使用情况读一次
     loadExercisePoses();
+    initWebWorkbench();
     paintAiEngineBar();
     probeLocalAi(false).then(function () { paintAiEngineBar(); });
     initNotifPermissionHint();
@@ -1893,6 +1894,223 @@ function roundRect(g, x, y, w, h, r) {
     g.lineTo(x + r, y + h); g.quadraticCurveTo(x, y + h, x, y + h - r);
     g.lineTo(x, y + r); g.quadraticCurveTo(x, y, x + r, y);
     g.closePath();
+}
+
+// ============ 第七批：网页端独占工作台（手机上做不了的三件事） ============
+// 判断标准只有一条：这件事需不需要大屏、键盘或打印机。需要的就留在网页，
+// App 里整块不出现（靠 inApp() 判断），不做"两边一模一样"的复制品。
+
+const WEB_WORKBENCH = true;
+
+/** 目标日倒推：给定想达到的日期，算每天需要多大缺口，并拿 TDEE 与安全下限判可行性。 */
+function planByTargetDate() {
+    const out = document.getElementById("wb-plan-out");
+    const dateEl = document.getElementById("wb-target-date");
+    const goalEl = document.getElementById("wb-target-jin");
+    if (!out || !dateEl) return;
+    const p = state.profile || {};
+    const m = state.calculated || {};
+    const cur = Number(state.currentWeightJin || p.weightJin || 0);
+    const goal = Number(goalEl && goalEl.value ? goalEl.value : p.targetWeightJin);
+    const tdee = Number(m.tdee || 0);
+    const bmr = Number(m.bmr || 0);
+    if (!dateEl.value) { out.innerHTML = "<span class='wb-warn'>先选一个目标日期</span>"; return; }
+    if (!(cur > 0) || !(goal > 0) || !(tdee > 0)) {
+        out.innerHTML = "<span class='wb-warn'>缺当前体重或每日消耗，算不了——先去档案填真实值，"
+            + "我不替你猜身体数据</span>";
+        return;
+    }
+    const days = Math.ceil((new Date(dateEl.value) - new Date()) / 86400000);
+    if (!(days > 0)) { out.innerHTML = "<span class='wb-warn'>目标日期得在未来</span>"; return; }
+    const loseJin = cur - goal;
+    if (loseJin <= 0) {
+        out.innerHTML = "<span class='wb-ok'>目标不低于当前体重，不需要制造缺口；"
+            + "这情况通常该问的是怎么练，不是怎么吃</span>";
+        return;
+    }
+    // 1 斤脂肪 ≈ 3850 kcal（7700 kcal/kg 折半），这是折算不是实测
+    const needDaily = Math.round(loseJin * 3850 / days);
+    const eatAt = Math.round(tdee - needDaily);
+    const floor = Math.max(1200, bmr > 0 ? Math.round(bmr) : 1200);
+    const weeklyJin = +(needDaily * 7 / 3850).toFixed(2);
+    let verdict, cls;
+    if (needDaily <= 0) { verdict = "不用控制也能到"; cls = "wb-ok"; }
+    else if (eatAt >= floor && weeklyJin <= 2) { verdict = "可行"; cls = "wb-ok"; }
+    else if (eatAt >= floor) { verdict = "缺口偏大，每周掉 " + weeklyJin + " 斤超出稳妥范围"; cls = "wb-warn"; }
+    else {
+        verdict = "<strong>做不到（按健康吃法）</strong>：要在这天到 " + goal + " 斤，"
+            + "每天得吃 " + eatAt + " kcal，已低于安全下限 " + floor + " kcal";
+        cls = "wb-bad";
+    }
+    const latest = days > 0 ? Math.ceil(loseJin * 3850 / Math.max(1, tdee - floor)) : 0;
+    out.innerHTML = "<div class='" + cls + "'>" + verdict + "</div>"
+        + "<ul class='wb-list'>"
+        + "<li>还剩 <strong>" + days + "</strong> 天，要掉 <strong>" + loseJin.toFixed(1) + "</strong> 斤</li>"
+        + "<li>需要日均缺口 <strong>" + needDaily + "</strong> kcal ≈ 每周 " + weeklyJin + " 斤</li>"
+        + "<li>你的休息日预算 " + (m.restCal || "—") + " kcal / 运动日 " + (m.workoutCal || "—") + " kcal</li>"
+        + "<li>按安全下限倒推，最快也要 <strong>" + latest + "</strong> 天（约 "
+        + new Date(Date.now() + latest * 86400000).toLocaleDateString() + "）</li>"
+        + "</ul>"
+        + "<div class='wb-note'>缺口靠「少吃 + 多动」哪一侧凑都行，但表格里的热量与宏量都是"
+        + "按菜名关键词粗估、按固定比例倒推的，不是营养学数据；这条倒推只用来判断"
+        + "「这个日期现不现实」，不当处方用。</div>";
+}
+
+/** 流水表格：把导出 CSV 拉下来在前端解析，支持搜索、按列排序、只看超标那几笔。 */
+let wbRows = null;
+async function loadLedger() {
+    const box = document.getElementById("wb-ledger");
+    if (!box) return;
+    if (!state.token) { box.innerHTML = "<span class='wb-warn'>登录后才看得到自己的流水</span>"; return; }
+    if (!wbRows) {
+        box.innerHTML = "<span class='wb-note'>正在读导出接口…</span>";
+        try {
+            const res = await fetch(`${API_BASE}/api/export.csv`, {
+                headers: { "Authorization": `Bearer ${state.token}` }
+            });
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            wbRows = parseCsv(await res.text());
+        } catch (e) {
+            box.innerHTML = "<span class='wb-bad'>读不到流水：" + escapeHtml((e && e.message) || "") + "</span>";
+            return;
+        }
+    }
+    renderLedger();
+}
+
+function splitCsvLine(line) {
+    // 导出里"项目"这一列带逗号且被引号包住（如 "一个肉包子，一个鸡蛋"），
+    // 不处理引号就会把一列切成几列
+    const out = [];
+    let cur = ""; let inQ = false;
+    for (let i2 = 0; i2 < line.length; i2++) {
+        const ch = line[i2];
+        if (ch === String.fromCharCode(34)) { inQ = !inQ; continue; }
+        if (ch === "," && !inQ) { out.push(cur); cur = ""; continue; }
+        cur += ch;
+    }
+    out.push(cur);
+    return out;
+}
+
+const CR_LF_RE = new RegExp("[" + String.fromCharCode(13) + String.fromCharCode(10) + "]+");
+
+function parseCsv(text) {
+    // 真实导出是平表：表,日期,项目,数值,备注 —— 第一列就是分类
+    const lines = String(text).split(CR_LF_RE).filter(function (l) { return l.trim(); });
+    if (!lines.length) return [];
+    const cols = splitCsvLine(lines[0]);
+    const rows = [];
+    for (let i2 = 1; i2 < lines.length; i2++) {
+        const cells = splitCsvLine(lines[i2]);
+        const r = {};
+        for (let c = 0; c < cols.length; c++) r[cols[c]] = cells[c] || "";
+        r.__kind = r["表"] || "";
+        rows.push(r);
+    }
+    return rows;
+}
+
+function renderLedger() {
+    const box = document.getElementById("wb-ledger");
+    if (!box || !wbRows) return;
+    const q = (document.getElementById("wb-search").value || "").trim().toLowerCase();
+    const kind = document.getElementById("wb-kind").value;
+    const onlyOver = document.getElementById("wb-over").checked;
+    let rows = wbRows.filter(function (r) {
+        if (kind && r.__kind !== kind) return false;
+        const cal = Number(r["数值"] || r.cal || 0);
+        if (onlyOver && !(cal >= 600)) return false;
+        if (!q) return true;
+        return Object.keys(r).some(function (k) {
+            return String(r[k]).toLowerCase().indexOf(q) >= 0;
+        });
+    });
+    const sortKey = window.__wbSort || "";
+    if (sortKey) {
+        rows = rows.slice().sort(function (a, b) {
+            const av = a[sortKey], bv = b[sortKey];
+            const an = Number(av), bn = Number(bv);
+            if (Number.isFinite(an) && Number.isFinite(bn)) return bn - an;
+            return String(bv).localeCompare(String(av));
+        });
+    }
+    if (!rows.length) { box.innerHTML = "<span class='wb-note'>这一筛选条件下没有记录</span>"; return; }
+    const cols = Object.keys(rows[0]).filter(function (k) { return k !== "__kind"; }).slice(0, 8);
+    let html = "<div class='wb-count'>共 " + rows.length + " 笔（已按筛选）</div><div class='wb-scroll'><table class='wb-table'><thead><tr>";
+    html += "<th>类</th>";
+    for (const c of cols) html += "<th data-col='" + c + "'>" + escapeHtml(c) + "</th>";
+    html += "</tr></thead><tbody>";
+    for (const r of rows.slice(0, 300)) {
+        html += "<tr><td>" + escapeHtml(r.__kind || "") + "</td>";
+        for (const c of cols) html += "<td>" + escapeHtml(String(r[c] || "")) + "</td>";
+        html += "</tr>";
+    }
+    html += "</tbody></table></div>";
+    if (rows.length > 300) html += "<div class='wb-note'>只画前 300 笔，要全部请用导出 CSV</div>";
+    box.innerHTML = html;
+    box.querySelectorAll("th[data-col]").forEach(function (th) {
+        th.addEventListener("click", function () {
+            window.__wbSort = th.getAttribute("data-col");
+            renderLedger();
+        });
+    });
+}
+
+/** 周复盘：把七天真数据排成一页，走浏览器打印（App 里没有打印这件事）。 */
+function renderWeeklyReport() {
+    const el = document.getElementById("wb-report");
+    if (!el) return;
+    const m = state.calculated || {};
+    const p = state.profile || {};
+    const bars = state.deficitHistory || [];
+    const pts = state.weightHistory || [];
+    const sum = bars.reduce(function (a, b) { return a + (Number(b.deficit) || 0); }, 0);
+    const logged = bars.filter(function (b) { return (Number(b.deficit) || 0) !== 0; }).length;
+    const w0 = pts.length ? Number(pts[0].jin) : 0;
+    const w1 = pts.length ? Number(pts[pts.length - 1].jin) : 0;
+    const rows = bars.map(function (b) {
+        const d = Number(b.deficit) || 0;
+        return "<tr><td>" + escapeHtml(b.date || b.day || "") + "</td><td class='num'>"
+            + (Number(b.consumed) || 0) + "</td><td class='num'>" + (Number(b.burned) || 0)
+            + "</td><td class='num " + (d > 0 ? "pos" : "neg") + "'>" + d + "</td></tr>";
+    }).join("");
+    el.innerHTML = "<div class='rpt-head'><div class='rpt-title'>轻塑 · 周复盘</div>"
+        + "<div class='rpt-sub'>" + escapeHtml(state.user && state.user.username ? state.user.username : "")
+        + " · 生成于 " + new Date().toLocaleString() + "</div></div>"
+        + "<div class='rpt-grid'>"
+        + "<div><i>净缺口合计</i><b>" + sum + " kcal</b></div>"
+        + "<div><i>有记录的天数</i><b>" + logged + " / 7</b></div>"
+        + "<div><i>体重变化</i><b>" + (w0 && w1 ? (w1 - w0).toFixed(1) + " 斤" : "数据不足") + "</b></div>"
+        + "<div><i>连续记录</i><b>" + (state.streakDays || 0) + " 天</b></div>"
+        + "</div>"
+        + "<table class='rpt-table'><thead><tr><th>日期</th><th>摄入</th><th>消耗</th><th>净缺口</th></tr></thead>"
+        + "<tbody>" + (rows || "<tr><td colspan=4>这 7 天没有可算的记录</td></tr>") + "</tbody></table>"
+        + "<div class='rpt-foot'>缺口为 0 的那些天是<strong>当天一笔未记</strong>，不是「零缺口」。"
+        + "摄入按菜名关键词粗估、宏量按 25/45/30 固定比例倒推，不是营养学数据。"
+        + "本系统不诊断疾病，涉及用药与疾病请咨询医生。</div>";
+}
+
+function printWeeklyReport() {
+    renderWeeklyReport();
+    document.body.classList.add("printing-report");
+    try {
+        window.print();
+    } catch (e) {
+        callNativeToast("这台浏览器不让调打印，试试菜单里的打印");
+    }
+    setTimeout(function () { document.body.classList.remove("printing-report"); }, 500);
+}
+
+/** 整块工作台只在网页出现；App 里连 DOM 都不留。 */
+function initWebWorkbench() {
+    if (!isPublicScreen() && !inApp()) {
+        const host = document.getElementById("web-workbench");
+        if (host) host.style.display = "block";
+        return;
+    }
+    const host = document.getElementById("web-workbench");
+    if (host) host.remove();
 }
 
 function openProfileModal() {

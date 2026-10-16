@@ -528,6 +528,48 @@
             <button type="button" class="btn-primary" onclick="openProfileModal()">去核对并改成真实值</button>
         </div>
 
+        <!-- 网页独占工作台：判断标准是「需不需要大屏/键盘/打印机」，
+             需要就留在网页，App 里整块 remove 掉，不做两边一样的复制品 -->
+        <div class="card web-wb" id="web-workbench" style="display:none;">
+            <div class="wb-head">
+                <span class="wb-title">🖥 网页端工作台</span>
+                <span class="wb-tag">App 里没有这三件事</span>
+            </div>
+
+            <div class="wb-block">
+                <div class="wb-h">① 目标日倒推：这个日期现不现实</div>
+                <div class="wb-row">
+                    <label>目标日期<input type="date" id="wb-target-date" class="input-control"></label>
+                    <label>目标（斤）<input type="number" step="0.1" id="wb-target-jin" class="input-control"></label>
+                    <button type="button" class="btn-secondary" onclick="planByTargetDate()">算一下</button>
+                </div>
+                <div id="wb-plan-out" class="wb-out"></div>
+            </div>
+
+            <div class="wb-block">
+                <div class="wb-h">② 流水表格：搜索、按列排序、只看高热量那几笔</div>
+                <div class="wb-row">
+                    <input type="search" id="wb-search" class="input-control" placeholder="搜菜名/日期" oninput="renderLedger()">
+                    <select id="wb-kind" class="input-control" onchange="renderLedger()">
+                        <option value="">全部类型</option><option value="饮食">饮食</option>
+                        <option value="体重">体重</option><option value="训练">训练</option>
+                        <option value="饮水">饮水</option>
+                    </select>
+                    <label class="wb-chk"><input type="checkbox" id="wb-over" onchange="renderLedger()">只看 ≥600 kcal</label>
+                    <button type="button" class="btn-secondary" onclick="loadLedger()">读流水</button>
+                </div>
+                <div id="wb-ledger" class="wb-out"></div>
+            </div>
+
+            <div class="wb-block">
+                <div class="wb-h">③ 周复盘一页纸：直接打印或存 PDF</div>
+                <div class="wb-row">
+                    <button type="button" class="btn-secondary" onclick="printWeeklyReport()">生成并打印</button>
+                </div>
+                <div id="wb-report" class="wb-report"></div>
+            </div>
+        </div>
+
         <div class="card" id="public-tools" style="display:none;">
             <div class="pub-tools-head">
                 <span class="pub-tools-title">这块大屏独有的功能（App 里没有）</span>

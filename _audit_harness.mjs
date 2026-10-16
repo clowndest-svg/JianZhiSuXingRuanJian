@@ -53,6 +53,8 @@ function makeCtx() {
       _children: [],
       appendChild(c) { this._children.push(c); return c; },
       remove() {}, select() {}, focus() {}, click() { log.clicks = (log.clicks || 0) + 1 },
+      querySelectorAll() { return []; },
+      querySelector() { return null; },
       addEventListener() {},
       // 桩缺 setAttribute 会让代码一调就抛、异常被 init 吞掉，
       // 表现成"逻辑没生效"而真因是桩少方法——这类假红上一批已经踩过一次。
@@ -946,6 +948,68 @@ if (!/loadApkMeta/.test(dlJs)) {
         dlJs.includes("setAttribute") && dlJs.includes("轻塑_") && dlJs.includes("version_code"), "");
   check("不再宣称高速直链", !/高速直链/.test(dlHtml), (dlHtml.match(/.{0,10}直链/) || [""])[0]);
 }
+
+
+// ============ 第七批：网页端独占工作台 ============
+const WB_NAMES = ["工作台只在网页出现","App 里整块移除","目标日倒推算得出真数字",
+    "身体数据缺失时拒绝倒推不猜数","倒推不安全时判做不到","流水表能解析分节CSV",
+    "流水表筛选生效","周复盘写明0是未记录而非零缺口","打印样式只留复盘页","工作台无未量过承诺"];
+const WB_HTML = fs.readFileSync(path.join(ROOT, "app/src/main/assets/index.html"), "utf8");
+const WB_JS = fs.readFileSync(path.join(ROOT, "app/src/main/assets/app.js"), "utf8");
+check("工作台只在网页出现", WB_HTML.includes('id="web-workbench"'), "");
+check("App 里整块移除", WB_JS.includes("host.remove()") && WB_JS.includes("inApp()"), "");
+check("工作台无未量过承诺", !/毫秒级|绝对隐私|永久免费|高速直链/.test(WB_HTML.slice(WB_HTML.indexOf("web-workbench"), WB_HTML.indexOf("web-workbench") + 4000)), "");
+
+// 关键：真调 planByTargetDate 并断言它算出数字。
+// 之前我用了个从没被写过的 state.metricsCache，功能会永远走「数据不足」却看不出来。
+run(h.context, `state.currentWeightJin=151; state.profile={targetWeightJin:132, weightJin:151};`
+    + ` state.calculated={tdee:2024,bmr:1499,restCal:1604,workoutCal:1774};`
+    + ` document.getElementById("wb-target-jin").value="132";`
+    + ` var d=new Date(Date.now()+120*86400000);`
+    + ` document.getElementById("wb-target-date").value=d.toISOString().slice(0,10);`
+    + ` planByTargetDate();`);
+const planTxt = txt("wb-plan-out").replace(/<[^>]+>/g, "");
+check("目标日倒推算得出真数字", /还剩\s*\d+\s*天/.test(planTxt) && /日均缺口/.test(planTxt) && /\d{3,}/.test(planTxt), planTxt.slice(0, 150));
+check("倒推不安全时判做不到",
+      /做不到|可行|偏大/.test(planTxt), planTxt.slice(0, 90));
+
+// 身体数据缺失时必须拒绝，不能拿默认值凑
+run(h.context, `state.currentWeightJin=0; state.profile={}; state.calculated={};`
+    + ` planByTargetDate();`);
+const planEmpty = txt("wb-plan-out");
+check("身体数据缺失时拒绝倒推不猜数",
+      planEmpty.includes("不替你猜") || planEmpty.includes("填真实值"), planEmpty.slice(0, 90));
+
+// 导出 CSV 是分节的，解析要能归类并支持筛选
+const LF2 = String.fromCharCode(10);
+const csv = ["表,日期,项目,数值,备注",
+  "饮食,2026-10-16,牛肉面,620,午餐",
+  "饮食,2026-10-16," + String.fromCharCode(34) + "一个肉包子，一个鸡蛋" + String.fromCharCode(34) + ",80,早餐",
+  "体重,2026-10-16,空腹体重,151,"].join(LF2);
+run(h.context, `wbRows = parseCsv(${JSON.stringify(csv)});`
+    + ` document.getElementById("wb-search").value="";`
+    + ` document.getElementById("wb-kind").value="饮食";`
+    + ` document.getElementById("wb-over").checked=false;`
+    + ` renderLedger();`);
+const led = txt("wb-ledger");
+check("流水表能解析真实平表CSV并按类筛选", /共 2 笔/.test(led.replace(/<[^>]+>/g, "")), led.slice(0, 120));
+check("含逗号带引号的字段不被切错", led.replace(/<[^>]+>/g, "").includes("一个肉包子，一个鸡蛋"), led.slice(0, 140));
+run(h.context, `document.getElementById("wb-over").checked=true; renderLedger();`);
+const led2 = txt("wb-ledger");
+check("流水表筛选生效", /共 1 笔/.test(led2.replace(/<[^>]+>/g, "")), led2.slice(0, 120));
+
+// 周复盘：0 缺口必须解释成「当天没记」，不能让人以为真的零缺口
+run(h.context, `state.deficitHistory=[{date:"10-15",deficit:0,consumed:0,burned:0},`
+    + ` {date:"10-16",deficit:420,consumed:1200,burned:160}];`
+    + ` state.weightHistory=[{date:"10-15",jin:152},{date:"10-16",jin:151}];`
+    + ` state.streakDays=3; state.user={username:"tester"};`
+    + ` renderWeeklyReport();`);
+const rpt = txt("wb-report");
+check("周复盘写明0是未记录而非零缺口", rpt.includes("当天一笔未记"), rpt.slice(0, 120));
+const WB_CSS = fs.readFileSync(path.join(ROOT, "app/src/main/assets/style.css"), "utf8");
+check("打印样式只留复盘页",
+      WB_CSS.includes("@media print") && WB_CSS.includes("printing-report")
+      && WB_CSS.includes("#wb-report"), "");
 
 const bad = R.filter(x => !x[1]);
 console.log(`\n=== ${MUTANT ? "变异样本(HEAD 改动前)" : "当前源码"}：${R.length} 条，绿 ${R.length - bad.length}，红 ${bad.length} ===`);

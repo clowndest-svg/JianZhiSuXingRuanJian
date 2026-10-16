@@ -2,7 +2,7 @@
  "version_code": 2,
  "version_name": "1.1.0",
  "apk_url": "/qingsu.apk",
- "size": 5731998,
- "md5": "88c52a7f15b01ae2df8404fbb8d650f8",
+ "size": 5733670,
+ "md5": "21dbfd7daeae3865d38490d28e28595b",
  "notes": "顾问接入本机模型与每用户长期记忆；身体数据不再由系统编造；App 启动自检通知权限；外卖面板显示真实使用情况；顶栏切换按钮改纯图标。"
 }
