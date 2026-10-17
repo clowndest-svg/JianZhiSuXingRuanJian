@@ -676,7 +676,19 @@ check("手机模式撤掉 desktop-view", !sandbox.document.body.classList.contai
 function txt2b(id) { return String(run(h.context, `document.getElementById("${id}").innerText`)); }
 
 check("首页有 header-row-1 结构", htmlSrc.includes('class="header-row-1"'), "");
-check("档案摘要独立成行", htmlSrc.includes("header-profile-line"), "");
+check("档案摘要挂在品牌第二行（顶栏不再三层堆叠）",
+      htmlSrc.includes('class="brand-profile"') && !htmlSrc.includes("header-profile-line"), "");
+check("顶栏账号入口是头像圆点 + 昵称",
+      htmlSrc.includes('class="account-chip"') && htmlSrc.includes('class="avatar-dot"'), "");
+// 机主嫌"用户名那样展示好丑"：uqa1792267853 这类登录名不该出现在顶栏。
+// 这里真的调用 displayName，不是查字符串在不在——名字取错时函数照样存在。
+check("顶栏名字取昵称，没有昵称才退回登录名",
+      String(run(h.context, "displayName({nickname:'小田',username:'uqa1792267853'})")) === "小田"
+      && String(run(h.context, "displayName({username:'uqa1792267853'})")) === "uqa1792267853", "");
+check("登录态不再把登录名直接写进顶栏",
+      !jsSrc.includes("updateUserUI(state.user.username)"), "");
+check("登录提示语也叫昵称而不是登录名",
+      jsSrc.indexOf("欢迎回来，${escapeHtml(displayName(data))}") >= 0, "");
 check("有视图切换按钮", htmlSrc.includes('id="btn-view-toggle"'), "");
 check("有日子差异说明位", htmlSrc.includes('id="mode-diff-hint"'), "");
 check("有每日状态条", htmlSrc.includes('class="daily-strip"'), "");

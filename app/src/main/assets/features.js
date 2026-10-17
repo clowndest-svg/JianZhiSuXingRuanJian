@@ -125,7 +125,7 @@ async function openSharingSettings(){
 async function saveSharing(rotate){
     const scope={};for(const [k] of TD_SCOPES)scope[k]=document.getElementById('scope-'+k).checked;
     const result=document.getElementById('share-result');
-    try{const s=await postApi('/api/share/settings',{enabled:document.getElementById('share-enabled').checked,days:Number(document.getElementById('share-days').value),scope,rotate});state.publicUrl=s.public_url;updateUserUI(state.user.username);if(result){result.dataset.err='0';result.textContent=rotate?'已更新密钥，旧链接已失效；新链接请到「我的」里复制':'分享设置已保存';}
+    try{const s=await postApi('/api/share/settings',{enabled:document.getElementById('share-enabled').checked,days:Number(document.getElementById('share-days').value),scope,rotate});state.publicUrl=s.public_url;updateUserUI(displayName(state.user));if(result){result.dataset.err='0';result.textContent=rotate?'已更新密钥，旧链接已失效；新链接请到「我的」里复制':'分享设置已保存';}
         const dlg=document.getElementById('account-tools-dialog');if(dlg&&dlg.open)setTimeout(()=>dlg.close(),700);}
     catch(e){if(result){result.dataset.err='1';result.textContent=e.message;}}
 }
@@ -323,6 +323,12 @@ async function refreshAccount(){
     if(!state.token){accountCache=null;paintAccountBadge();return null;}
     try{
         accountCache=await getJson('/api/account');
+        // 昵称可能在别的入口改过，或这是旧版本存下的会话：顶栏名字要跟着这次回读刷新，
+        // 不能一直停在登录那一刻读到的值。
+        if(accountCache&&accountCache.user){
+            state.user=Object.assign({},state.user,accountCache.user);
+            updateUserUI(displayName(state.user));
+        }
         paintAccountBadge();
         // 忌口与城市变了，外卖点单顺序和食谱冲突标注必须跟着重画；
         // 不重画的话"保存成功"和屏幕上看到的推荐会对不上
@@ -336,12 +342,17 @@ async function refreshAccount(){
     return accountCache;
 }
 
-/** 顶栏那颗头像：没登录/没头像时保持原样，不塞一个假剪影进去。 */
+/** 顶栏圆点：有头像放头像，没头像用昵称首字做字母章，一个字符都没有才落回"轻"。
+    用 Array.from 而不是 [0]：昵称可能以 emoji 开头，直接按下标取会切出半个码元变成乱码。 */
 function paintAccountBadge(){
     const host=document.getElementById('header-avatar-slot');
     if(!host)return;
     const url=accountCache&&accountCache.avatar_url;
-    host.innerHTML=url?`<img class="header-avatar" src="${escapeHtml(API_BASE+url)}" alt="我的头像">`:'';
+    if(url){host.innerHTML=`<img src="${escapeHtml(API_BASE+url)}" alt="我的头像">`;return;}
+    const u=(accountCache&&accountCache.user)||state.user||{};
+    const nm=String(u.nickname||u.username||'').trim();
+    const first=nm?Array.from(nm)[0]:'';
+    host.textContent=first?first.toUpperCase():'轻';
 }
 
 async function openAccountCenter(){

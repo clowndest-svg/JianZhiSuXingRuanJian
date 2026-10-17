@@ -1617,24 +1617,68 @@ body {
     opacity: 0.8;
 }
 
-/* 用户账号快捷状态 */
-.user-account-badge {
+/* 账号入口：一颗头像圆点 + 昵称。
+   以前是"蓝色小人图标 + 蓝字 + 一圈描边"，机主实拍说丑；
+   现在无边框、深色字，未登录时圆点显示品牌首字，不塞假人剪影。 */
+.account-chip {
     display: flex;
     align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    color: var(--primary-deep);
-    background: #FFFFFF;
-    border: 1px solid var(--border);
-    padding: 4px 8px;
+    gap: 7px;
+    /* 实测两头都翻车过：默认允许收缩时被长标题挤到只剩 padding 的 16px，
+       "登录/注册"放不下；改成完全不许收缩（flex:0 0 auto）后反过来挤掉品牌行，
+       393 手机上档案摘要被截成"170cm · 160斤 · …"。现在可收缩但带 92px 下限，
+       昵称自己有 max-width 省略，圆点始终放得下。
+       上限用 vw 而不是百分比：百分比的参照是工具组自身宽度，那是个 shrink-to-fit
+       的循环量，各引擎算出来的结果不一样。 */
+    flex: 0 1 auto;
+    min-width: 92px;
+    max-width: min(240px, 60vw);
+    font-size: 12.5px;
+    color: #0F172A;
+    background: #F4F6F8;
+    border: none;
+    padding: 3px 11px 3px 3px;
     border-radius: var(--radius-full);
     cursor: pointer;
-    font-weight: 600;
-    transition: background 0.15s;
+    font-weight: 700;
+    transition: background 0.15s, transform 0.15s;
 }
 
-.user-account-badge:active {
-    background: #F1F5F9;
+.account-chip:active {
+    background: #E8EDF3;
+    transform: scale(0.97);
+}
+
+.avatar-dot {
+    flex: 0 0 26px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+    color: #FFFFFF;
+    font-size: 12.5px;
+    font-weight: 800;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.avatar-dot img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.account-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 9em;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
 }
 
 /* ================= APK 下载弹窗与入口样式 ================= */
@@ -1897,6 +1941,38 @@ body {
     min-width: 0;
 }
 
+.brand-line {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    min-width: 0;
+}
+.brand-tag { margin: 0; font-size: 11px; color: var(--text-muted); }
+/* 档案摘要挂在品牌下面第二行：整行可点，去掉胶囊底和描边，读起来像标题的补充 */
+.brand-profile {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 1px 0 0;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: #475569;
+    font-weight: 600;
+    text-align: left;
+    min-width: 0;
+    max-width: 100%;
+}
+.brand-profile #header-profile-summary {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.brand-edit { flex: 0 0 auto; font-size: 10px; color: var(--primary-dark); }
 .app-header .brand-text h1,
 .app-header .brand-text p {
     white-space: nowrap;
@@ -1904,9 +1980,10 @@ body {
     text-overflow: ellipsis;
 }
 
-/* 右侧按钮组：可收缩但不许被压成竖排 */
+/* 右侧按钮组：可收缩但不许被压成竖排。
+   .account-chip 不在这一组里——它有自己的收缩契约（可收缩 + 92px 下限），
+   混在这里会被下面的 min-width:0 覆盖掉，那个下限就白写了。 */
 .profile-pill-btn,
-.user-account-badge,
 .header-download-btn {
     flex: 0 1 auto;
     min-width: 0;
@@ -1916,8 +1993,7 @@ body {
     text-overflow: ellipsis;
 }
 
-.profile-pill-btn #header-profile-summary,
-.user-account-badge #header-username-display {
+.profile-pill-btn #header-profile-summary {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1968,16 +2044,6 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 .header-icon-btn:active { transform: scale(0.94); }
 
-/* 档案摘要单独一行，彻底告别竖排 */
-.header-profile-line {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    width: 100%; margin-top: 8px; padding: 7px 12px; border-radius: 12px;
-    background: var(--primary-soft); border: 1px solid var(--primary-border);
-    color: var(--primary-dark); font-size: 12px; font-weight: 700; cursor: pointer;
-    text-align: left;
-}
-.header-profile-line #header-profile-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pill-edit { flex: 0 0 auto; font-size: 10.5px; background: #FFFFFF; border: 1px solid var(--primary-border); border-radius: 99px; padding: 1px 8px; }
 .mode-diff-hint { margin-top: 6px; font-size: 10.5px; color: var(--text-muted); line-height: 1.5; }
 
 .daily-strip {
@@ -2721,24 +2787,6 @@ header *, .header-tools, .header-row-1 {
     flex: 1 1 100%;
 }
 
-/* 顶栏用户名：克隆测量里 clientWidth 为 0，说明它在 flex 里被挤没，给最小可读宽度 */
-/* 实测根因：账号胶囊作为 flex 子项默认允许收缩，被长标题挤到只剩 padding 的 16px，
-   里面"登录/注册"要 49px 自然放不下。让它不参与收缩，超长的那一侧交给标题去省略。 */
-.user-account-badge {
-    flex: 0 0 auto;
-    max-width: 100%;
-    min-width: 0;
-}
-
-#header-username-display {
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 9em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 /* 字段小注：把长说明从 placeholder 搬出来，placeholder 只留放得下的短词 */
 .field-hint {
     font-size: 10.5px;
@@ -3135,8 +3183,6 @@ body.update-blocked { overflow: hidden; }
 .meal-row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* 顶栏头像与链接式按钮 */
-.header-avatar{width:22px;height:22px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,.7);display:block}
-#header-avatar-slot:not(:empty) + #header-user-icon{display:none}
 .link-like{appearance:none;-webkit-appearance:none;border:0;background:none;padding:0;margin:0;font:inherit;color:var(--primary-dark,#059669);text-decoration:underline;cursor:pointer}
 .link-like:focus-visible{outline:2px solid #10B981;outline-offset:2px}
 

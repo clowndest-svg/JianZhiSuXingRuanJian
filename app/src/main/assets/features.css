@@ -103,8 +103,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 
 /* Let fixed header controls wrap instead of enlarging narrow WebView viewports. */
 @media(max-width:380px){
- .header-row-1{flex-wrap:wrap}
- .header-tools{flex:1 1 100%;max-width:100%;flex-wrap:wrap;justify-content:flex-end}
+ /* 顶栏不再换行：机主实拍指的就是"品牌在上、账号入口掉到下面一行"。
+    账号入口改成可收缩带下限（见 style.css 的 .account-chip），齿轮已删掉重复入口，
+    320 档量过最窄一行仍放得下，不需要靠换行腾地方。 */
  .header-mode-bar{flex-wrap:wrap}
  .mode-btn{min-width:0;flex:1 1 120px;white-space:normal}
  .water-cups-grid{grid-template-columns:repeat(4,minmax(0,1fr))}

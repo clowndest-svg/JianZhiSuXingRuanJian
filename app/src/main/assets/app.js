@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 30;
+const APP_BUILD = 31;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -425,7 +425,7 @@ async function initAuthAndData() {
         }
         state.token = savedToken;
         state.user = saved;
-        updateUserUI(state.user.username);
+        updateUserUI(displayName(state.user));
         await syncRemoteDashboard();
         await syncRemoteCharts();
     } else {
@@ -565,7 +565,12 @@ function saveAuthSession(token, user) {
     if (typeof refreshAccount === 'function') refreshAccount();
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
-    updateUserUI(user.username);
+    updateUserUI(displayName(user));
+}
+
+/** 顶栏和登录态显示昵称，没有昵称才退回登录名——和头像圆点取首字的口径保持一致。 */
+function displayName(u) {
+    return String((u && (u.nickname || u.username)) || "");
 }
 
 function updateUserUI(username) {
@@ -597,7 +602,7 @@ function applyDashboardData(data) {
     if (!data || !data.metrics) return;
     state.dashboardLoaded = true;
     state.publicUrl = data.public_url || state.publicUrl;
-    if(state.user)updateUserUI(state.user.username);
+    if(state.user)updateUserUI(displayName(state.user));
     // 今天练没练、清单勾了哪些、当前是休息日还是运动日，都以服务端为准
     state.workoutDoneToday = !!data.today_workout_done;
     state.dayMode = data.day_mode || "rest";
@@ -1772,7 +1777,7 @@ async function submitLogin() {
             saveAuthSession(data.token, { username: data.username, nickname: data.nickname });
             state.publicUrl=data.public_url;
             closeAuthModal();
-            callNativeToast(`🎉 欢迎回来，${data.username}！专属真实档案已同步！`);
+            callNativeToast(`🎉 欢迎回来，${escapeHtml(displayName(data))}！专属真实档案已同步！`);
             callNativeVibrate(100);
             await syncRemoteDashboard();
             await syncRemoteCharts();

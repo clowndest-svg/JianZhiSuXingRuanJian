@@ -27,6 +27,11 @@ SANDBOX = os.path.join(ROOT, "_audit_sandbox", "legacy-backend")
 SRC_REL = "server.py"
 
 
+def _css_rules(css):
+    """把样式表拆成 (选择器, 规则体) 列表。只看最内层花括号，@media 的外壳忽略掉。"""
+    return [(m.group(1), m.group(2)) for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css)]
+
+
 def reset_ask_limiter(m):
     """重置问答限流窗口。新版计数在 Redis/内存里由 rate_reset_all_ask 清，
     旧版只有进程内 _ask_hits 字典——两边都要真的清掉，不能因为版本没这个函数就跳过。"""
@@ -733,12 +738,63 @@ def main():
           ".daily-strip .dc-val" in css_txt and "white-space: normal" in css_txt, "")
     check("引擎状态行允许折行",
           ".ai-engine-bar .eng-why" in css_txt and "white-space: normal" in css_txt, "")
-    # 实测根因是账号胶囊被 flex 收缩到 16px，不是子元素缺 min-width
-    check("顶栏账号胶囊不参与收缩",
-          ".user-account-badge" in css_txt and "flex: 0 0 auto" in css_txt, "")
+    # 实测两头都翻车过：不许收缩时它反过来挤掉品牌行，默认收缩时被长标题压成 16px。
+    # 现在的契约是"可收缩 + 92px 下限"，昵称自己有 max-width 省略。
+    _chip = css_txt[css_txt.index(".account-chip {"):css_txt.index("}", css_txt.index(".account-chip {"))] \
+        if ".account-chip {" in css_txt else ""
+    check("顶栏账号入口可收缩但有下限",
+          "flex: 0 1 auto" in _chip and "min-width: 92px" in _chip, _chip[:60])
+    # 百分比上限的参照是工具组自身宽度，那是 shrink-to-fit 的循环量，各引擎算得不一样
+    check("账号入口宽度上限用视口单位而不是自指百分比",
+          "min(240px, 60vw)" in _chip and "max-width: 52%" not in _chip, _chip[:60])
+    # 级联陷阱：文件末尾那组"右侧按钮组"覆盖规则里混进了 .account-chip，
+    # 它的 min-width:0 会盖掉上面 92px 的下限——只看自己那条规则是查不出来的。
+    _chip_zeroed = []
+    for _sel, _body in _css_rules(css_txt):
+        if ".account-chip" in [p.strip() for p in _sel.split(",")]:
+            if "min-width: 0" in _body or "min-width:0" in _body:
+                _chip_zeroed.append(_sel.strip()[:60])
+    check("账号入口的收缩下限没被后面的覆盖组抹掉", not _chip_zeroed, _chip_zeroed[:2])
+
+    # ---- 顶栏重排（机主实拍："一上一下不好看"、"用户名那样展示好丑"） ----
+    check("顶栏不再有蓝色小人 emoji 当账号图标", "👤" not in html_txt[html_txt.index('<header'):html_txt.index("</header>")], "")
+    check("账号入口是头像圆点 + 昵称两块，没有描边胶囊",
+          ".account-chip {" in css_txt and "border: none" in css_txt[css_txt.index(".account-chip {"):css_txt.index("}", css_txt.index(".account-chip {"))],
+          "")
+    check("昵称超长走省略号而不是竖排",
+          "max-width: 9em" in css_txt and ".account-name {" in css_txt, "")
+    _hdr_html = html_txt[html_txt.index("<header"):html_txt.index("</header>")]
+    check("顶栏只剩排版切换一颗图标按钮，重复的齿轮已删",
+          _hdr_html.count('class="header-icon-btn"') == 1 and "openProfileModal" in _hdr_html,
+          str(_hdr_html.count('class="header-icon-btn"')))
+    _fcss = read_asset("features.css")
+    check("窄屏不再把账号入口挤到品牌下面一行",
+          ".header-row-1{flex-wrap:wrap}" not in _fcss
+          and ".header-tools{flex:1 1 100%" not in _fcss, "")
+    # 昵称改在 /api/account 里回读，顶栏只在登录那一刻画过一次的话，改了名字要重开 App 才生效
+    _fjs = read_asset("features.js")
+    check("个人中心回读到新昵称时顶栏跟着重画",
+          "updateUserUI(displayName(state.user))" in _fjs
+          and "updateUserUI(state.user.username)" not in _fjs, "")
+    # 档案摘要挂进品牌第二行：顶栏从"品牌 / 档案 / 模式"三层压成两层
+    brand_at = html_txt.index('class="app-brand"')
+    prof_at = html_txt.index('class="brand-profile"')
+    tools_at = html_txt.index('class="header-tools"')
+    mode_at = html_txt.index('class="header-mode-bar"')
+    check("档案摘要在品牌块内、且在工具组之前", brand_at < prof_at < tools_at, (brand_at, prof_at, tools_at))
+    check("顶栏只剩两层：品牌行之后直接是模式条",
+          html_txt.index("</header>", prof_at) > mode_at > tools_at
+          and "header-profile-line" not in html_txt, "")
+    check("旧档案行与描边胶囊的样式已删除",
+          ".header-profile-line" not in css_txt and ".pill-edit" not in css_txt, "")
 
     check("遮挡覆盖规则已追加", "遮挡与溢出修复" in css_txt and "has-floating-dl" in css_txt, "")
-    check("顶栏允许换行不挤标题", "flex-wrap: wrap" in css_txt, "")
+    # 旧断言写的是"顶栏允许换行"——换行正是要修掉的那件事（账号入口掉到品牌下面一行）。
+    # 现在的契约：品牌区长文本走省略号，不换行。
+    check("顶栏品牌区长文本走省略号而不是换行",
+          ".app-header .brand-text h1," in css_txt
+          and "white-space: nowrap" in css_txt[css_txt.index(".app-header .brand-text h1,"):css_txt.index("}", css_txt.index(".app-header .brand-text h1,"))],
+          "")
     check("长文本走省略号不竖排", "text-overflow: ellipsis" in css_txt, "")
     check("App 内隐藏悬浮下载入口",
           "floating.style.display" in js_txt and "has-floating-dl" in js_txt, "")

@@ -41,6 +41,12 @@ public class DeviceSmokeTest {
         try(FileOutputStream out=new FileOutputStream(new File(dir,name+".png"))){image.compress(Bitmap.CompressFormat.PNG,100,out);}
         image.recycle();
     }
+    /** 把量到的数字原样留档：断言只说"过了"，看图的人要能对上号。 */
+    private void dumpQa(String name,String text) throws Exception {
+        File f=new File(instrumentation.getTargetContext().getExternalFilesDir(null),"qa/"+name);
+        f.getParentFile().mkdirs();
+        try(FileOutputStream out=new FileOutputStream(f)){out.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+    }
     private MainActivity launchShell() throws Exception {
         Intent intent=new Intent(instrumentation.getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK);
         instrumentation.getTargetContext().startActivity(intent);
@@ -63,7 +69,7 @@ public class DeviceSmokeTest {
         // 屏上有没有印原始枚举"是能量的——先把可量的钉住，再看图。
         String user="uqa"+System.currentTimeMillis();String password="UsbQaOnly!123";
         org.json.JSONObject body=new org.json.JSONObject().put("username",user).put("password",password)
-                .put("age",30).put("height",170).put("weight_jin",160).put("target_weight_jin",140);
+                .put("nickname","小田").put("age",30).put("height",170).put("weight_jin",160).put("target_weight_jin",140);
         java.net.HttpURLConnection request=(java.net.HttpURLConnection)new URL(BuildConfig.API_BASE_URL+"/api/register").openConnection();
         request.setRequestMethod("POST");request.setConnectTimeout(15000);request.setReadTimeout(15000);request.setDoOutput(true);
         request.setRequestProperty("Content-Type","application/json");
@@ -90,6 +96,61 @@ public class DeviceSmokeTest {
                     +"if(!i||!i.complete||i.naturalWidth<64)return false;"
                     +"const r=i.getBoundingClientRect();"
                     +"return Math.abs(r.width-r.height)<=1&&r.width>=28&&r.width<=44;})()"));
+            // 顶栏度量：机主说"一上一下不好看、用户名那样展示好丑"。
+            // 观感靠看图，但"同一行、不换行、圆点是正圆、层级少一层"是量得出来的。
+            // 探针本身要能自证：JS 里任何一处取空元素，evaluateJavascript 只会回 null，
+            // 报出来像"产品没通过"，其实是探针写坏了。套一层 try 把真因带回来。
+            String hd = js("JSON.stringify((function(){try{"
+                    +"var chip=document.querySelector('.account-chip');"
+                    +"var icon=document.querySelector('.brand-icon');"
+                    +"var dot=document.querySelector('.avatar-dot');"
+                    +"var name=document.getElementById('header-username-display');"
+                    +"var brand=document.querySelector('.app-brand');"
+                    +"var prof=document.querySelector('.brand-profile');"
+                    +"var hdr=document.querySelector('.app-header');"
+                    +"if(!chip||!icon||!dot||!name||!prof||!hdr)return {probeError:'缺元素 chip='+(!!chip)+"
+                    +"' icon='+(!!icon)+' dot='+(!!dot)+' name='+(!!name)+' prof='+(!!prof)+' hdr='+(!!hdr)};"
+                    +"var cr=chip.getBoundingClientRect(),ir=icon.getBoundingClientRect(),dr=dot.getBoundingClientRect();"
+                    +"var extra=Array.prototype.filter.call(document.querySelectorAll('.header-icon-btn'),function(b){"
+                    +"return b.id!=='btn-view-toggle'&&b.offsetHeight>0;}).length;"
+                    +"return {chipH:Math.round(cr.height),iconH:Math.round(ir.height),"
+                    +"topDiff:Math.abs(Math.round((cr.top+cr.height/2)-(ir.top+ir.height/2))),"
+                    +"extraIcons:extra,nameText:name.textContent.trim(),"
+                    +"dotW:Math.round(dr.width),dotH:Math.round(dr.height),"
+                    +"nameH:Math.round(name.getBoundingClientRect().height),"
+                    +"nameLines:Math.round(name.getBoundingClientRect().height/parseFloat(getComputedStyle(name).fontSize)/1.4),"
+                    +"profLeft:Math.round(prof.getBoundingClientRect().left),"
+                    +"titleLeft:Math.round(brand.querySelector('h1').getBoundingClientRect().left),"
+                    +"hdrH:Math.round(hdr.getBoundingClientRect().height),"
+                    +"tiers:Array.from(hdr.children).filter(function(c){return c.offsetHeight>0;}).length,"
+                    +"toolsRight:Math.round(cr.right),hdrRight:Math.round(hdr.getBoundingClientRect().right),"
+                    +"overflow:document.documentElement.scrollWidth>window.innerWidth+1};"
+                    +"}catch(e){return {probeError:String(e&&e.message||e)};}})())");
+            org.json.JSONObject hj = new org.json.JSONObject(new org.json.JSONArray("[" + hd + "]").getString(0));
+            assertFalse("顶栏度量探针自己失败了: " + hd, hj.has("probeError"));
+            dumpQa("header-desktop.json", hj.toString());
+            assertEquals("顶栏账号入口和品牌图标不在同一行中线上: " + hd, 0, hj.getInt("topDiff"));
+            assertTrue("账号入口比品牌图标矮太多，看着像没对齐: " + hd,
+                    hj.getInt("chipH") >= hj.getInt("iconH") - 6);
+            // 齿轮和档案摘要是同一个入口，窄屏上白占 40px；机主说的"一上一下"就是它俩把顶栏撑成三层
+            assertEquals("顶栏还留着第二颗重复的齿轮: " + hd, 0, hj.getInt("extraIcons"));
+            assertEquals("账号入口显示的不是昵称: " + hd, "小田", hj.getString("nameText"));
+            assertEquals("头像圆点不是正圆: " + hd, hj.getInt("dotW"), hj.getInt("dotH"));
+            assertTrue("头像圆点太小: " + hd, hj.getInt("dotW") >= 22);
+            assertEquals("昵称被排成多行（该省略号时没省略）: " + hd, 1, hj.getInt("nameLines"));
+            // 档案行挂在品牌文字下面（图标在左边），所以对齐参照是标题而不是图标
+            assertEquals("档案行没和标题左对齐: " + hd, hj.getInt("titleLeft"), hj.getInt("profLeft"));
+            // 工具组最后一个元素（账号入口）该贴着顶栏右内边，右侧不留大块空白
+            assertTrue("顶栏右侧留白过大，工具组没贴到边: " + hd,
+                    hj.getInt("hdrRight") - hj.getInt("toolsRight") <= 20);
+            // 层级数才是一上一下的直接度量：品牌行 + 模式条（提示条有内容时才算第三块）
+            assertTrue("顶栏可见块超过 3 个，还在往堆: " + hd, hj.getInt("tiers") <= 3);
+            assertTrue("顶栏高度异常（没量到内容或堆太多层）: " + hd,
+                    hj.getInt("hdrH") >= 80 && hj.getInt("hdrH") <= 180);
+            assertFalse("顶栏改动引起横向溢出: " + hd, hj.getBoolean("overflow"));
+            // 这张要在开任何弹窗之前拍：上一轮把它放在 openDownloadModal 之后，
+            // 取回来的图盖着弹窗，等于没有顶栏证据。
+            screenshot("header-clean");
             js("openDownloadModal()");
             waitFor("document.querySelector('#download-apk-modal img.brand-mark')!==null");
             assertEquals("下载弹窗的品牌图没加载成功", "true", js(
@@ -205,7 +266,7 @@ public class DeviceSmokeTest {
         // 忌口设置是不是真的走到了 DOM、邮件通道没配时界面有没有照实说。
         String user="uqa"+System.currentTimeMillis();String password="UsbQaOnly!123";
         org.json.JSONObject body=new org.json.JSONObject().put("username",user).put("password",password)
-                .put("age",30).put("height",170).put("weight_jin",160).put("target_weight_jin",140);
+                .put("nickname","小田").put("age",30).put("height",170).put("weight_jin",160).put("target_weight_jin",140);
         java.net.HttpURLConnection request=(java.net.HttpURLConnection)new URL(BuildConfig.API_BASE_URL+"/api/register").openConnection();
         request.setRequestMethod("POST");request.setConnectTimeout(15000);request.setReadTimeout(15000);request.setDoOutput(true);
         request.setRequestProperty("Content-Type","application/json");
@@ -238,6 +299,9 @@ public class DeviceSmokeTest {
         String geo = new org.json.JSONArray("[" + js("window.__geo") + "]").getString(0);
         assertTrue("定位回调没落地，页面会一直卡在请求中: " + geo,
                 geo.startsWith("ok:") || geo.startsWith("err:"));
+        // 模拟器给不给得出 fix 是随机的：走了哪条分支要留在产物里，
+        // 不然"这一版城市落库没验到"和"验过但没提"看着一模一样。
+        dumpQa("location.txt", geo + "\n");
         if (geo.startsWith("ok:")) {
             // 真坐标直接回传服务端：验的是"设备上的经纬度能真的认出一个城市"，
             // 不是浏览器里的模拟值。坐标取自上一次回调，不写死。
@@ -306,9 +370,47 @@ public class DeviceSmokeTest {
         assertEquals("320 档个人中心横向溢出: " + dlg, 0, dj.getJSONArray("over").length());
         assertTrue("320 档弹窗内容宽超过可视宽: " + dlg, dj.getInt("scrollW") <= dj.getInt("clientW") + 1);
         screenshot("account-center-320");
+        // 机主那台 vivo 就是窄屏，顶栏"一上一下"最容易在这里露馅。
+        // MuMu 窗口是 1280 起的，应用会带 desktop-view；只压窗口不会自己切回去，
+        // 拍出来是"桌面壳 + 窄视口"的混合体，不代表手机。先真切到手机排版再拍。
+        js("document.getElementById('account-tools-dialog').close();applyViewMode('mobile')");
+        waitFor("document.body.classList.contains('mobile-view')");
+        // 机主实拍那张就是 360 CSS 宽：账号入口掉到品牌下面一行，就是"一上一下"。
+        // 宽屏那档量不到这件事，必须在窄屏这一档量。
+        String nh = js("JSON.stringify((function(){try{"
+                +"var chip=document.querySelector('.account-chip');"
+                +"var icon=document.querySelector('.brand-icon');"
+                +"var prof=document.querySelector('.brand-profile');"
+                +"var name=document.getElementById('header-username-display');"
+                +"if(!chip||!icon||!prof||!name)return {probeError:'缺元素'};"
+                +"var cr=chip.getBoundingClientRect(),ir=icon.getBoundingClientRect();"
+                +"return {rowDiff:Math.abs(Math.round((cr.top+cr.height/2)-(ir.top+ir.height/2))),"
+                +"chipPct:Math.round(cr.width/innerWidth*100),innerW:Math.round(innerWidth),"
+                +"profH:Math.round(prof.getBoundingClientRect().height),"
+                +"profText:prof.textContent.trim().length,"
+                +"clipped:name.scrollWidth>name.clientWidth,"
+                +"overflow:document.documentElement.scrollWidth>window.innerWidth+1};"
+                +"}catch(e){return {probeError:String(e&&e.message||e)};}})())");
+        org.json.JSONObject nj = new org.json.JSONObject(new org.json.JSONArray("[" + nh + "]").getString(0));
+        assertFalse("窄屏顶栏探针自己失败了: " + nh, nj.has("probeError"));
+        dumpQa("header-narrow.json", nj.toString());
+        assertEquals("320 档账号入口又掉到品牌下面一行（一上一下）: " + nh, 0, nj.getInt("rowDiff"));
+        assertTrue("320 档账号入口宽得压掉品牌: " + nh, nj.getInt("chipPct") <= 45);
+        assertTrue("320 档档案摘要没排出来: " + nh, nj.getInt("profH") >= 14 && nj.getInt("profText") > 4);
+        assertFalse("320 档顶栏改动引起横向溢出: " + nh, nj.getBoolean("overflow"));
+        screenshot("header-320");
+        final double phoneDensity = Double.parseDouble(js("devicePixelRatio"));
+        instrumentation.runOnMainSync(() -> web.setLayoutParams(
+                new android.widget.FrameLayout.LayoutParams((int) Math.round(393 * phoneDensity),
+                        ViewGroup.LayoutParams.MATCH_PARENT)));
+        js("document.querySelector('meta[name=viewport]').content='width=device-width, initial-scale=1';");
+        Thread.sleep(400);
+        assertEquals("393 档没真的跑在 393 CSS 宽上", 393.0, Double.parseDouble(js("innerWidth")), 1.0);
+        screenshot("header-393");
         instrumentation.runOnMainSync(() -> web.setLayoutParams(
                 new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT)));
+        js("applyViewMode('desktop')");
         js("document.getElementById('account-tools-dialog').close()");
 
         // 找回密码：登录页要有入口，且界面说的话必须和服务端通道状态一致

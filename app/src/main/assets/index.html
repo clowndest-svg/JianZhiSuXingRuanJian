@@ -17,29 +17,32 @@
             <div class="app-brand">
                 <img class="brand-icon" src="app-icon.png" alt="轻塑" width="34" height="34">
                 <div class="brand-text">
-                    <h1>轻塑</h1>
-                    <p>减脂塑形严管伴侣</p>
+                    <div class="brand-line">
+                        <h1>轻塑</h1>
+                        <p class="brand-tag">减脂塑形严管伴侣</p>
+                    </div>
+                    <!-- 档案摘要挂在品牌第二行。它原来单独占一行，
+                         顶栏就成了"品牌 / 档案 / 模式"三层堆叠，右侧还空出一块 -->
+                    <button type="button" class="brand-profile" onclick="openProfileModal()" title="修改档案">
+                        <span id="header-profile-summary">未绑定档案 · 请先登录</span>
+                        <span class="brand-edit" aria-hidden="true">✎</span>
+                    </button>
                 </div>
             </div>
             <div class="header-tools">
                 <button class="header-download-btn" id="btn-header-download" onclick="openDownloadModal()">
                     <span>📱</span><span>下载App</span>
                 </button>
-                <button class="user-account-badge" onclick="openAuthModal()">
-                    <span id="header-avatar-slot"></span>
-                    <span id="header-user-icon">👤</span>
-                    <span id="header-username-display">登录/注册</span>
+                <!-- 账号入口：头像圆点 + 昵称，无边框无 emoji；未登录时圆点用品牌首字"轻" -->
+                <button type="button" class="account-chip" onclick="openAccountCenter()" title="个人中心">
+                    <span class="avatar-dot" id="header-avatar-slot">轻</span>
+                    <span class="account-name" id="header-username-display">登录/注册</span>
                 </button>
                 <button class="header-icon-btn" id="btn-view-toggle" onclick="toggleViewMode()" title="切换电脑版/手机版排版">🖥️</button>
-                <button class="header-icon-btn" onclick="openProfileModal()" title="我的档案与身形目标">⚙️</button>
+                <!-- 原来这里还有一颗齿轮，点的也是 openProfileModal——和下面那行档案摘要
+                     完全重复，窄屏上却要多占 40px。删掉，档案入口只留一处。 -->
             </div>
         </div>
-
-        <!-- 档案摘要从胶囊里拿出来单独一行：以前挤在按钮里会被压成竖排 -->
-        <button class="header-profile-line" onclick="openProfileModal()">
-            <span id="header-profile-summary">未绑定档案 · 请先登录</span>
-            <span class="pill-edit">调整</span>
-        </button>
 
         <!-- 现代化 iOS/Tailwind 风格分段切换器 (运动日 / 休息日) -->
         <div class="header-mode-bar">
