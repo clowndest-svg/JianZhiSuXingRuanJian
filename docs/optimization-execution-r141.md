@@ -57,7 +57,28 @@ alpha 取自 artwork 明度（黑底变透明、人形与绿环保留），24/36
   删掉 115、116 两个设备夹具，`users_left=[tiangang,木木]`、`foreign_key_check` 0 条、
   真实账号各表行数前后一致、`integrity_check` ok。
 
-## 5. 仍未覆盖（不写成通过）
+## 5. 收尾时把线上记录的 revision 纠正过来（含我自己的一次低级错）
+
+补提交 `a9bc7dc` 之后，`/opt/qingsu/release.json` 还指着 `92542ed`——那个签出去会构建成
+versionCode 23，和线上真正在跑的 build 24 对不上。所以用同一个 stage 目录重跑了一次
+`deploy.py`，把 revision 抬到 `a9bc7dc5a20f942e7d758afa0e9ef2b7c5a7c142`。
+`build.gradle` 不在发布归档里，两次重跑的载荷逐字节相同：APK `sha256 1e31ca4b8902…`、
+`size 5,962,201` 与重跑前一致，`verify_live.py` 8 项通过、`remaining_users=2`。
+
+**我自己在这一步犯了一个必须记下来的错**：第一次重跑时我拿 12 位短 SHA 补零凑成 40 位
+（`a9bc7dc5a20f0000…`）写进了 `--revision`，线上于是上报了一个**不存在的提交号**。
+约一分钟后用 `git rev-parse HEAD` 取到真实完整 SHA 重跑纠正。
+教训：**给对账字段填值必须由命令现取，不能凭记忆或从截断输出拼**——
+`cut -c1-12` 的输出看着像完整 SHA，补零更是能一路通过所有字符串比较。
+判据侧的兜底是 `deploy.py` 末尾那句 `assert live.get('source_revision')==args.revision`，
+它只能保证"线上报的等于我传的"，**保证不了"我传的是真提交号"**；
+所以收尾复核要拿 `git rev-parse HEAD` 与 `/health/ready` 两边对完整 40 位，而不是看前缀。
+
+顺带一条现场观察：重跑前 `/health/ready` 的 `gate.builds` 是 `{"24":14}`——MuMu 上那台
+build 24 的调用被真实计进来了，说明"抬门前先看得见谁在调用"这条设计在真环境里确实拿得到数据。
+这个计数是**进程内**的，重启后归零（重跑后就空了），别当持久台账用。
+
+## 6. 仍未覆盖（不写成通过）
 
 - **通知栏小图标在真实状态栏里长什么样没看过**：vivo 没连，MuMu 的状态栏截图也不代表各厂商染色；
   只验到资源存在、代码引用它、剪影 alpha 合理。
