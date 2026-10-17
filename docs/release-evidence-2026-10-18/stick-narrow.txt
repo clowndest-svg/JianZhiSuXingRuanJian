@@ -1,0 +1,2 @@
+320档 {"W":368,"H":368,"ink":1673,"minX":28,"minY":116,"maxX":328,"maxY":228,"name":"仰卧臀桥顶峰收缩 (Glute Bridge)","covered":false,"cssW":245,"dpr":1.5}
+360档 {"W":428,"H":428,"ink":2281,"minX":34,"minY":134,"maxX":382,"maxY":264,"name":"仰卧臀桥顶峰收缩 (Glute Bridge)","covered":false,"cssW":285,"dpr":1.5}
