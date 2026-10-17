@@ -64,6 +64,8 @@
 - 集成判据 `test_public_static_assets_really_serve`：把十件公网静态件真的 GET 一遍，  钉 200 与 content-type 前缀。**改之前它当场红**（500），改完绿——这条判据是被这个 bug 挣来的。
 - 启动校验：扩展名没登记 MIME 就在 import 时抛 `RuntimeError`，不留到用户请求。  变异标定：从表里删掉 `png` → 启动即炸（ERROR）；只关掉启动校验 → 服务照常 200（等价变异，如实记）。
 
+- 同一批自查里还抓到 **`set-min-build.py show` 只回退出码、一个字不打印**：第一次在服务器上跑它，文件在、EXIT=0、屏幕上什么都没有。判据补了一条真跑子进程、要求 stdout 是含三个字段的 JSON；把 show 改回直接调 `live()` 当场红。修好后线上打印 `{override:"0", manifest_min_version_code:22, effective_min_build_live:0, gate.builds:{"22":15,"0":2}}`——那两个 `"0"` 就是本轮无头的探针请求，说明"谁还在用旧形状调用"真的看得见。
+
 重发一次：`{"deployed":"r139b","backup":"/opt/qingsu/backups/release-20261017-191136","source_revision":"e686c2ea7152…"}`，归档两端 MD5 一致（`40fd48ad…`），`/app-icon.png` 现在 200 / image/png / 214,919 字节且 SHA-256 与仓库一致；`verify_live.py` 8 项通过，库里只剩 `tiangang`、`木木`。APK 没动（图标 500 只影响网页侧），所以 `qingsu.apk` 与 `version.json` 沿用上一次的对账结果。
 ## 7. 仍未覆盖（不写成通过）
 
