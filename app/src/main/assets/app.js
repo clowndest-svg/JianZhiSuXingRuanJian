@@ -11,9 +11,10 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 28;
+const APP_BUILD = 29;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
-const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer"];
+const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
+    "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
 
 function isGatedApi(url) {
     const text = String(url || "");
@@ -185,7 +186,10 @@ const TAKEOUT_DB = {
     "烧烤烤五花肉+掌中宝20串": { cal: 1100, oil: 45, warning: "五花肉脂肪超50%，刷油刷辣酱反复烘烤，夜宵代谢负担极大！", subName: "烤鸡胸肉串+烤口蘑+烤生蚝+烤韭菜(少油少盐)", subCal: 420, subBenefit: "热量仅 420 kcal · 纯正低脂高蛋白 · 立省 680 kcal！" },
     "珍珠奶茶大杯(正常糖)": { cal: 490, oil: 18, warning: "一杯含糖量达 50g (约11块方糖)，植脂末含反式脂肪酸！", subName: "无糖茉莉绿茶鲜奶 + 少许仙草", subCal: 120, subBenefit: "热量仅 120 kcal · 零反式脂肪 · 立省 370 kcal！" },
     "轻食鸡胸肉藜麦沙拉(油醋汁)": { cal: 420, oil: 8, warning: "", subName: "本身即为健康轻食，合格！注意沙拉酱勿全倒。", subCal: 420, subBenefit: "恭喜！属于合格控卡餐，优质蛋白充足。" },
-    "赛百味6寸香烤牛肉堡": { cal: 380, oil: 9, warning: "", subName: "本身即为推荐优质慢碳高蛋白快餐！", subCal: 380, subBenefit: "全麦面包+精瘦牛肉+丰富蔬菜，绝佳减脂搭配！" }
+    "赛百味6寸香烤牛肉堡": { cal: 380, oil: 9, warning: "", subName: "本身即为推荐优质慢碳高蛋白快餐！", subCal: 380, subBenefit: "全麦面包+精瘦牛肉+丰富蔬菜，绝佳减脂搭配！" },
+    "南翔小笼包8只+酸辣汤": { cal: 760, oil: 26, warning: "馅里打的是猪皮冻与糖，一口一个的油脂比看着高；酸辣汤钠含量大，喝完容易水肿。", subName: "小笼包4只 + 白灼青菜 + 紫菜蛋花汤(少盐)", subCal: 420, subBenefit: "热量仅 420 kcal · 甜口猪油减半 · 立省 340 kcal！" },
+    "红烧大排饭(含例汤)": { cal: 890, oil: 38, warning: "大排先炸后红烧，糖色与油一起挂上去；汤汁泡饭等于把油直接喝掉。", subName: "白切鸡饭(去皮) + 烫青菜(不浇汁)", subCal: 470, subBenefit: "热量仅 470 kcal · 去掉炸衣与糖色 · 立省 420 kcal！" },
+    "兰州牛肉面(大碗加肉)": { cal: 620, oil: 18, warning: "清汤看着清淡，但加肉份量与汤里那层辣油才是热量主体；面一份就是 300g 熟重。", subName: "牛肉面(小碗、不加肉、少辣油) + 烫青菜", subCal: 430, subBenefit: "热量仅 430 kcal · 慢碳配蛋白 · 立省 190 kcal！" },
 };
 
 // 4套轮换食谱
@@ -233,6 +237,119 @@ const RECIPES_DATA = {
 };
 
 // 一周采购清单
+// 忌口命中规则：只按菜名与替代项里的字面食材判，不去猜做法。
+// 宁可写窄：把"牛奶"误判成辣，比漏判一项更难查——漏判用户会自己发现，误判不会。
+const AVOID_RULES = {
+    no_spicy: /辣|麻酱|红油|火锅|湘菜|川菜|黔|酸辣|剁椒/,
+    no_seafood: /虾|蟹|蚌|蚝|鲍|鱼|海带|紫菜|海鲜|金枪|鳕|三文|螺/,
+    no_beef: /牛肉|肥牛|牛腱|牛腩|牛骨/,
+    no_pork: /猪|五花|排骨|香肠|培根|火腿|腊肉/,
+    no_dairy: /牛奶|酸奶|奶酪|奶油|黄油|芝士|奶茶/,
+    vegetarian: /鸡|鸭|牛|羊|猪|虾|鱼|培根|火腿|肉/,
+    less_oil: null            // 少油不改菜名，只改排序
+};
+
+// 菜名 -> 菜系标签。词汇必须与 app_modules/geo.py 里各城市的标签对得上，
+// 否则"你在成都"匹配不到任何一道，城市这一维就成了摆设（判据核对交集非空）。
+const TAKEOUT_CUISINE = {
+    "隆江猪脚饭": ["粤菜", "烧腊"],
+    "杨国福麻辣烫(重麻酱)": ["川渝", "川菜", "火锅", "辣"],
+    "麦辣鸡腿堡套餐(含薯条可乐)": ["西式", "快餐"],
+    "螺蛳粉+炸蛋+鸭掌": ["桂菜", "米粉", "辣"],
+    "黄焖鸡米饭(大份多汁)": ["鲁菜", "北方"],
+    "烧烤烤五花肉+掌中宝20串": ["通用", "夜宵"],
+    "珍珠奶茶大杯(正常糖)": ["粤菜", "茶饮"],
+    "轻食鸡胸肉藜麦沙拉(油醋汁)": ["西式", "轻食"],
+    "赛百味6寸香烤牛肉堡": ["西式", "快餐"],
+    "南翔小笼包8只+酸辣汤": ["本帮", "江浙", "苏帮", "浓油赤酱"],
+    "红烧大排饭(含例汤)": ["本帮", "江浙", "北方"],
+    "兰州牛肉面(大碗加肉)": ["西北", "清真", "面食", "北方"],
+};
+
+function accountNow() {
+    return (typeof accountData === 'function' && accountData()) || {};
+}
+function avoidTagsNow() { return accountNow().avoid_tags || []; }
+function cityCuisinesNow() { return accountNow().cuisines || []; }
+function dishConflicts(text, tags) {
+    const s = String(text || '');
+    return (tags || []).filter(function (k) {
+        const re = AVOID_RULES[k];
+        return !!(re && re.test(s));
+    });
+}
+
+/** 按忌口与城市给"先点哪个"的排序。
+ *  只排顺序、不改热量，也不藏菜：冲突的菜仍然如实显示热量与替代项。 */
+function rankTakeout() {
+    const tags = avoidTagsNow(), cuisines = cityCuisinesNow();
+    return Object.keys(TAKEOUT_DB).map(function (name) {
+        const item = TAKEOUT_DB[name];
+        const bad = dishConflicts(name, tags);
+        const subBad = dishConflicts(item.subName, tags);
+        const local = (TAKEOUT_CUISINE[name] || []).some(function (c) { return cuisines.indexOf(c) >= 0; });
+        const oilOk = tags.indexOf('less_oil') >= 0 ? (item.oil <= 15 ? 1 : -1) : (item.oil <= 15 ? 1 : 0);
+        return { name: name, item: item, bad: bad, subBad: subBad, local: local,
+                 score: (bad.length ? -100 : 0) + (local ? 2 : 0) + oilOk };
+    }).sort(function (a, b) { return b.score - a.score || a.item.cal - b.item.cal; });
+}
+
+function renderTakeoutAdvisor() {
+    const host = document.getElementById('takeout-advisor');
+    if (!host) return;
+    const a = accountNow(), tags = avoidTagsNow(), cuisines = cityCuisinesNow();
+    const rows = rankTakeout();
+    const clean = rows.filter(function (r) { return !r.bad.length; }).slice(0, 3);
+    const clash = rows.filter(function (r) { return r.bad.length; });
+    const head = '<div class="tav-meta">城市：' +
+        (a.city ? escapeHtml(a.city) + (cuisines.length ? '（当地口味 ' + escapeHtml(cuisines.join('、')) + '）'
+                                                       : '（不在内置菜系表里，只按忌口排）')
+                : '未设置') + ' · 忌口 ' + tags.length + ' 项</div>';
+    if (!tags.length && !cuisines.length) {
+        host.innerHTML = head + '<p class="tav-empty">还没设忌口也没定城市，这里只能按热量给顺序。' +
+            '到【个人中心】勾一下，排序会跟着变。</p>';
+        return;
+    }
+    const card = function (r) {
+        return '<div class="tav-item"><div class="tav-item-main">' +
+            '<div class="tav-item-title">' + escapeHtml(r.name) +
+            (r.local ? '<span class="tav-tag">当地常见</span>' : '') + '</div>' +
+            '<div class="tav-item-meta">约 ' + r.item.cal + ' kcal · 油 ' + r.item.oil + 'g · 替代项 ' +
+            r.item.subCal + ' kcal</div></div><div class="tav-item-acts">' +
+            '<button type="button" class="td-mini" data-copy="' + escapeHtml(r.item.subName) +
+            '" onclick="copyTakeoutKeyword(this.getAttribute(\'data-copy\'))">复制替代项</button>' +
+            '</div></div>';
+    };
+    host.innerHTML = head +
+        '<div class="tav-group">按你的设置，优先点这几样</div>' +
+        (clean.length ? clean.map(card).join('')
+                      : '<p class="tav-empty">忌口勾得太宽，这几样爆款全都冲突——下面那组是实情。</p>') +
+        (clash.length ? '<div class="tav-group tav-group-clash">与忌口冲突（仍如实标热量）</div>' +
+            clash.map(function (r) {
+                return '<div class="tav-item tav-bad"><div class="tav-item-main">' +
+                    '<div class="tav-item-title">' + escapeHtml(r.name) + '</div>' +
+                    '<div class="tav-item-meta">命中：' +
+                    escapeHtml(r.bad.map(function (k) { return (AVOID_CN[k] || [k])[0]; }).join('、')) +
+                    ' · 约 ' + r.item.cal + ' kcal</div>' +
+                    '<div class="tav-sub">' + (r.subBad.length
+                        ? '替代项「' + escapeHtml(r.item.subName) + '」也命中忌口，别照着点'
+                        : '替代项：' + escapeHtml(r.item.subName) + '（约 ' + r.item.subCal + ' kcal）') +
+                    '</div></div></div>';
+            }).join('') : '');
+}
+
+function copyTakeoutKeyword(text) {
+    const s = String(text || '');
+    if (!s) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(s).then(
+            function () { callNativeToast('已复制，到外卖软件里粘贴搜索'); },
+            function () { callNativeToast('浏览器拒绝复制，请手动输入：' + s); });
+        return;
+    }
+    callNativeToast('这个环境没有剪贴板接口，请手动输入：' + s);
+}
+
 const SHOPPING_ITEMS = [
     { cat: "🥩 优质蛋白区", items: ["鸡蛋 15-20 枚 (每天1.5-2个)", "去皮鸡腿肉/鸡胸肉 600g (分4袋)", "瘦牛肉(里脊/吊龙) 450g (分3袋)", "无冰衣大青虾仁 500g", "龙利鱼柳/鳕鱼 350g", "北豆腐(老豆腐) 2盒", "低脂牛奶/无糖豆浆 7盒 + 希腊酸奶 3杯"] },
     { cat: "🍚 复合慢碳主食区", items: ["三色糙米/藜麦 1袋 (与大米1:1混煮)", "纯燕麦片(配料表仅燕麦) 1袋", "全麦吐司 1袋 + 荞麦面 1包", "甜玉米 4根", "红薯/紫薯/山药 共600g", "黄心土豆/贝贝南瓜 共500g"] },
@@ -249,6 +366,8 @@ window.addEventListener("DOMContentLoaded", () => {
     setupTimer();
     renderShoppingList();
     renderRecipePlan(state.selectedPlan || "A");
+    // 点单顺序卡要在拉到忌口/城市之前也有内容可看，所以先按空设置画一次
+    if (typeof renderTakeoutAdvisor === 'function') renderTakeoutAdvisor();
     switchShapeGender(state.profile.gender || "female", false);
     initViewMode();
     // 开 App 先查通知权限；外卖真实使用情况读一次
@@ -442,6 +561,8 @@ function saveAuthSession(token, user) {
     state.token = token;
     state.user = user;
     resetPrivateUI();
+    // 忌口与城市决定外卖/食谱的推荐顺序，头像在顶栏；换账号时必须重拉一次
+    if (typeof refreshAccount === 'function') refreshAccount();
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
     updateUserUI(user.username);
@@ -3469,7 +3590,15 @@ function renderRecipePlan(planKey) {
         </div>
     `;
 
+    // 忌口只用来**标注冲突**，不会自动改写方案：内置食材表是既定内容，
+    // 悄悄替换成别的菜等于让用户照着做了一份他没同意过的食谱。
+    const tags = avoidTagsNow().filter(function (k) { return k !== "less_oil"; });
+    let clashMeals = 0;
     plan.meals.forEach(m => {
+        // 判食材前先剥掉 <br>/<strong>：不剥的话标签里的字母会参与匹配
+        const plain = String(m.content || "").replace(/<[^>]*>/g, " ");
+        const hits = tags.length ? dishConflicts(plain, tags) : [];
+        if (hits.length) clashMeals++;
         html += `
             <div class="meal-plan-card">
                 <div class="meal-plan-title">
@@ -3477,9 +3606,13 @@ function renderRecipePlan(planKey) {
                     <span style="font-size: 11px; color: var(--text-light); font-weight: normal;">${m.time}</span>
                 </div>
                 <div class="meal-plan-content">${m.content}</div>
+                ${hits.length ? `<div class="meal-clash">这一餐有 ${hits.length} 处与忌口冲突：${escapeHtml(hits.map(function (k) { return (AVOID_CN[k] || [k])[0]; }).join("、"))}。做法不会自动避开，照着做时把对应那行换掉。</div>` : ""}
             </div>
         `;
     });
+    if (tags.length) {
+        html = `<div class="meal-clash-summary">已按你的 ${tags.length} 项忌口标注：这套方案里 ${clashMeals} 餐有冲突项。</div>` + html;
+    }
     card.innerHTML = html;
 }
 

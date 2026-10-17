@@ -1078,6 +1078,55 @@ try {
 
 
 
+// ============ r146：忌口与城市真的改变了推荐，而不是摆设 ============
+const AVOID_BLOCK = (function () {
+  try {
+    return run(h.context, `(function(){
+      var out = {rules: {}, hidden: 0, localHit: 0, order: []};
+      // 每条规则单独开：必须至少咬到一道，又不能把九道全咬掉（全咬等于这个开关没有意义）
+      Object.keys(AVOID_RULES).forEach(function (k) {
+        if (!AVOID_RULES[k]) return;
+        var hit = Object.keys(TAKEOUT_DB).filter(function (n) { return dishConflicts(n, [k]).length; });
+        out.rules[k] = hit.length;
+      });
+      var all = Object.keys(AVOID_RULES).filter(function (k) { return AVOID_RULES[k]; });
+      var allHit = Object.keys(TAKEOUT_DB).filter(function (n) { return dishConflicts(n, all).length; });
+      out.allHit = allHit.length;
+      out.total = Object.keys(TAKEOUT_DB).length;
+      // 排序层：设成"不吃辣 + 成都"，冲突项必须排到后面但**仍在列表里**
+      accountData = function () { return { avoid_tags: ["no_spicy"], cuisines: ["川菜", "辣"], city: "成都" }; };
+      var r = rankTakeout();
+      out.order = r.map(function (x) { return x.name; });
+      out.firstBad = r.findIndex(function (x) { return x.bad.length; });
+      out.lastClean = r.map(function (x) { return x.bad.length ? -1 : 1; }).lastIndexOf(1);
+      out.localHit = r.filter(function (x) { return x.local; }).length;
+      // 替代项自己也可能与忌口冲突，必须如实标出来而不是推荐一个用户不能吃的
+      var la = r.filter(function (x) { return x.name.indexOf("麻辣烫") >= 0; })[0];
+      out.subBad = !!(la && la.subBad.length);
+      return out;
+    })()`);
+  } catch (e) {
+    return { error: String(e && e.message).slice(0, 80) };
+  }
+})();
+if (AVOID_BLOCK.error) {
+  check("每条忌口规则都真能咬到菜", false, "跑不起来: " + AVOID_BLOCK.error);
+  check("忌口不会把所有爆款全判死", false, "同上");
+  check("排序把冲突项排到后面但不藏起来", false, "同上");
+  check("当地菜系真的点亮了至少一道", false, "同上");
+  check("替代项自己撞忌口时会标出来", false, "同上");
+} else {
+  const bites = Object.entries(AVOID_BLOCK.rules).filter(([, n]) => n === 0).map(([k]) => k);
+  check("每条忌口规则都真能咬到菜", bites.length === 0, "咬不到任何菜的规则: " + JSON.stringify(bites));
+  check("忌口不会把所有爆款全判死", AVOID_BLOCK.allHit < AVOID_BLOCK.total,
+        [AVOID_BLOCK.allHit, AVOID_BLOCK.total]);
+  check("排序把冲突项排到后面但不藏起来",
+        AVOID_BLOCK.firstBad > AVOID_BLOCK.lastClean && AVOID_BLOCK.order.length === AVOID_BLOCK.total,
+        [AVOID_BLOCK.firstBad, AVOID_BLOCK.lastClean, AVOID_BLOCK.order.length]);
+  check("当地菜系真的点亮了至少一道", AVOID_BLOCK.localHit >= 1, AVOID_BLOCK.localHit);
+  check("替代项自己撞忌口时会标出来", AVOID_BLOCK.subBad === true, AVOID_BLOCK.subBad);
+}
+
 // ============ 第六批补：下载弹窗不许有写死的版本与体积 ============
 const DL_NAMES = ["下载弹窗无写死体积","下载弹窗无写死版本号","版本与体积改为待填占位",
     "清单读不到时显示未知而不是回落假数","下载文件名带真实版本","不再宣称高速直链"];

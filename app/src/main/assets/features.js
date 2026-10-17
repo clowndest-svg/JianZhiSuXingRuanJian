@@ -269,6 +269,7 @@ window.addEventListener('DOMContentLoaded',()=>{
         const host=document.createElement('section');host.id='account-tool-card';host.className='card account-tools';
         host.innerHTML=`<h3>我的记录与设置</h3><nav>
         ${[['📋','历史与补录','查看和修正每一条记录','openRecordManager()'],
+           ['👤','个人中心','头像、改密码、邮箱找回、城市与忌口','openAccountCenter()'],
            ['🔗','分享与隐私','控制监督大屏显示什么、多久过期','openSharingSettings()'],
            ['⏰','每日提醒','设置提醒时间','openReminderSettings()'],
            ['✅','确认今日完整','把今天标为完整日参与统计','confirmTodayComplete()'],
@@ -293,4 +294,268 @@ async function deleteLatestPhoto(){
 function resetAccountTools(){
     pendingMeal=null;recordRows=[];recordOffset=0;lastBackfill={signature:'',id:''};
     const dialog=document.getElementById('account-tools-dialog');if(dialog)dialog.remove();
+    accountCache=null;
+}
+
+// ================ 个人中心：头像 / 改密 / 邮箱绑定与找回 / 城市与忌口 ================
+// 这里的标签名必须与 server.py 的 AVOID_TAGS 逐条一致（判据会核对）。漂一条的后果是
+// "用户勾了不吃辣、服务端存了个没人认识的字符串"，界面还提示保存成功——最难查的那种。
+const AVOID_TAGS=['no_spicy','no_seafood','no_beef','no_pork','no_dairy','vegetarian','less_oil'];
+const AVOID_CN={
+    no_spicy:['不吃辣','麻酱、红油、湘菜、火锅这类往后排'],
+    no_seafood:['海鲜过敏','虾、鱼、贝、海带紫菜都算'],
+    no_beef:['不吃牛肉','含肥牛、牛腱、牛肉汤底'],
+    no_pork:['不吃猪肉','含五花、排骨、香肠培根'],
+    no_dairy:['不喝奶制品','牛奶、酸奶、奶酪'],
+    vegetarian:['素食优先','所有肉禽海鲜都往后排'],
+    less_oil:['只要少油','按油量排序，不排除菜名']
+};
+let accountCache=null;
+function accountData(){return accountCache;}
+
+function tdStatus(id,msg,isErr){
+    const el=document.getElementById(id);if(!el)return;
+    el.textContent=msg;
+    if(isErr)el.setAttribute('data-err','1');else el.removeAttribute('data-err');
+}
+
+async function refreshAccount(){
+    if(!state.token){accountCache=null;paintAccountBadge();return null;}
+    try{
+        accountCache=await getJson('/api/account');
+        paintAccountBadge();
+        // 忌口与城市变了，外卖点单顺序和食谱冲突标注必须跟着重画；
+        // 不重画的话"保存成功"和屏幕上看到的推荐会对不上
+        if(typeof renderTakeoutAdvisor==='function')renderTakeoutAdvisor();
+        if(typeof renderRecipePlan==='function'&&state.selectedPlan)renderRecipePlan(state.selectedPlan);
+    }catch(e){
+        // 拉不到就沿用上一次的缓存，但要让人看见它没刷新：
+        // 静默用旧值会让人以为"改了没生效"，实际是这条请求失败了
+        if(!accountCache)callNativeToast('个人中心没读到：'+(e.message||'请重新登录'));
+    }
+    return accountCache;
+}
+
+/** 顶栏那颗头像：没登录/没头像时保持原样，不塞一个假剪影进去。 */
+function paintAccountBadge(){
+    const host=document.getElementById('header-avatar-slot');
+    if(!host)return;
+    const url=accountCache&&accountCache.avatar_url;
+    host.innerHTML=url?`<img class="header-avatar" src="${escapeHtml(API_BASE+url)}" alt="我的头像">`:'';
+}
+
+async function openAccountCenter(){
+    if(!state.token){openAuthModal();return;}
+    const a=await refreshAccount();
+    if(!a){callNativeToast('个人中心没打开：请先登录');return;}
+    const source=a.city_source==='gps'?'按定位就近认的':(a.city_source==='manual'?'你手填的':'来源未记');
+    const cityLine=a.city?`${a.city}（${source}）`:'还没设置';
+    const mailLine=a.mail==='up'?'邮件通道已接入，可以绑定邮箱找回密码'
+                                 :'邮件通道未接入：'+(a.mail_why||'服务器上没有配置发信账号');
+    toolDialog('个人中心',`
+      <p class="td-lead">头像、密码、邮箱找回、所在城市与忌口都在这。忌口会真的改变外卖与食谱的推荐顺序；城市是按坐标就近认的粗匹配，不对就手改。</p>
+      <div class="td-group-label">头像</div>
+      <div class="td-group">
+        <div class="td-avatar-row">
+          ${a.avatar_url?`<img class="td-avatar" src="${escapeHtml(API_BASE+a.avatar_url)}" alt="当前头像">`:'<span class="td-avatar td-avatar-empty">还没头像</span>'}
+          <label class="td-field-row"><span class="td-field-label">选一张图（JPEG / PNG / WebP，4MB 内）</span><input type="file" id="avatar-file" accept="image/*"></label>
+        </div>
+        <div class="td-actions"><button type="button" class="td-btn" onclick="uploadAvatar()">上传头像</button></div>
+        <p id="avatar-status" class="td-status" role="status"></p>
+        <p class="td-note">上传前会去掉照片里的位置等隐藏信息，并压到 512 像素。</p>
+      </div>
+      <div class="td-group-label">城市与定位</div>
+      <div class="td-group">
+        ${tdValueRow('当前城市',cityLine,a.cuisines&&a.cuisines.length?'当地常见口味：'+a.cuisines.join('、'):'这个城市不在内置菜系表里，推荐只按忌口过滤')}
+        <label class="td-field-row"><span class="td-field-label">手填城市</span><input id="city-input" maxlength="40" placeholder="例：成都" value="${escapeHtml(a.city||'')}"></label>
+        <div class="td-actions">
+          <button type="button" class="td-btn-quiet" onclick="useMyLocation()">用浏览器定位</button>
+          <button type="button" class="td-btn" onclick="saveCityManual()">保存手填城市</button>
+        </div>
+        <p id="city-status" class="td-status" role="status">${a.loc_updated_at?'上次定位：'+escapeHtml(a.loc_updated_at):'还没有定位记录'}</p>
+      </div>
+      <div class="td-group-label">忌口（影响外卖与食谱推荐）</div>
+      <div class="td-group">${AVOID_TAGS.map(k=>tdToggleRow('avoid-'+k,(a.avoid_tags||[]).indexOf(k)>=0,AVOID_CN[k][0],AVOID_CN[k][1])).join('')}</div>
+      <div class="td-actions"><button type="button" class="td-btn" onclick="saveAvoidTags()">保存忌口</button></div>
+      <p id="avoid-status" class="td-status" role="status"></p>
+      <div class="td-group-label">邮箱与找回密码</div>
+      <div class="td-group">
+        ${tdValueRow('已绑邮箱',a.email_bound?a.email_masked+(a.email_verified?'（已验证）':'（未验证）'):'未绑定')}
+        <label class="td-field-row"><span class="td-field-label">邮箱</span><input id="bind-email" type="email" maxlength="200" placeholder="用于找回密码"></label>
+        <label class="td-field-row"><span class="td-field-label">验证码</span><input id="bind-code" inputmode="numeric" maxlength="6" placeholder="十分钟内有效"></label>
+        <div class="td-actions">
+          <button type="button" class="td-btn-quiet" onclick="sendBindCode()">发验证码</button>
+          <button type="button" class="td-btn" onclick="verifyBindCode()">绑定并验证</button>
+        </div>
+        <p id="email-status" class="td-status" role="status" ${a.mail==='up'?'':'data-err="1"'}>${escapeHtml(mailLine)}</p>
+      </div>
+      <div class="td-group-label">修改密码</div>
+      <div class="td-group">
+        <label class="td-field-row"><span class="td-field-label">原密码</span><input id="pw-old" type="password" maxlength="200" autocomplete="current-password"></label>
+        <label class="td-field-row"><span class="td-field-label">新密码（至少 8 位）</span><input id="pw-new" type="password" maxlength="200" autocomplete="new-password"></label>
+        <label class="td-field-row"><span class="td-field-label">再输一遍新密码</span><input id="pw-new2" type="password" maxlength="200" autocomplete="new-password"></label>
+        <div class="td-actions"><button type="button" class="td-btn" onclick="changePassword()">修改密码</button></div>
+        <p id="pw-status" class="td-status" role="status"></p>
+        <p class="td-note">改成功后其他设备会掉线需要重新登录，这台机器不受影响。</p>
+      </div>
+      <div class="td-group-label">去过的城市</div>
+      <div class="td-group">${(a.cities_seen||[]).length
+        ?(a.cities_seen||[]).map(x=>tdValueRow(x.city,'首次 '+String(x.first_seen).slice(0,10)+' · 最近 '+String(x.last_seen).slice(0,10))).join('')
+        :'<p class="td-note">还没有第二个城市。出差或旅行时定位到别处，这里会多一行——换城市最容易打乱点单，回来能对照看。</p>'}</div>
+    `);
+}
+
+async function uploadAvatar(){
+    const input=document.getElementById('avatar-file');
+    const file=input&&input.files&&input.files[0];
+    if(!file){tdStatus('avatar-status','先选一张图',true);return;}
+    if(file.size>4*1024*1024){tdStatus('avatar-status','这张图超过 4MB，换小一点的',true);return;}
+    const fd=new FormData();fd.append('photo',file);
+    tdStatus('avatar-status','正在上传…');
+    try{
+        const r=await postApi('/api/account/avatar',fd);
+        tdStatus('avatar-status',r.msg||'头像已更新');
+        await refreshAccount();
+        const img=document.querySelector('.td-avatar');
+        if(img&&accountCache&&accountCache.avatar_url)img.src=API_BASE+accountCache.avatar_url;
+    }catch(e){tdStatus('avatar-status',e.message||'头像上传失败',true);}
+}
+
+function useMyLocation(){
+    if(!navigator.geolocation){tdStatus('city-status','这个浏览器没有定位接口，请手填城市',true);return;}
+    tdStatus('city-status','正在请求定位…（浏览器或系统会先问你是否允许）');
+    navigator.geolocation.getCurrentPosition(async pos=>{
+        const p=pos&&pos.coords||{};
+        try{
+            const r=await postApi('/api/account/location',{lat:Number(p.latitude),lng:Number(p.longitude),accuracy:p.accuracy==null?null:Number(p.accuracy)});
+            tdStatus('city-status',r.msg);
+            await refreshAccount();
+            const box=document.getElementById('city-input');
+            if(box&&r.city)box.value=r.city;
+        }catch(e){tdStatus('city-status',e.message||'定位结果没存上',true);}
+    },err=>{
+        const why=err&&err.code===1?'你拒绝了定位授权'
+                 :(err&&err.code===3?'定位超时，信号可能不好':'当前拿不到位置');
+        tdStatus('city-status',why+'；可以手填城市，或到系统设置里给浏览器/本应用打开定位权限',true);
+    },{timeout:12000,maximumAge:300000,enableHighAccuracy:false});
+}
+
+async function saveCityManual(){
+    const box=document.getElementById('city-input');
+    const city=(box&&box.value||'').trim();
+    if(!city){tdStatus('city-status','城市名是空的',true);return;}
+    try{
+        const r=await postApi('/api/account/city',{city});
+        tdStatus('city-status',r.msg);
+        await refreshAccount();
+    }catch(e){tdStatus('city-status',e.message||'城市没保存',true);}
+}
+
+async function saveAvoidTags(){
+    const tags=AVOID_TAGS.filter(k=>{
+        const el=document.getElementById('avoid-'+k);
+        return !!(el&&el.checked);
+    });
+    try{
+        const r=await postApi('/api/account/preferences',{avoid_tags:tags});
+        accountCache=Object.assign({},accountCache,{avoid_tags:r.avoid_tags||tags});
+        tdStatus('avoid-status','已保存 '+tags.length+' 项忌口'+(tags.length?'，外卖与食谱推荐会跟着变':'（全部取消，推荐不再排除菜名）'));
+        if(typeof renderTakeoutAdvisor==='function')renderTakeoutAdvisor();
+        if(typeof renderRecipePlan==='function')renderRecipePlan();
+    }catch(e){tdStatus('avoid-status',e.message||'忌口没保存',true);}
+}
+
+async function sendBindCode(){
+    const box=document.getElementById('bind-email');
+    const email=(box&&box.value||'').trim();
+    if(!email){tdStatus('email-status','先填邮箱',true);return;}
+    try{
+        const r=await postApi('/api/account/email/send',{email});
+        tdStatus('email-status',r.msg+'（'+r.ttl_minutes+' 分钟内有效）');
+    }catch(e){tdStatus('email-status',e.message||'验证码没发出去',true);}
+}
+
+async function verifyBindCode(){
+    const email=((document.getElementById('bind-email')||{}).value||'').trim();
+    const code=((document.getElementById('bind-code')||{}).value||'').trim();
+    if(!email||!code){tdStatus('email-status','邮箱和验证码都要填',true);return;}
+    try{
+        const r=await postApi('/api/account/email/verify',{email,code});
+        tdStatus('email-status',r.msg);
+        await refreshAccount();
+    }catch(e){tdStatus('email-status',e.message||'验证没通过',true);}
+}
+
+async function changePassword(){
+    const old=(document.getElementById('pw-old').value||'');
+    const nw=(document.getElementById('pw-new').value||'');
+    const nw2=(document.getElementById('pw-new2').value||'');
+    if(nw!==nw2){tdStatus('pw-status','两次输入的新密码不一样',true);return;}
+    if(nw.length<8){tdStatus('pw-status','新密码至少 8 位',true);return;}
+    try{
+        const r=await postApi('/api/account/password',{old_password:old,new_password:nw});
+        tdStatus('pw-status',r.msg+'（已下线 '+(r.revoked_sessions||0)+' 个其他会话）');
+        document.getElementById('pw-old').value='';
+        document.getElementById('pw-new').value='';
+        document.getElementById('pw-new2').value='';
+    }catch(e){tdStatus('pw-status',e.message||'密码没改成',true);}
+}
+
+// ============ 忘记密码（登录页入口，免登录） ============
+// 这条链路必须在强更门豁免清单里：抬门之后如果把它也挡住，
+// 忘密码的人就彻底回不来了——那正是"更新门"最坏的误伤。
+// 也不能复用 postApi：那条要求已登录，而走到这里的人恰恰是没登录的。
+async function publicPost(path,body){
+    const res=await fetch(`${API_BASE}${path}`,{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    let data=null;try{data=await res.json();}catch(e){data=null;}
+    if(!res.ok)throw new Error((data&&data.detail)||`HTTP ${res.status}`);
+    return data||{};
+}
+
+async function openForgotPassword(){
+    toolDialog('找回密码',`
+      <p class="td-lead">只有<b>已绑定并通过验证</b>的邮箱能走这条路。重置成功后所有设备都会下线。</p>
+      <div class="td-group-label">第 1 步：发验证码</div>
+      <div class="td-group">
+        <label class="td-field-row"><span class="td-field-label">注册时绑定的邮箱</span><input id="fg-email" type="email" maxlength="200"></label>
+        <div class="td-actions"><button type="button" class="td-btn" onclick="sendForgotCode()">发送验证码</button></div>
+      </div>
+      <div class="td-group-label">第 2 步：填验证码与新密码</div>
+      <div class="td-group">
+        <label class="td-field-row"><span class="td-field-label">验证码</span><input id="fg-code" inputmode="numeric" maxlength="6"></label>
+        <label class="td-field-row"><span class="td-field-label">新密码（至少 8 位）</span><input id="fg-pw" type="password" maxlength="200" autocomplete="new-password"></label>
+        <div class="td-actions"><button type="button" class="td-btn" onclick="submitForgotReset()">重置密码</button></div>
+      </div>
+      <p id="fg-status" class="td-status" role="status"></p>
+      <p class="td-note">没绑过邮箱的账号找不回来：本软件不采集手机号，也没有人工客服通道。这条限制是明摆着的，不做"假装能找回"。</p>`);
+    try{
+        const res=await fetch(`${API_BASE}/api/account/recovery-status`);
+        const s=await res.json();
+        if(s&&s.mail!=='up')tdStatus('fg-status','邮件通道未接入：'+(s.mail_why||'')+'，现在发不出验证码',true);
+    }catch(e){/* 状态读不到不拦人，真正发送时会给出明确失败原因 */}
+}
+
+async function sendForgotCode(){
+    const email=((document.getElementById('fg-email')||{}).value||'').trim();
+    if(!email){tdStatus('fg-status','先填邮箱',true);return;}
+    try{
+        const r=await publicPost('/api/account/forgot',{email});
+        // 服务端对"绑过"和"没绑过"给同一句话，这里也不许加区别
+        tdStatus('fg-status',r.msg);
+    }catch(e){tdStatus('fg-status',e.message||'验证码没发出去',true);}
+}
+
+async function submitForgotReset(){
+    const email=((document.getElementById('fg-email')||{}).value||'').trim();
+    const code=((document.getElementById('fg-code')||{}).value||'').trim();
+    const pw=((document.getElementById('fg-pw')||{}).value||'');
+    if(!email||!code){tdStatus('fg-status','邮箱和验证码都要填',true);return;}
+    if(pw.length<8){tdStatus('fg-status','新密码至少 8 位',true);return;}
+    try{
+        const r=await publicPost('/api/account/reset',{email,code,new_password:pw});
+        tdStatus('fg-status',r.msg);
+        const dlg=document.getElementById('account-tools-dialog');
+        if(dlg&&dlg.open)setTimeout(()=>dlg.close(),1200);
+    }catch(e){tdStatus('fg-status',e.message||'重置没成功',true);}
 }

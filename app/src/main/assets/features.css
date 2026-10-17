@@ -123,3 +123,26 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .td-ai-row .td-btn-quiet{flex:0 0 auto;font-size:14px;padding:9px 14px}
 /* 在线/本机模型估算的出处说明，退一行小字 */
 .td-meal-src{margin:6px 0 0;font-size:12px;line-height:1.6;color:#64748B;overflow-wrap:anywhere}
+
+/* ============ 个人中心与推荐：头像、点单顺序卡 ============ */
+.td-avatar-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.td-avatar{width:64px;height:64px;border-radius:50%;object-fit:cover;border:1px solid #E2E8F0;background:#F1F5F9;flex:0 0 auto}
+.td-avatar-empty{display:flex;align-items:center;justify-content:center;font-size:11px;color:#94A3B8;width:64px;height:64px}
+.tav-meta{font-size:12.5px;color:#475569;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:6px 10px;margin-bottom:8px}
+.tav-group{font-size:12px;font-weight:800;color:#047857;margin:10px 0 2px}
+.tav-group-clash{color:#B45309}
+.tav-item{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-top:1px solid #EEF2F6}
+.tav-item:first-of-type{border-top:0}
+.tav-item-main{flex:1 1 auto;min-width:0}
+.tav-item-title{font-size:14px;font-weight:600;color:#0F172A;line-height:1.45;overflow-wrap:anywhere}
+.tav-item-meta{margin-top:2px;font-size:12px;color:#64748B;line-height:1.5;overflow-wrap:anywhere}
+.tav-sub{margin-top:4px;font-size:12px;color:#475569;line-height:1.55;overflow-wrap:anywhere}
+.tav-bad .tav-item-title{color:#B45309}
+.tav-tag{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;background:#ECFDF5;border:1px solid #A7F3D0;color:#047857;font-size:10.5px;font-weight:700;vertical-align:1px}
+.tav-empty{font-size:12.5px;color:#64748B;line-height:1.6;margin:4px 0}
+.tav-foot{margin:10px 0 0;font-size:11.5px;color:#94A3B8;line-height:1.6}
+.takeout-advisor-card .tav-item-acts{display:flex;flex-direction:row;gap:6px;flex:0 0 auto}
+/* 窄屏下这颗「复制替代项」挤不动菜名时整组换行。用 flex-wrap 而不是再加一条
+   @media 断点：多一个断点就多一条没人测过的宽度区间，
+   真机那条「断点全覆盖」判据正是为此而红过一次。 */
+.tav-item{flex-wrap:wrap}

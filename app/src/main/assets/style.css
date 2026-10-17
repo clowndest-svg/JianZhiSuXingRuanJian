@@ -3133,3 +3133,13 @@ body.update-blocked { overflow: hidden; }
 }
 
 .meal-row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* 顶栏头像与链接式按钮 */
+.header-avatar{width:22px;height:22px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,.7);display:block}
+#header-avatar-slot:not(:empty) + #header-user-icon{display:none}
+.link-like{appearance:none;-webkit-appearance:none;border:0;background:none;padding:0;margin:0;font:inherit;color:var(--primary-dark,#059669);text-decoration:underline;cursor:pointer}
+.link-like:focus-visible{outline:2px solid #10B981;outline-offset:2px}
+
+/* 食谱忌口标注：只标不改，颜色用琥珀色而不是红色（红色在本应用里是"超标"） */
+.meal-clash{margin-top:6px;font-size:11.5px;line-height:1.55;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:5px 8px;overflow-wrap:anywhere}
+.meal-clash-summary{margin:0 0 10px;font-size:12px;color:#475569;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:6px 9px}

@@ -32,3 +32,4 @@ _build.log
 
 .venv/
 ai-online.json
+mail.json

@@ -74,7 +74,14 @@ public class DeviceSmokeTest {
         launchShell();
         js("document.getElementById('login-username').value="+JSONObject.quote(user)+";document.getElementById('login-password').value="+JSONObject.quote(password)+";submitLogin();");
         waitFor("state.dashboardLoaded===true");
-        js("postApi('/api/food/log',{slot:'早餐',food_name:'测试燕麦粥',cal:180}).catch(()=>{})");
+        // 夹具这条餐食是后面"历史记录"判据的样本：它没记进去的话，
+        // 弹窗只会显示"还没有记录"，报出来的却是"印了原始枚举"——先把种子本身验掉。
+        js("postApi('/api/food/log',{slot:'早餐',food_name:'测试燕麦粥',cal:180})"
+                +".then(r=>{window.__seed='ok:'+JSON.stringify(r).slice(0,140);})"
+                +".catch(e=>{window.__seed='err:'+(e&&e.message);});");
+        waitFor("!!window.__seed");
+        assertEquals("夹具那条餐食没记进去: " + js("window.__seed"), "true",
+                js("window.__seed.indexOf('ok:')===0"));
         waitFor("document.getElementById('account-tool-card')!==null");
         try {
             // 品牌位换成图片后，最容易坏的是"图根本没加载出来"和"被拉成椭圆"
@@ -193,6 +200,133 @@ public class DeviceSmokeTest {
     }
 
     /** 强更门的两端都在真机上量：页面自报的号要和安装包一致，遮罩要真盖得住。 */
+    @Test(timeout=300000) public void accountCenterLocationAndDietFilterOnDevice() throws Exception {
+        // 这一组只问四件事：壳里的定位通道通不通、个人中心在 320 档排不排得开、
+        // 忌口设置是不是真的走到了 DOM、邮件通道没配时界面有没有照实说。
+        String user="uqa"+System.currentTimeMillis();String password="UsbQaOnly!123";
+        org.json.JSONObject body=new org.json.JSONObject().put("username",user).put("password",password)
+                .put("age",30).put("height",170).put("weight_jin",160).put("target_weight_jin",140);
+        java.net.HttpURLConnection request=(java.net.HttpURLConnection)new URL(BuildConfig.API_BASE_URL+"/api/register").openConnection();
+        request.setRequestMethod("POST");request.setConnectTimeout(15000);request.setReadTimeout(15000);request.setDoOutput(true);
+        request.setRequestProperty("Content-Type","application/json");
+        request.setRequestProperty("X-App-Build",String.valueOf(instrumentation.getTargetContext()
+                .getPackageManager().getPackageInfo(instrumentation.getTargetContext().getPackageName(),0).versionCode));
+        try(java.io.OutputStream out=request.getOutputStream()){out.write(body.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+        assertEquals("夹具注册",200,request.getResponseCode());request.disconnect();
+        // 先把系统定位权限授掉：不授的话一调用就弹系统授权框，自动化通道点不到它，
+        // 测出来的"失败"其实是我们自己没授权。
+        try {
+            instrumentation.getUiAutomation().grantRuntimePermission(
+                    instrumentation.getTargetContext().getPackageName(),
+                    "android.permission.ACCESS_FINE_LOCATION");
+        } catch (Exception ignored) {
+        }
+        launchShell();
+        js("document.getElementById('login-username').value="+JSONObject.quote(user)
+                +";document.getElementById('login-password').value="+JSONObject.quote(password)+";submitLogin();");
+        waitFor("state.dashboardLoaded===true && typeof openAccountCenter==='function'");
+        assertEquals("App 里 navigator.geolocation 不可用（壳没开定位）","true",js("!!navigator.geolocation"));
+
+        // 回调必须在超时后落地。挂住不返回＝onGeolocationPermissionsShowPrompt
+        // 没把 callback 结掉，界面会永远停在"正在请求定位"。
+        js("window.__geo='pending';navigator.geolocation.getCurrentPosition("
+                +"p=>{window.__geo='ok:'+(Math.round(p.coords.latitude*100)/100)+','+(Math.round(p.coords.longitude*100)/100);},"
+                +"e=>{window.__geo='err:'+(e&&e.code);},{timeout:12000,enableHighAccuracy:false});");
+        waitFor("window.__geo.indexOf('pending')!==0");
+        // evaluateJavascript 回的是 JSON 编码后的字面量，带引号；先剥一层再判前缀，
+        // 否则 startsWith("ok:") 永远不成立——真机第一次跑就是这么误报"回调没落地"的。
+        String geo = new org.json.JSONArray("[" + js("window.__geo") + "]").getString(0);
+        assertTrue("定位回调没落地，页面会一直卡在请求中: " + geo,
+                geo.startsWith("ok:") || geo.startsWith("err:"));
+        if (geo.startsWith("ok:")) {
+            // 真坐标直接回传服务端：验的是"设备上的经纬度能真的认出一个城市"，
+            // 不是浏览器里的模拟值。坐标取自上一次回调，不写死。
+            String ll = geo.substring(3);
+            js("postApi('/api/account/location',{lat:" + ll.split(",")[0] + ",lng:"
+                    + ll.split(",")[1] + "}).then(r=>{window.__loc=JSON.stringify(r);})"
+                    + ".catch(e=>{window.__loc=JSON.stringify({callError:String(e&&e.message||e)});})");
+            waitFor("!!window.__loc");
+            org.json.JSONObject lo = new org.json.JSONObject(
+                    new org.json.JSONArray("[" + js("window.__loc") + "]").getString(0));
+            assertTrue("设备坐标没能存进账号: " + lo.toString(), lo.getBoolean("matched"));
+            assertTrue("设备坐标认不出城市: " + lo.toString(), lo.getString("city").length() >= 2);
+        }
+
+        // 个人中心：手填城市这条兜底路必须真的能存
+        js("openAccountCenter()");
+        waitFor("!!document.getElementById('city-input')");
+        js("document.getElementById('city-input').value='成都';saveCityManual();");
+        waitFor("accountData() && accountData().city==='成都'");
+        assertEquals("成都该带出当地口味","true",js("(accountData().cuisines||[]).length>0"));
+
+        // 忌口设置要一路走到 DOM：勾了两项之后，列表里必须出现冲突标注，
+        // 但条目数不能少——只排顺序、不藏菜。
+        js("postApi('/api/account/preferences',{avoid_tags:['no_spicy','no_seafood']})"
+                +".then(r=>{window.__pref=JSON.stringify(r);})");
+        waitFor("window.__pref && JSON.parse(window.__pref).avoid_tags.length===2");
+        js("refreshAccount()");
+        waitFor("accountData() && accountData().avoid_tags.length===2");
+        String tav = js("JSON.stringify((function(){renderTakeoutAdvisor();"
+                +"var box=document.getElementById('takeout-advisor');"
+                +"return {items:box.querySelectorAll('.tav-item').length,bad:box.querySelectorAll('.tav-bad').length,"
+                +"meta:(box.querySelector('.tav-meta')||{}).textContent||''};})())");
+        org.json.JSONObject tv = new org.json.JSONObject(new org.json.JSONArray("[" + tav + "]").getString(0));
+        assertEquals("忌口只该改顺序，不该把菜从列表里删掉", 12, tv.getInt("items"));
+        assertTrue("勾了不吃辣/海鲜，却一项都没标成冲突: " + tav, tv.getInt("bad") > 0);
+        assertTrue("点单顺序卡没显示当前城市: " + tav, tv.getString("meta").contains("成都"));
+
+        // 320 档：弹窗里的开关、密码格、按钮都得是正常控件，且不许横向溢出
+        final double cssDensity = Double.parseDouble(js("devicePixelRatio"));
+        instrumentation.runOnMainSync(() -> web.setLayoutParams(
+                new android.widget.FrameLayout.LayoutParams((int) Math.round(320 * cssDensity),
+                        ViewGroup.LayoutParams.MATCH_PARENT)));
+        js("document.querySelector('meta[name=viewport]').content='width=device-width, initial-scale=1';");
+        Thread.sleep(400);
+        js("document.getElementById('account-tools-dialog').close();openAccountCenter()");
+        waitFor("!!document.getElementById('city-input')");
+        String dlg = js("JSON.stringify((function(){var d=document.getElementById('account-tools-dialog');"
+                +"var dr=d.getBoundingClientRect();"
+                +"var over=[].slice.call(d.querySelectorAll('*')).filter(function(e){"
+                +"return e.getBoundingClientRect().right>dr.right+1;}).map(function(e){return e.tagName+'.'+e.className;});"
+                +"return {sw:d.querySelectorAll('.td-switch').length,pw:d.querySelectorAll('input[type=password]').length,"
+                +"city:!!document.getElementById('city-input'),over:over,"
+                +"scrollW:d.scrollWidth,clientW:d.clientWidth};})())");
+        org.json.JSONObject dj = new org.json.JSONObject(new org.json.JSONArray("[" + dlg + "]").getString(0));
+        assertEquals("忌口开关应是 7 个真控件: " + dlg, 7, dj.getInt("sw"));
+        assertEquals("改密区应有三个密码格: " + dlg, 3, dj.getInt("pw"));
+        assertTrue("320 档没有手填城市输入框: " + dlg, dj.getBoolean("city"));
+        assertEquals("320 档个人中心横向溢出: " + dlg, 0, dj.getJSONArray("over").length());
+        assertTrue("320 档弹窗内容宽超过可视宽: " + dlg, dj.getInt("scrollW") <= dj.getInt("clientW") + 1);
+        screenshot("account-center-320");
+        instrumentation.runOnMainSync(() -> web.setLayoutParams(
+                new android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT)));
+        js("document.getElementById('account-tools-dialog').close()");
+
+        // 找回密码：登录页要有入口，且界面说的话必须和服务端通道状态一致
+        assertEquals("登录页没有忘记密码入口", "true",
+                js("!!document.querySelector('.link-like[onclick=\"openForgotPassword()\"]')"));
+        js("openForgotPassword()");
+        waitFor("!!document.getElementById('fg-email')");
+        js("fetch(API_BASE+'/api/account/recovery-status').then(r=>r.json())"
+                +".then(j=>{window.__rs=j.mail;});");
+        waitFor("!!window.__rs");
+        String mailState = js("window.__rs");
+        String shown = js("document.getElementById('fg-status').textContent");
+        if ("down".equals(mailState)) {
+            assertTrue("邮件通道没配，界面却没说清楚: " + shown, shown.contains("未接入"));
+        } else {
+            assertFalse("界面在编造通道状态: " + shown, shown.contains("未接入"));
+        }
+        js("document.getElementById('account-tools-dialog').close()");
+        js("postApi('/api/account/password',{old_password:"+ JSONObject.quote(password)
+                +",new_password:'UsbQaOnly!456'}).then(r=>{window.__cp=JSON.stringify(r);})");
+        waitFor("window.__cp && JSON.parse(window.__cp).revoked_sessions>=0");
+        assertEquals("改密文案没说明其他设备要重登: " + js("window.__cp"), "true",
+                js("JSON.parse(window.__cp).msg.indexOf('其他设备')>=0"));
+        js("switchTab('dashboard')");
+    }
+
     @Test(timeout=150000) public void clientIdentifiesItselfAndBlocksTheScreen() throws Exception {
         launchShell();
         int packaged=instrumentation.getTargetContext().getPackageManager()

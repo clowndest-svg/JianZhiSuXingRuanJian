@@ -12,6 +12,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.net.Uri;
 import android.webkit.ValueCallback;
+import android.webkit.GeolocationPermissions;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -71,6 +72,8 @@ public class MainActivity extends Activity {
         settings.setLoadWithOverviewMode(true);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMediaPlaybackRequiresUserGesture(false);
+        // H5 的 navigator.geolocation 要这条，否则页面里调它永远直接报错
+        settings.setGeolocationEnabled(true);
 
         // Bridge interface for native notifications, vibration and audio cues
         webView.addJavascriptInterface(new WebAppInterface(this, webView), "AndroidBridge");
@@ -94,6 +97,28 @@ public class MainActivity extends Activity {
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
+                // 网页问"能不能拿位置"时，先看 Android 运行时权限在不在：
+                // 没拿到系统权限就直接 allow，H5 只会收到一个说不清的位置错误。
+                if (hasLocationPermission()) {
+                    callback.invoke(origin, true, false);
+                    return;
+                }
+                pendingGeoCallback = callback;
+                pendingGeoOrigin = origin;
+                try {
+                    requestPermissions(new String[]{
+                            "android.permission.ACCESS_FINE_LOCATION",
+                            "android.permission.ACCESS_COARSE_LOCATION"}, GEO_PERM_REQUEST);
+                } catch (Exception e) {
+                    // 弹不出系统授权（比如 ROM 限制）时要把网页那边结掉，
+                    // 不能留着 callback 让 H5 一直卡在"正在请求定位"
+                    pendingGeoCallback = null;
+                    pendingGeoOrigin = null;
+                    callback.invoke(origin, false, false);
+                }
+            }
             @Override
             public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
                 if (MainActivity.this.filePathCallback != null) {
@@ -133,6 +158,31 @@ public class MainActivity extends Activity {
         ReminderReceiver.schedule(this);
     }
 
+    // ================= 定位授权：H5 发起，原生决定 =================
+    private static final int GEO_PERM_REQUEST = 2026;
+    private GeolocationPermissions.Callback pendingGeoCallback;
+    private String pendingGeoOrigin;
+
+    private boolean hasLocationPermission() {
+        return checkSelfPermission("android.permission.ACCESS_COARSE_LOCATION")
+                == android.content.pm.PackageManager.PERMISSION_GRANTED
+                || checkSelfPermission("android.permission.ACCESS_FINE_LOCATION")
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void settleGeoCallback(boolean granted) {
+        final GeolocationPermissions.Callback cb = pendingGeoCallback;
+        final String origin = pendingGeoOrigin;
+        pendingGeoCallback = null;
+        pendingGeoOrigin = null;
+        if (cb == null || origin == null) return;
+        try {
+            cb.invoke(origin, granted, false);
+        } catch (Exception ignored) {
+            // 页面这时可能已经关掉了：回调失败不需要提示，但绝不能抛出去
+        }
+    }
+
     // ================= 第五批：开 App 先查通知权限 =================
     private static final int NOTIF_PERM_REQUEST = 2025;
     public void askNotificationPermission() {
@@ -161,6 +211,18 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == GEO_PERM_REQUEST) {
+            boolean ok = false;
+            for (int i = 0; i < grantResults.length; i++) {
+                if (grantResults[i] == android.content.pm.PackageManager.PERMISSION_GRANTED) ok = true;
+            }
+            settleGeoCallback(ok);
+            if (!ok) {
+                Toast.makeText(this, "没给定位权限，App 里就取不到位置；可以在个人中心手填城市",
+                        Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (requestCode != NOTIF_PERM_REQUEST) {
             return;
         }

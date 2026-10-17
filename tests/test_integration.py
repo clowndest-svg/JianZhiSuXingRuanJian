@@ -270,7 +270,6 @@ class Integration(unittest.TestCase):
                           data={'weight_jin': '150', 'waist_cm': '80'},
                           files={'photo': ('big.png', b'x' * (8 * 1024 * 1024 + 4096), 'image/png')})
         self.assertEqual(big.status_code, 413)
-        from PIL import Image
         huge = io.BytesIO()
         Image.new('RGB', (4500, 4500)).save(huge, format='PNG')
         over = self.c.post('/api/cycle/upgrade', headers=self.auth,
@@ -381,5 +380,149 @@ class Integration(unittest.TestCase):
         self.assertEqual(ready['min_build'], 22)
         self.assertGreaterEqual(ready['gate']['blocked'], 5, ready)
         self.assertIn('0', ready['gate']['builds'], '抬门前看不见还有谁在调用')
+
+    def test_account_center_recovery_and_location(self):
+        """账号中心：改密掉线、头像签名、邮箱验证码、城市就近——全部真跑那条链路。
+
+        邮件发送本身用 stub 接住（这台机器上没有可用 SMTP），
+        但"没配通道就必须拒绝"那半段是**不打桩**的：直接指向一个不存在的配置文件。
+        """
+        import json as _json, re as _re
+        m = self.m
+
+        # ---------- 改密码 ----------
+        self.assertEqual(self.c.post('/api/account/password', headers=self.auth,
+            json={'old_password': 'nope', 'new_password': 'Review!456'}).status_code, 400)
+        self.assertEqual(self.c.post('/api/account/password', headers=self.auth,
+            json={'old_password': 'Review!123', 'new_password': 'short'}).status_code, 400)
+        second = self.c.post('/api/login', json={'username': 'owner',
+                                                 'password': 'Review!123'}).json()['token']
+        h2 = {'Authorization': 'Bearer ' + second}
+        self.assertEqual(self.c.get('/api/account', headers=h2).status_code, 200)
+        r = self.c.post('/api/account/password', headers=self.auth,
+                        json={'old_password': 'Review!123', 'new_password': 'Review!456'})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertGreaterEqual(r.json()['revoked_sessions'], 1, '改密后其他会话必须掉线')
+        self.assertEqual(self.c.get('/api/account', headers=h2).status_code, 401,
+                         '旧令牌还能用，等于改密码没起作用')
+        self.assertEqual(self.c.get('/api/account', headers=self.auth).status_code, 200,
+                         '当前这台设备不该被自己踢下线')
+
+        # ---------- 头像：签名链接、覆盖同名、不带签名取不到 ----------
+        buf = io.BytesIO(); Image.new('RGB', (900, 900), (200, 60, 60)).save(buf, format='JPEG')
+        up = self.c.post('/api/account/avatar', headers=self.auth,
+                         files={'photo': ('a.jpg', buf.getvalue(), 'image/jpeg')})
+        self.assertEqual(up.status_code, 200, up.text)
+        signed = up.json()['avatar_url']
+        self.assertIn('signature=', signed)
+        self.assertEqual(self.c.get(signed).status_code, 200, '本人拿签名链接取不到头像')
+        self.assertEqual(self.c.get(signed.split('?')[0]).status_code, 404,
+                         '不带签名就能取头像＝任何人可枚举 user_id')
+        up2 = self.c.post('/api/account/avatar', headers=self.auth,
+                          files={'photo': ('b.png', buf.getvalue(), 'image/png')})
+        self.assertEqual(up2.json()['avatar_url'].split('?')[0], signed.split('?')[0],
+                         '换头像应覆盖同一个文件，不然磁盘上会堆出一串历史头像')
+
+        # ---------- 邮件通道没配：不打桩，必须如实拒绝且不留验证码 ----------
+        m.mailer.CONFIG_PATH = str(Path(self.tmp.name) / 'definitely-no-mail.json')
+        self.assertEqual(m.mailer.status()['ok'], False)
+        self.assertEqual(self.c.get('/api/account/recovery-status').json()['mail'], 'down')
+        blocked = self.c.post('/api/account/email/send', headers=self.auth,
+                              json={'email': 'zhang.ge@example.com'})
+        self.assertEqual(blocked.status_code, 503, blocked.text)
+        self.assertIn('邮件通道未接入', blocked.json()['detail'])
+        conn = m.get_db()
+        self.assertEqual(conn.execute('SELECT COUNT(*) FROM email_codes').fetchone()[0], 0,
+                         '发不出去却留下验证码，等于留了一条用户看不见但能改密的后门')
+        conn.close()
+
+        # ---------- 配好通道后走完整流程（send 打桩，只为拿到那六个数字） ----------
+        cfg = Path(self.tmp.name) / 'mail.json'
+        cfg.write_text(_json.dumps({'host': 'smtp.invalid', 'port': 465, 'user': 'u',
+                                    'password': 'p', 'from': 'bot@example.org'}), encoding='utf-8')
+        m.mailer.CONFIG_PATH = str(cfg)
+        sent, real_send = [], m.mailer.send
+
+        def fake_send(to_addr, subject, text):
+            sent.append((to_addr, text))
+            return True, ''
+        m.mailer.send = fake_send
+        try:
+            self.assertEqual(m.mailer.status()['ok'], True)
+            s = self.c.post('/api/account/email/send', headers=self.auth,
+                            json={'email': 'Zhang.Ge@example.com'})
+            self.assertEqual(s.status_code, 200, s.text)
+            self.assertEqual(s.json()['masked'], 'zh***@example.com', '邮箱要归一化并掩码')
+            self.assertNotIn('123456', s.text)
+            code = _re.search(r'(\d{6})', sent[0][1]).group(1)
+            self.assertEqual(
+                self.c.post('/api/account/email/verify', headers=self.auth,
+                            json={'email': 'zhang.ge@example.com', 'code': '000000'}).status_code, 400)
+            v = self.c.post('/api/account/email/verify', headers=self.auth,
+                            json={'email': 'zhang.ge@example.com', 'code': code})
+            self.assertEqual(v.status_code, 200, v.text)
+            acc = self.c.get('/api/account', headers=self.auth).json()
+            self.assertTrue(acc['email_verified'])
+            self.assertEqual(acc['email_masked'], 'zh***@example.com')
+            self.assertEqual(
+                self.c.post('/api/account/email/verify', headers=self.auth,
+                            json={'email': 'zhang.ge@example.com', 'code': code}).status_code, 400,
+                '同一个验证码能用第二次，就不是"一次性"')
+
+            # 找回密码：绑过与没绑过的响应必须逐字相同，否则等于开放邮箱枚举
+            del sent[:]
+            bound = self.c.post('/api/account/forgot', json={'email': 'zhang.ge@example.com'})
+            stray = self.c.post('/api/account/forgot', json={'email': 'nobody@example.com'})
+            self.assertEqual(bound.status_code, 200)
+            self.assertEqual(bound.json(), stray.json(), '两条响应有差异，可被用来枚举邮箱')
+            self.assertEqual(len(sent), 1, '没绑过的邮箱不该真的发信')
+            rcode = _re.search(r'(\d{6})', sent[0][1]).group(1)
+            self.assertEqual(self.c.post('/api/account/reset', json={
+                'email': 'zhang.ge@example.com', 'code': '111111', 'new_password': 'Review!999'}).status_code, 400)
+            rr = self.c.post('/api/account/reset', json={
+                'email': 'zhang.ge@example.com', 'code': rcode, 'new_password': 'Review!999'})
+            self.assertEqual(rr.status_code, 200, rr.text)
+            self.assertGreaterEqual(rr.json()['revoked_sessions'], 1)
+            self.assertEqual(self.c.get('/api/account', headers=self.auth).status_code, 401,
+                             '重置后旧会话还在，等于没重置')
+            login = self.c.post('/api/login', json={'username': 'owner', 'password': 'Review!999'})
+            self.assertEqual(login.status_code, 200)
+            self.auth = {'Authorization': 'Bearer ' + login.json()['token']}
+        finally:
+            m.mailer.send = real_send
+
+        # ---------- 忌口与城市 ----------
+        self.assertEqual(self.c.post('/api/account/preferences', headers=self.auth,
+            json={'avoid_tags': ['no_spicy', 'no_glue']}).status_code, 400,
+            '不认识的忌口标签要报错，悄悄丢掉会让用户以为勾上了')
+        pref = self.c.post('/api/account/preferences', headers=self.auth,
+                           json={'avoid_tags': ['no_spicy', 'no_seafood']}).json()
+        self.assertEqual(pref['avoid_tags'], ['no_spicy', 'no_seafood'])
+        loc = self.c.post('/api/account/location', headers=self.auth,
+                          json={'lat': 30.57, 'lng': 104.07}).json()
+        self.assertTrue(loc['matched'])
+        self.assertEqual(loc['city'], '成都')
+        self.assertIn('辣', loc['cuisines'])
+        far = self.c.post('/api/account/location', headers=self.auth,
+                          json={'lat': -30.0, 'lng': -160.0}).json()
+        self.assertFalse(far['matched'])
+        self.assertEqual(far['city'], '成都', '认不出来时不能把已有城市清掉')
+        acc = self.c.get('/api/account', headers=self.auth).json()
+        self.assertEqual([x['city'] for x in acc['cities_seen']], ['成都'])
+        manual = self.c.post('/api/account/city', headers=self.auth, json={'city': '佛山'}).json()
+        self.assertIn('粤菜', manual['cuisines'])
+
+        # ---------- 抬门之后，找回密码这条路必须还通 ----------
+        web = Path(os.environ['QINGSU_WEB_DIR']); web.mkdir(parents=True, exist_ok=True)
+        (web / 'version.json').write_text(_json.dumps({
+            'version_code': 29, 'version_name': '1.9.7', 'min_version_code': 29,
+            'apk_url': 'https://124.220.54.64/qingsu.apk', 'size': 1,
+            'md5': 'ab' * 16, 'notes': 'r146'}, ensure_ascii=False), encoding='utf-8')
+        m._version_policy_cache['key'] = None
+        self.assertEqual(self.c.get('/api/dashboard').status_code, 403, '没构建号就该被挡')
+        self.assertEqual(self.c.post('/api/account/forgot',
+                                     json={'email': 'nobody@example.com'}).status_code, 200,
+                         '门把找回密码也挡住，忘密码的人就彻底回不来了')
+        self.assertEqual(self.c.get('/api/account/recovery-status').status_code, 200)
 
 if __name__=='__main__':unittest.main(verbosity=2)

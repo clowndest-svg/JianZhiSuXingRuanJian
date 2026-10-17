@@ -524,6 +524,93 @@ def main():
     # flex:1 不等于能缩到固有宽度以下，表单控件必须显式 min-width:0。
     chat_at = css_txt.find(".chat-input-bar input {")
     chat_css = css_txt[chat_at:css_txt.find("}", chat_at)]
+    # ============ r146：账号中心、定位与推荐 ============
+    feat_txt = read_asset("features.js")
+    srv = get_source(mutant)
+
+    # 忌口清单前后端必须逐条一致（豁免清单那条判据已经证明"两份清单会漂"）
+    _av_s = srv[srv.find("AVOID_TAGS = ("):srv.find(")", srv.find("AVOID_TAGS = ("))]
+    _av_c = feat_txt[feat_txt.find("const AVOID_TAGS="):feat_txt.find("];", feat_txt.find("const AVOID_TAGS="))]
+    srv_avoid = re.findall(r'"([a-z_]+)"', _av_s)
+    cli_avoid = re.findall(r"'([a-z_]+)'", _av_c)
+    check("忌口清单前后端逐条一致", bool(srv_avoid) and srv_avoid == cli_avoid,
+          {"服务端": srv_avoid, "前端": cli_avoid})
+    check("前端每条忌口都有中文说明", all(k in feat_txt for k in srv_avoid),
+          [k for k in srv_avoid if k not in feat_txt])
+
+    # 城市词汇必须和菜名标签对得上：对不上的话"按城市排序"就是永远不生效的死代码
+    if str(ROOT) not in __import__("sys").path:
+        __import__("sys").path.insert(0, str(ROOT))
+    geo_mod = __import__("app_modules.geo", fromlist=["geo"])
+    _cu = js_txt[js_txt.find("const TAKEOUT_CUISINE = {"):]
+    _cu = _cu[:_cu.find("};")]
+    dish_cuisines = {n: [x.strip().strip('"') for x in body.split(",") if x.strip()]
+                     for n, body in re.findall(r'"([^"]+)":\s*\[([^\]]*)\]', _cu)}
+    check("菜系标签表非空且覆盖每道外卖", len(dish_cuisines) >= 8, len(dish_cuisines))
+    _extra = {"通用", "西式", "快餐", "轻食", "茶饮", "夜宵"}
+    all_tags = set()
+    for _n, _la, _lo, cs in geo_mod.CITIES:
+        all_tags |= set(cs)
+    unknown = {d: [x for x in cs if x not in all_tags and x not in _extra]
+               for d, cs in dish_cuisines.items()}
+    check("菜名上的菜系标签都在城市词汇表里", not [k for k, v in unknown.items() if v], unknown)
+    dead = [n for n, _la, _lo, cs in geo_mod.CITIES
+            if not any(set(cs) & set(v) for v in dish_cuisines.values())]
+    # 十二道菜覆盖不了四十四座城市的每一种菜系，所以这条按覆盖率判：
+    # 70% 是"城市这一维真的在起作用"，掉下去多半是两边词汇表漂了。
+    hit_rate = 1.0 - len(dead) / float(len(geo_mod.CITIES))
+    check("七成以上城市能匹配到至少一道外卖", hit_rate >= 0.70,
+          {"覆盖": "%.0f%%" % (hit_rate * 100), "匹配不到": dead[:8]})
+    dead_tags = sorted({x for cs in dish_cuisines.values() for x in cs
+                        if x not in _extra and x not in all_tags})
+    check("菜名上没有城市用不到的死标签", not dead_tags, dead_tags)
+
+    # 就近匹配：阈值必须真起作用，不能"在太平洋上也认成某市"
+    near = geo_mod.city_of(30.57, 104.07)
+    check("成都坐标能就近认出来", bool(near) and near["city"] == "成都", near)
+    check("海上的坐标认不出城市而不是硬给一个", geo_mod.city_of(-30.0, -160.0) is None, None)
+    check("非法坐标不抛异常", geo_mod.city_of("x", None) is None, None)
+
+    # 邮件通道：未配置必须拒绝；发送失败要把验证码收回；验证码只存哈希、绝不回给前端
+    _sc = srv[srv.find("def _send_code"):srv.find("def _account_payload")]
+    check("邮件未配置走 503 而不是假装已发送", "status_code=503" in _sc, _sc[:80])
+    check("发送失败要回收验证码", "DELETE FROM email_codes" in _sc, "")
+    check("验证码只存哈希", "code_hash" in srv and "hash_token(code)" in srv, "")
+    check("验证码不回给前端", '"code": code' not in srv and "code=code" not in _sc, "")
+    check("邮箱只回掩码", "def mask_email" in srv and "email_masked" in srv, "")
+
+    # 改密与重置的撤销范围不同：前者留当前会话，后者一个不留
+    cp = srv[srv.find("def change_password"):srv.find("def upload_avatar")]
+    rs = srv[srv.find("def reset_password"):srv.find("def save_location")]
+    check("改密只留当前会话", '_revoke_sessions(conn, user["id"], user.get("_session_hash"))' in cp, cp[-160:])
+    check("重置撤销全部会话（不留 keep 参数）", "_revoke_sessions(conn, row[\"user_id\"])" in rs, rs[-160:])
+
+    # 头像：固定文件名（覆盖而不是堆历史）+ 必须走签名链接
+    check("头像按用户固定命名", "avatar-%d.jpg" in srv, "")
+    check("头像返回签名链接", "signed_photo(" in srv[srv.find("def upload_avatar"):srv.find("def email_bind_send")], "")
+
+    # WebView 定位：三件缺一不可，而且顺序必须是"先查系统权限再放行网页"
+    act = io.open(os.path.join(ROOT, "app", "src", "main", "java", "com", "fitcoach",
+                               "shapemaster", "MainActivity.java"), encoding="utf-8").read()
+    check("WebView 开了定位", "setGeolocationEnabled(true)" in act, "")
+    prompt = act[act.find("onGeolocationPermissionsShowPrompt"):act.find("setWebChromeClient", act.find("onGeolocationPermissionsShowPrompt"))]
+    check("网页问定位时先查系统权限再放行",
+          "hasLocationPermission()" in prompt
+          and prompt.find("hasLocationPermission()") < prompt.find("callback.invoke(origin, true"),
+          prompt[:100])
+    check("弹不出系统授权时把网页回调结掉", "invoke(origin, false" in prompt, prompt[-120:])
+    check("授权结果回来要结掉挂起的回调", "settleGeoCallback" in act, "")
+    mf = io.open(os.path.join(ROOT, "app", "src", "main", "AndroidManifest.xml"), encoding="utf-8").read()
+    for perm in ("ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"):
+        check("清单声明了 " + perm, perm in mf, perm)
+    check("定位不是安装必需能力（没 GPS 也能装）",
+          'android:name="android.hardware.location" android:required="false"' in mf, "")
+
+    # 观感承诺：只标注、不偷改、不藏冲突项、不假装知道商家
+    check("食谱冲突只标注不改写", "meal-clash" in js_txt and "与忌口冲突" in js_txt, "")
+    check("外卖推荐不藏冲突项", "与忌口冲突（仍如实标热量）" in js_txt, "")
+    check("说清没有商家数据", "没有商家与配送数据" in html_txt, "")
+
     check("聊天输入框允许压到视口宽度以内", "min-width: 0" in chat_css, chat_css[:90])
 
     # 就绪上报必须是"读出来的"，不能是写死的：写死时部署脚本拿同一个字自比，
@@ -824,9 +911,12 @@ def main():
     check("身体数据输入框七个都在", len(still_there) == 7, still_there)
     check("空值输入框都带说明文案", len(hinted) == 7, hinted)
 
-    # B. 内联 on* 引用的函数必须在 app.js 里定义（syncTargetWeightPlaceholder 曾只在 HTML 里）
+    # B. 内联 on* 引用的函数必须在页面脚本里定义（syncTargetWeightPlaceholder 曾只在 HTML 里）。
+    #    页面加载 app.js 与 features.js 两份，所以两处定义都算数——
+    #    只扫 app.js 会把 features.js 里的真函数误报成悬空，反过来也会漏掉真问题。
     KW = {"if", "for", "while", "switch", "catch", "return", "typeof", "new", "function"}
-    called, defs = set(), set(re.findall(r"\bfunction\s+([A-Za-z_$][\w$]*)", js_txt))
+    page_js = js_txt + "\n" + read_asset("features.js")
+    called, defs = set(), set(re.findall(r"\bfunction\s+([A-Za-z_$][\w$]*)", page_js))
     for body in re.findall(r"\bon\w+\s*=\s*\"([^\"]*)\"", html_txt):
         for nm in re.findall(r"(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(", body):
             if nm not in KW:
@@ -1388,6 +1478,7 @@ def main():
         import app_modules.online_ai as _oai
         _git = io.open(os.path.join(ROOT, ".gitignore"), encoding="utf-8").read()
         check("在线模型配置文件不进仓库", "ai-online.json" in _git, _git[:60])
+        check("发信配置文件不进仓库", "mail.json" in _git, _git[-60:])
         _leaks = [n for n in ("sk-", "api_key\":\"") if n in srv_txt]
         check("服务端源码里不写死密钥", not _leaks, _leaks)
         _st = _oai.online_status(force=True)

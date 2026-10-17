@@ -4,6 +4,7 @@ import math
 import uuid
 import logging
 from app_modules.features import share_settings, public_projection, DEFAULT_SCOPE
+from app_modules import mailer, geo
 import io
 import os
 import sqlite3
@@ -278,7 +279,41 @@ def migrate_db():
     _ensure_columns(c, "profiles", [
         ("day_mode", "TEXT DEFAULT 'rest'"),
         ("cycle_started_at", "TEXT"),
+        ("email", "TEXT"),
+        ("email_verified_at", "TEXT"),
+        ("avatar_url", "TEXT"),
+        ("city", "TEXT"),
+        ("city_source", "TEXT DEFAULT 'none'"),
+        ("avoid_tags", "TEXT DEFAULT ''"),
+        ("loc_lat", "REAL"),
+        ("loc_lng", "REAL"),
+        ("loc_updated_at", "TEXT"),
     ])
+    # 邮箱验证码只存哈希，明文一个字节都不落库；一次性，验中即删。
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS email_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email_hash TEXT NOT NULL,
+        code_hash TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_email_codes ON email_codes(email_hash, purpose)")
+    # 去过的城市：定位上报时增量维护，周报用它说"这一周期你在几个城市"。
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS user_cities (
+        user_id INTEGER NOT NULL,
+        city TEXT NOT NULL,
+        first_seen TEXT NOT NULL,
+        last_seen TEXT NOT NULL,
+        hits INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY(user_id, city),
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+    """)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     c.execute("SELECT id FROM users WHERE share_secret IS NULL OR share_secret = ''")
     for row in c.fetchall():
@@ -378,6 +413,137 @@ def verify_pw(pw, user_row):
     return hash_pw(pw) == user_row["password_hash"]
 
 
+# ============================ 账号中心：口令、验证码、忌口、定位 ============================
+
+# 忌口标签的唯一权威清单。前端 app.js 里那份 AVOID_TAGS 必须逐条一致，判据会核对——
+# 漂一条的后果是"用户勾了不吃辣，服务端存了个没人认识的字符串"，界面还显示成功。
+AVOID_TAGS = ("no_spicy", "no_seafood", "no_beef", "no_pork", "no_dairy", "vegetarian", "less_oil")
+CODE_TTL = 600          # 十分钟有效：再长就成了常驻后门
+CODE_MAX_ATTEMPTS = 5   # 六位数字百万分之一，不限量就是让人试到中为止
+MAIL_LIMIT_PER_IP = 4       # 同一 IP 十分钟内的上限，挡轰炸
+MAIL_LIMIT_PER_EMAIL = 5    # 同一邮箱一小时内的上限
+
+
+def password_problem(pw):
+    """改密/重置这条路上口令要够长。注册侧维持原样：那是既有行为，不在这次范围里。"""
+    if not pw or len(pw) < 8:
+        return "新密码至少 8 位"
+    if len(pw) > 200:
+        return "新密码太长了"
+    if pw.isdigit():
+        return "新密码不要全是数字"
+    return ""
+
+
+def parse_avoid(raw):
+    """存进来什么形状都可能（逗号分隔），出去一定是合法子集且顺序稳定。"""
+    want = {x.strip() for x in str(raw or "").split(",") if x.strip()}
+    return [x for x in AVOID_TAGS if x in want]
+
+
+def mask_email(addr):
+    """界面只回掩码邮箱：共享屏幕或被人瞄一眼，不该把完整邮箱交出去。"""
+    addr = str(addr or "")
+    if "@" not in addr:
+        return ""
+    local, _, domain = addr.partition("@")
+    head = local[:2] if len(local) > 2 else local[:1]
+    return "%s***@%s" % (head, domain)
+
+
+def _issue_email_code(conn, email, purpose):
+    code = "".join(secrets.choice("0123456789") for _ in range(6))
+    c = conn.cursor()
+    c.execute("DELETE FROM email_codes WHERE email_hash=? AND purpose=?",
+              (hash_token(email), purpose))
+    c.execute("INSERT INTO email_codes(email_hash,code_hash,purpose,expires_at,attempts,created_at)"
+              " VALUES (?,?,?,?,0,?)",
+              (hash_token(email), hash_token(code), purpose, int(time.time()) + CODE_TTL,
+               datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    return code
+
+
+def _consume_email_code(conn, email, purpose, code):
+    """返回 (是否通过, 人话原因)。一次性：验中即删；试满次数也删，不给人慢慢猜。"""
+    c = conn.cursor()
+    row = c.execute("SELECT * FROM email_codes WHERE email_hash=? AND purpose=? ORDER BY id DESC LIMIT 1",
+                    (hash_token(email), purpose)).fetchone()
+    if not row:
+        return False, "没有待验证的验证码，请重新获取"
+    if row["expires_at"] < int(time.time()):
+        c.execute("DELETE FROM email_codes WHERE id=?", (row["id"],))
+        conn.commit()
+        return False, "验证码已过期，请重新获取"
+    if row["attempts"] >= CODE_MAX_ATTEMPTS:
+        c.execute("DELETE FROM email_codes WHERE id=?", (row["id"],))
+        conn.commit()
+        return False, "这组验证码尝试次数已用完，请重新获取"
+    if not secrets.compare_digest(row["code_hash"], hash_token((code or "").strip())):
+        c.execute("UPDATE email_codes SET attempts=attempts+1 WHERE id=?", (row["id"],))
+        conn.commit()
+        left = CODE_MAX_ATTEMPTS - row["attempts"] - 1
+        return False, ("验证码不对，还能再试 %d 次" % left) if left > 0 else "验证码错误次数过多，请重新获取"
+    c.execute("DELETE FROM email_codes WHERE id=?", (row["id"],))
+    conn.commit()
+    return True, ""
+
+
+def _revoke_sessions(conn, user_id, keep_hash=None):
+    """撤销会话。改密后旧设备必须掉线，否则"改了密码"不等于"别人进不来"。"""
+    c = conn.cursor()
+    if keep_hash:
+        n = c.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?",
+                      (user_id, keep_hash)).rowcount
+    else:
+        n = c.execute("DELETE FROM sessions WHERE user_id=?", (user_id,)).rowcount
+    conn.commit()
+    return n
+
+
+def _remember_city(conn, user_id, city):
+    if not city:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c = conn.cursor()
+    if c.execute("SELECT city FROM user_cities WHERE user_id=? AND city=?", (user_id, city)).fetchone():
+        c.execute("UPDATE user_cities SET last_seen=?, hits=hits+1 WHERE user_id=? AND city=?",
+                  (now, user_id, city))
+    else:
+        c.execute("INSERT INTO user_cities(user_id,city,first_seen,last_seen,hits) VALUES (?,?,?,?,1)",
+                  (user_id, city, now, now))
+    conn.commit()
+
+
+def _avatar_tag(user_id):
+    """头像用固定文件名：换一张就是覆盖，不会在磁盘上堆出一串历史头像。"""
+    return "avatar-%d.jpg" % int(user_id)
+
+
+def _store_avatar(user_id, raw):
+    """复用打卡照片那套校验：真格式、像素上限、去 EXIF、重编码。头像只留 512。"""
+    if not raw:
+        raise HTTPException(status_code=400, detail="没有收到图片")
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(io.BytesIO(raw)) as image:
+            if image.format not in ("JPEG", "PNG", "WEBP") or image.width * image.height > 20000000:
+                raise ValueError("图片格式或尺寸不支持")
+            image = ImageOps.exif_transpose(image).convert("RGB")
+            image.thumbnail((512, 512))
+            out = io.BytesIO()
+            image.save(out, format="JPEG", quality=88)
+            blob = out.getvalue()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="请选择有效的JPEG、PNG或WebP图片")
+    name = _avatar_tag(user_id)
+    with open(os.path.join(UPLOAD_DIR, name), "wb") as f:
+        f.write(blob)
+    return "/uploads/" + name
+
+
 def public_url_for(user_row):
     """公开大屏必须带密钥，否则任何人都能靠猜用户名拖数据。"""
     keys = user_row.keys() if hasattr(user_row, "keys") else []
@@ -445,7 +611,10 @@ def _public_allowed(ip):
 BUILD_HEADER = "x-app-build"
 # 访客侧的两个大屏读数与打气不参与强更：把来看监督页的人挡在门外没有任何意义，
 # 它们本来就要求分享密钥并按 IP 限流。
-GATE_EXEMPT_PATHS = ("/api/public/dashboard", "/api/public/charts", "/api/cheer")
+# 找回密码这三条也在豁免里：它们正是"人已经被挡在门外"时要用的，
+# 门一抬就把找回密码一起挡掉，等于把用户永久锁死。
+GATE_EXEMPT_PATHS = ("/api/public/dashboard", "/api/public/charts", "/api/cheer",
+                     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset")
 
 _version_policy_cache = {"key": None, "data": {}}
 _min_build_cache = {"key": None, "data": None}
@@ -834,6 +1003,324 @@ def update_profile(req: ProfileUpdateReq, user: dict = Depends(get_current_user)
     finally:conn.close()
 
     return {"code": 0, "msg": "个人专属方案更新成功！"}
+
+# ============ 账号中心：个人中心 / 换头像 / 改密 / 邮箱找回 / 定位与忌口 ============
+
+class PasswordChangeReq(ValidatedModel):
+    old_password: str
+    new_password: str
+
+class EmailSendReq(ValidatedModel):
+    email: str
+
+class EmailVerifyReq(ValidatedModel):
+    email: str
+    code: str
+
+class ForgotReq(ValidatedModel):
+    email: str
+
+class ResetReq(ValidatedModel):
+    email: str
+    code: str
+    new_password: str
+
+class LocationReq(ValidatedModel):
+    lat: float
+    lng: float
+    accuracy: Optional[float] = None
+
+class CityReq(ValidatedModel):
+    city: str
+
+class PrefsReq(ValidatedModel):
+    avoid_tags: Optional[List[str]] = None
+
+
+def _now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _ensure_profile_row(conn, user_id):
+    """没有档案行就补一行：否则"保存成功但下次进来又没了"这种问题最难查。"""
+    c = conn.cursor()
+    if not c.execute("SELECT 1 FROM profiles WHERE user_id=?", (user_id,)).fetchone():
+        c.execute("INSERT INTO profiles(user_id, updated_at) VALUES (?,?)", (user_id, _now()))
+        conn.commit()
+
+
+def _profile_row(conn, user_id):
+    """取档案字典；没有这一行时返回空字典，调用方一律用 .get() 读。"""
+    return dict(conn.execute("SELECT * FROM profiles WHERE user_id=?", (user_id,)).fetchone() or {})
+
+
+def _send_code(addr, purpose, request):
+    """发验证码。邮件通道没配就如实失败，绝不回"已发送"。
+
+    发不出去时把刚写进库的那条验证码一起删掉——留着它就是一条
+    "用户永远收不到、但知道邮箱的人能拿来改密码"的后门。
+    """
+    if not mailer.email_shape_ok(addr):
+        raise HTTPException(status_code=400, detail="邮箱格式不对，收不到信")
+    st = mailer.status()
+    if not st["ok"]:
+        raise HTTPException(status_code=503, detail=st["why"])
+    ok_ip, _src, _n = rate_hit("mail:ip:" + _ip(request), MAIL_LIMIT_PER_IP, 600)
+    if not ok_ip:
+        raise HTTPException(status_code=429, detail="发送太频繁，请十分钟后再试")
+    ok_to, _src2, _n2 = rate_hit("mail:to:" + purpose + ":" + hash_token(addr),
+                                 MAIL_LIMIT_PER_EMAIL, 3600)
+    if not ok_to:
+        raise HTTPException(status_code=429, detail="这个邮箱一小时内收的验证码太多了")
+    conn = get_db()
+    try:
+        code = _issue_email_code(conn, addr, purpose)
+    finally:
+        conn.close()
+    body = ("轻塑减脂 验证码：%s\n%d 分钟内有效，只能用一次。\n"
+            "如果不是你本人操作，请忽略这封邮件，并尽快在 App 里修改密码。" % (code, CODE_TTL // 60))
+    sent, why = mailer.send(addr, "轻塑减脂 验证码", body)
+    if not sent:
+        conn = get_db()
+        try:
+            conn.execute("DELETE FROM email_codes WHERE email_hash=? AND purpose=?",
+                         (hash_token(addr), purpose))
+            conn.commit()
+        finally:
+            conn.close()
+        raise HTTPException(status_code=502, detail=why)
+    return {"code": 0, "masked": mask_email(addr), "ttl_minutes": CODE_TTL // 60,
+            "msg": "验证码已发到 %s" % mask_email(addr)}
+
+
+def _account_payload(conn, user):
+    p = _profile_row(conn, user["id"])
+    city = (p.get("city") or "").strip()
+    avatar = (p.get("avatar_url") or "").strip()
+    mail = mailer.status()
+    seen = [dict(r) for r in conn.execute(
+        "SELECT city,first_seen,last_seen,hits FROM user_cities WHERE user_id=?"
+        " ORDER BY last_seen DESC LIMIT 8", (user["id"],)).fetchall()]
+    return {
+        "code": 0,
+        "user": {"id": user["id"], "username": user["username"], "nickname": user.get("nickname")},
+        "email_masked": mask_email(p.get("email")),
+        "email_bound": bool(p.get("email")),
+        "email_verified": bool(p.get("email_verified_at")),
+        # 头像走和打卡照片同一条签名链接：URL 只发给本人，15 分钟过期
+        "avatar_url": signed_photo(avatar) if avatar else "",
+        "city": city,
+        "city_source": p.get("city_source") or "none",
+        "cuisines": geo.cuisines_of(city),
+        "avoid_tags": parse_avoid(p.get("avoid_tags")),
+        "avoid_options": list(AVOID_TAGS),
+        "mail": "up" if mail["ok"] else "down",
+        "mail_why": mail.get("why", ""),
+        "cities_seen": seen,
+        "loc_updated_at": p.get("loc_updated_at") or "",
+    }
+
+
+@app.get("/api/account/recovery-status")
+def recovery_status():
+    """登录页要先知道邮箱这条路通不通，别让人填完邮箱才发现信发不出去。"""
+    st = mailer.status()
+    return {"code": 0, "mail": "up" if st["ok"] else "down", "mail_why": st.get("why", "")}
+
+
+@app.get("/api/account")
+def get_account(user: dict = Depends(get_current_user)):
+    conn = get_db()
+    try:
+        return _account_payload(conn, user)
+    finally:
+        conn.close()
+
+
+@app.post("/api/account/password")
+def change_password(req: PasswordChangeReq, user: dict = Depends(get_current_user)):
+    problem = password_problem(req.new_password)
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone()
+        if not row or not verify_pw(req.old_password, row):
+            raise HTTPException(status_code=400, detail="原密码不对")
+        salt, hashed = make_pw(req.new_password)
+        conn.execute("UPDATE users SET password_hash=?, pw_salt=? WHERE id=?",
+                     (hashed, salt, user["id"]))
+        # 只留当前这个会话，其余全部撤销：否则"改了密码"防不住已经偷走的令牌
+        dropped = _revoke_sessions(conn, user["id"], user.get("_session_hash"))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"code": 0, "msg": "密码已更新，其他设备需要重新登录", "revoked_sessions": dropped}
+
+
+@app.post("/api/account/avatar")
+async def upload_avatar(photo: UploadFile = File(None), user: dict = Depends(get_current_user)):
+    if not photo or not getattr(photo, "filename", None):
+        raise HTTPException(status_code=400, detail="没有收到图片")
+    raw = await photo.read(4 * 1024 * 1024 + 1)
+    if len(raw) > 4 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="头像请小于 4MB")
+    from starlette.concurrency import run_in_threadpool
+    url = await run_in_threadpool(_store_avatar, user["id"], raw)
+    conn = get_db()
+    try:
+        _ensure_profile_row(conn, user["id"])
+        conn.execute("UPDATE profiles SET avatar_url=?, updated_at=? WHERE user_id=?",
+                     (url, _now(), user["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"code": 0, "msg": "头像已更新", "avatar_url": signed_photo(url)}
+
+
+@app.post("/api/account/email/send")
+def email_bind_send(req: EmailSendReq, request: Request, user: dict = Depends(get_current_user)):
+    return _send_code(mailer.normalize(req.email), "bind", request)
+
+
+@app.post("/api/account/email/verify")
+def email_bind_verify(req: EmailVerifyReq, user: dict = Depends(get_current_user)):
+    addr = mailer.normalize(req.email)
+    conn = get_db()
+    try:
+        ok, why = _consume_email_code(conn, addr, "bind", req.code)
+        if not ok:
+            raise HTTPException(status_code=400, detail=why)
+        # 一个邮箱只能绑一个账号：否则两个人用同一邮箱找回，后一个能改掉前一个的密码
+        clash = conn.execute("SELECT user_id FROM profiles WHERE email=? AND user_id<>?",
+                             (addr, user["id"])).fetchone()
+        if clash:
+            raise HTTPException(status_code=400, detail="这个邮箱已经绑在另一个账号上了")
+        _ensure_profile_row(conn, user["id"])
+        conn.execute("UPDATE profiles SET email=?, email_verified_at=?, updated_at=? WHERE user_id=?",
+                     (addr, _now(), _now(), user["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"code": 0, "msg": "邮箱已绑定并通过验证", "email_masked": mask_email(addr)}
+
+
+@app.post("/api/account/forgot")
+def forgot_password(req: ForgotReq, request: Request):
+    """免登录入口（在强更门豁免清单里）。返回文案对"绑过"和"没绑过"完全一致。"""
+    addr = mailer.normalize(req.email)
+    generic = {"code": 0, "msg": "如果这个邮箱绑定过账号且已通过验证，验证码已经发出，十分钟内有效"}
+    if not mailer.email_shape_ok(addr):
+        raise HTTPException(status_code=400, detail="邮箱格式不对，收不到信")
+    st = mailer.status()
+    if not st["ok"]:
+        raise HTTPException(status_code=503, detail=st["why"])
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT email_verified_at FROM profiles WHERE email=?", (addr,)).fetchone()
+    finally:
+        conn.close()
+    if not row or not row["email_verified_at"]:
+        return generic
+    _send_code(addr, "reset", request)
+    return generic
+
+
+@app.post("/api/account/reset")
+def reset_password(req: ResetReq):
+    problem = password_problem(req.new_password)
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
+    addr = mailer.normalize(req.email)
+    conn = get_db()
+    try:
+        ok, why = _consume_email_code(conn, addr, "reset", req.code)
+        if not ok:
+            raise HTTPException(status_code=400, detail=why)
+        row = conn.execute("SELECT user_id FROM profiles WHERE email=?", (addr,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=400, detail="这个邮箱没有绑定账号")
+        salt, hashed = make_pw(req.new_password)
+        conn.execute("UPDATE users SET password_hash=?, pw_salt=? WHERE id=?",
+                     (hashed, salt, row["user_id"]))
+        # 重置是"口令可能已经泄露"的场景：一个会话都不留
+        dropped = _revoke_sessions(conn, row["user_id"])
+        conn.commit()
+    finally:
+        conn.close()
+    return {"code": 0, "msg": "密码已重置，请用新密码登录（所有设备都已下线）",
+            "revoked_sessions": dropped}
+
+
+@app.post("/api/account/location")
+def save_location(req: LocationReq, user: dict = Depends(get_current_user)):
+    """存坐标并就近认城市。认不出来就照实说没认出来，让用户手填。"""
+    hit = geo.city_of(req.lat, req.lng)
+    conn = get_db()
+    try:
+        _ensure_profile_row(conn, user["id"])
+        if hit:
+            conn.execute("UPDATE profiles SET city=?, city_source='gps', loc_lat=?, loc_lng=?,"
+                         " loc_updated_at=?, updated_at=? WHERE user_id=?",
+                         (hit["city"], req.lat, req.lng, _now(), _now(), user["id"]))
+            _remember_city(conn, user["id"], hit["city"])
+        else:
+            # 没匹配上就不动 city：把上次的城市悄悄清掉，比留着旧值更难解释
+            conn.execute("UPDATE profiles SET loc_lat=?, loc_lng=?, loc_updated_at=?,"
+                         " updated_at=? WHERE user_id=?",
+                         (req.lat, req.lng, _now(), _now(), user["id"]))
+        conn.commit()
+        p = _profile_row(conn, user["id"])
+    finally:
+        conn.close()
+    if hit:
+        return {"code": 0, "matched": True, "city": hit["city"], "km": hit["km"],
+                "cuisines": hit["cuisines"],
+                "msg": "按坐标就近认到 %s（离锚点约 %s 公里）；这是粗匹配，不对可以手改"
+                       % (hit["city"], hit["km"])}
+    return {"code": 0, "matched": False, "city": (p.get("city") or ""),
+            "km": None, "cuisines": geo.cuisines_of(p.get("city")),
+            "msg": "离内置城市锚点都超过 %d 公里，没认出来；请手填城市" % int(geo.MAX_KM)}
+
+
+@app.post("/api/account/city")
+def save_city(req: CityReq, user: dict = Depends(get_current_user)):
+    name = (req.city or "").strip()
+    if len(name) > 40:
+        raise HTTPException(status_code=400, detail="城市名太长了")
+    cuisines = geo.cuisines_of(name)
+    conn = get_db()
+    try:
+        _ensure_profile_row(conn, user["id"])
+        conn.execute("UPDATE profiles SET city=?, city_source='manual', updated_at=? WHERE user_id=?",
+                     (name, _now(), user["id"]))
+        _remember_city(conn, user["id"], name)
+        conn.commit()
+    finally:
+        conn.close()
+    return {"code": 0, "city": name, "cuisines": cuisines,
+            "msg": ("城市已设为 %s" % name) if cuisines else
+                   ("城市已设为 %s；这个城市不在内置菜系表里，推荐只按忌口过滤" % name)}
+
+
+@app.post("/api/account/preferences")
+def save_preferences(req: PrefsReq, user: dict = Depends(get_current_user)):
+    if req.avoid_tags is None:
+        raise HTTPException(status_code=400, detail="没有收到要保存的忌口设置")
+    bad = [x for x in req.avoid_tags if x not in AVOID_TAGS]
+    if bad:
+        # 不认识的标签直接报错，而不是悄悄丢掉：静默丢会让用户以为"勾上了"
+        raise HTTPException(status_code=400, detail="不认识的忌口标签：" + "、".join(bad[:3]))
+    tags = [x for x in AVOID_TAGS if x in set(req.avoid_tags)]
+    conn = get_db()
+    try:
+        _ensure_profile_row(conn, user["id"])
+        conn.execute("UPDATE profiles SET avoid_tags=?, updated_at=? WHERE user_id=?",
+                     (",".join(tags), _now(), user["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"code": 0, "avoid_tags": tags, "msg": "忌口已保存"}
 
 # ==================== Real Data Dashboard & Logs ====================
 

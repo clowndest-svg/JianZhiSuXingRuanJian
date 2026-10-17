@@ -26,6 +26,7 @@
                     <span>📱</span><span>下载App</span>
                 </button>
                 <button class="user-account-badge" onclick="openAuthModal()">
+                    <span id="header-avatar-slot"></span>
                     <span id="header-user-icon">👤</span>
                     <span id="header-username-display">登录/注册</span>
                 </button>
@@ -398,6 +399,16 @@
                 </div>
             </div>
 
+            <!-- 按忌口与城市给的点单顺序：只排顺序，不改热量，也不藏冲突项 -->
+            <div class="card takeout-advisor-card">
+                <div class="card-title">
+                    <span class="title-left">🧭 按你的忌口与城市排的点单顺序</span>
+                    <span style="font-size: 11px; color: var(--text-muted); font-weight: 700;" id="takeout-advisor-note">顺序建议，非商家列表</span>
+                </div>
+                <div id="takeout-advisor"></div>
+                <p class="tav-foot">这里没有商家与配送数据，说不出"你附近哪家店有"。它能做的是：把常见的爆款按你的忌口和当地口味排个先后，并把跟忌口冲突的那几样照实标出来。</p>
+            </div>
+
             <!-- 外卖输入与快捷识别 -->
             <div class="card">
                 <div class="card-title">
@@ -421,6 +432,9 @@
                     <div class="chip" onclick="quickCheckTakeout('珍珠奶茶大杯(正常糖)')" role="button" tabindex="0">🧋 珍珠奶茶全糖</div>
                     <div class="chip" onclick="quickCheckTakeout('轻食鸡胸肉藜麦沙拉(油醋汁)')" role="button" tabindex="0">🥗 轻食鸡胸沙拉</div>
                     <div class="chip" onclick="quickCheckTakeout('赛百味6寸香烤牛肉堡')" role="button" tabindex="0">🥪 赛百味牛肉堡</div>
+                    <div class="chip" onclick="quickCheckTakeout('南翔小笼包8只+酸辣汤')" role="button" tabindex="0">🥟 南翔小笼包</div>
+                    <div class="chip" onclick="quickCheckTakeout('红烧大排饭(含例汤)')" role="button" tabindex="0">🍛 红烧大排饭</div>
+                    <div class="chip" onclick="quickCheckTakeout('兰州牛肉面(大碗加肉)')" role="button" tabindex="0">🍲 兰州牛肉面</div>
                 </div>
 
                 <button class="btn-primary" style="background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%); margin-top: 10px; box-shadow: 0 2px 8px rgba(239, 68, 68, 0.25);" onclick="analyzeTakeout()">
@@ -1124,6 +1138,7 @@
                     </button>
                     <div style="font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 10px;">
                         新用户请切换至【注册新用户】录入个人真实身高体重
+                        · <button type="button" class="link-like" onclick="openForgotPassword()">忘记密码</button>
                     </div>
                 </div>
 
