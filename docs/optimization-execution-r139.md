@@ -44,7 +44,14 @@
 
 ## 5. 上线与对账
 
-（部署后补：线上 `min_build` 状态、清单与包指纹、公网回读、测试账号清理。）
+- 部署：`{"deployed":"r139","backup":"/opt/qingsu/backups/release-20261017-190252","source_revision":"5a5ce1f6c5d5…"}`。
+- `/health/ready` 回读 `r139` + 同一提交号，`min_build=0`、`build_override=true`、`gate.blocked=0`。
+- **门在线上确实在跑**：跑完发布自检后 `gate.builds` 是 `{"22":14}`——这个计数只有新代码会写。抬门之前先看得见"还有谁在调用"，这条设计兑现了。
+- 清单：`version_code 22 / 1.9.0`、`min_version_code 22`、`size 5941497`、`md5 6d5ccc92`、`sha256 e49dcbd0…`，与仓库那份逐字节一致。
+- 包：公网下回来的 `qingsu.apk` SHA-256 与本地、与清单三处相同（`e49dcbd0…`）。
+- 资产：`app.js`、`body3d.js`、`app-icon.png`、`vendor/three.module.js`、`models/cesium_man.glb`、`exercise_poses.json` 六个线上 SHA-256 逐个 MATCH；归档两端 MD5 一致（`a64d046c…`）。
+- `verify_live.py` 8 项通过，其中新增一项 `update gate min_build=0 override=True blocked=0`。
+- 测试账号：只删 id 99（`usbqa1792234654569`，本轮 MuMu 回归建的），删前按 18 张带 `user_id` 的表逐一断言，删后 `foreign_key_check` 0 条、真实账号（tiangang、木木）各表行数前后一致、`integrity_check` ok。
 
 ## 6. 仍未覆盖（不写成通过）
 
