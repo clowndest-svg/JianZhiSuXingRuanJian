@@ -53,9 +53,22 @@
 - `verify_live.py` 8 项通过，其中新增一项 `update gate min_build=0 override=True blocked=0`。
 - 测试账号：只删 id 99（`usbqa1792234654569`，本轮 MuMu 回归建的），删前按 18 张带 `user_id` 的表逐一断言，删后 `foreign_key_check` 0 条、真实账号（tiangang、木木）各表行数前后一致、`integrity_check` ok。
 
-## 6. 仍未覆盖（不写成通过）
+## 6. 线上自查抓到的一个真 bug（判据形状值得记）
+
+部署完照例逐个 URL 回读，发现 **`/app-icon.png` 返 500**：`extension_asset` 里那张按扩展名取 MIME 的表只有 js/css/svg/webmanifest/json，没有 png——路由注册了、文件也上传了，请求进来才 KeyError。
+
+我那条「静态件都有显式公网路由」的判据是绿的：它核的是源码里有没有 `@app.get("/app-icon.png")` 这个串，**证明的是注册，不是服务**。这类形状（注册在、文件在、类型没登记）静态判据永远看不见。
+
+补了两层：
+
+- 集成判据 `test_public_static_assets_really_serve`：把十件公网静态件真的 GET 一遍，  钉 200 与 content-type 前缀。**改之前它当场红**（500），改完绿——这条判据是被这个 bug 挣来的。
+- 启动校验：扩展名没登记 MIME 就在 import 时抛 `RuntimeError`，不留到用户请求。  变异标定：从表里删掉 `png` → 启动即炸（ERROR）；只关掉启动校验 → 服务照常 200（等价变异，如实记）。
+
+重发一次：`{"deployed":"r139b","backup":"/opt/qingsu/backups/release-20261017-191136","source_revision":"e686c2ea7152…"}`，归档两端 MD5 一致（`40fd48ad…`），`/app-icon.png` 现在 200 / image/png / 214,919 字节且 SHA-256 与仓库一致；`verify_live.py` 8 项通过，库里只剩 `tiangang`、`木木`。APK 没动（图标 500 只影响网页侧），所以 `qingsu.apk` 与 `version.json` 沿用上一次的对账结果。
+## 7. 仍未覆盖（不写成通过）
 
 - **线上没抬门**。`min_build` 停在 0，等机主在 vivo 上装完 22 再抬。所以"已装的 1.8.3 在真人手机上被挡"这一格本轮没有实拍证据；MuMu 上也只验了新包侧。
 - 抬门后 `verify_live.py` 会扮成最新版（已带 `X-App-Build`），但**别的第三方调用方**（脚本、外部集成）如果存在，会被当成旧包挡掉——目前仓库里没有这类调用方，线上日志也没查过。
 - 旧包被挡时屏上具体显示什么（403 走的是旧版自己的错误处理，很可能是"加载失败"而不是"请更新"）没验；旧包唯一像样的提示是它自带的启动更新弹窗。
+- **判据盲区仍在**：「路由注册了」和「请求进得来」是两件事，这次靠人工逐个 URL 回读才发现。十件静态件已进集成判据，但**带参数的路由与子目录白名单**（`/vendor/{name}`、`/models/{name}`）仍只核注册，没核真取。
 - vivo 真机仍未连，3D 与新图标在真实 GPU/高密度屏上的表现依旧未知。
