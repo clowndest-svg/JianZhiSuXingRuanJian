@@ -189,6 +189,17 @@ public class DeviceSmokeTest {
         assertTrue("取景算出过荒谬相机距离（坏帧会让画面歪掉而不自知）: " + st3d.toString(),
                 st3d.isNull("badFrame"));
         assertEquals("有骨骼被算成 NaN 后退回绑定姿态: " + st3d.toString(), 0, st3d.getInt("nanBones"));
+        // 骨长校正量：姿态表与模型比例差多少。超过 ±50% 就不是"校正"而是"拉长成橡皮筋"，
+        // 说明表或模型选错了，画面会诡异但不会触发任何其它判据。
+        org.json.JSONArray lenScales = st3d.getJSONArray("lenScales");
+        assertTrue("四肢骨长没有参与校正（表与模型比例脱节时这里会空）: " + st3d.toString(),
+                lenScales.length() >= 8);
+        double worst = 0;
+        for (int k = 0; k < lenScales.length(); k++)
+                worst = Math.max(worst, Math.abs(lenScales.getDouble(k) - 1.0));
+        assertTrue("骨长校正幅度过大（|k-1|>0.5），姿态表与模型比例不兼容: " + lenScales, worst <= 0.5);
+        assertTrue("骨长顶到了夹紧边界，说明姿态表要求的长度超出可接受范围: " + s3d,
+                j3d.getDouble("reach") <= 0.02);
         js("setEx3DAngle('front')"); Thread.sleep(600);
         screenshot("exercise-3d-front");
         String sFront = js("JSON.stringify(Body3D.selfTest(            poseFromTable(exActivePoseKey, exActiveArch, 0.3), posePlane(exActivePoseKey), ex3DCamera.yaw))");
@@ -227,8 +238,10 @@ public class DeviceSmokeTest {
             // 所以遇到冠状面动作留一张证据。
             if ("true".equals(js("posePlane(exActivePoseKey)===\"frontal\"")) && standingShot == null) {
                 standingShot = "exercise-3d-standing";
-                screenshot(standingShot);
             }
+            // 每个动作都留一张：上一版"鱼鳍脚"就藏在第 4 个动作里，
+            // 只截两张图等于把最难看的那张跳过了。
+            screenshot("ex3d-" + i);
         }
         assertEquals("每个动作的 3D 演示都要画全: " + exBad, "", exBad.toString());
         assertNotNull("这一版训练计划里没有站着做的动作，站姿外观没被截图覆盖", standingShot);

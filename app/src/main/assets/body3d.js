@@ -64,6 +64,16 @@ const JOINT_BONE = {
 const BONE_BY_NAME = {};
 BONES.forEach(b => { BONE_BY_NAME[b[0]] = b; });
 
+/* 骨长校正：姿态表里的骨长和 CesiumMan 的对不上（表里大腿 0.366m，模型只有
+   0.304m），于是"膝盖该落地"的跪姿落不了——腿短一截，整个人看着悬空。
+   一根骨的长度是由"它子骨的局部位移"实现的（子骨起点就是本骨的终点关节），
+   所以缩放子骨的 position 就等于缩放本骨。只列链条干净的四肢，
+   躯干那两根 pelvis/spine 共用同一对关节，缩放会重复计入，先不动。 */
+const LEN_CHILD = {
+    r_thigh: 'r_shin', r_shin: 'r_foot', r_upper_arm: 'r_forearm', r_forearm: 'r_hand',
+    l_thigh: 'l_shin', l_shin: 'l_foot', l_upper_arm: 'l_forearm', l_forearm: 'l_hand'
+};
+
 const State = {
     status: 'idle',                 // idle | loading | ready | unavailable
     reason: '',
@@ -71,9 +81,13 @@ const State = {
     bones: {},                      // 语义名 -> Bone
     bindBoneQuat: {},               // 语义名 -> 绑定时世界四元数
     bindBoneLocal: {},              // 语义名 -> 绑定时局部四元数（不动这根骨头时该用它）
+    bindChildPos: {},               // 语义名 -> 子骨绑定时局部位移（缩放它=缩放本骨）
+    bindLen: {},                    // 语义名 -> 绑定骨长
+    lenScale: {}, lenWant: {},
     bindJoint: {},                  // 关节名 -> 绑定时世界坐标
     parts: null, blobs: null, ground: null, jointWorld: {},
     matSkin: null, matHot: null,
+    floorY: 0,
     yaw: Math.PI / 2, pitch: 0.1, camR: 0, camWant: 0, camY: 0.9, camCenter: [0, 0, 0], badFrame: null,
     frameMs: 0, triangles: 0, drawCalls: 0, solved: 0, frames: 0, nanBones: 0
 };
@@ -181,10 +195,12 @@ const PARTS = [
        端点离踝只有 8cm（真脚 16cm 以上），所以整段再沿同方向拉长 1.9 倍。
        perpTo 把脚向对小腿做正交化：脚骨是整条跟着腿转的，实测站姿下它斜向下
        49°，人看着像踮脚；去掉沿小腿的分量才踩得住地。 */
-    { k: 'foot_r', c: 'shoe', a: 'r_ankle', b: 'r_toe', perpTo: 'r_knee', m: ['calf_r'], w: .95, d: 1.25, stretch: 1.9,
-      p: [[0, .036], [.26, .034], [.62, .030], [1, .016]] },
-    { k: 'foot_l', c: 'shoe', a: 'l_ankle', b: 'l_toe', perpTo: 'l_knee', m: ['calf_l'], w: .95, d: 1.25, stretch: 1.9,
-      p: [[0, .036], [.26, .034], [.62, .030], [1, .016]] }
+    /* w 是左右宽、d 是"脚底法线"方向（厚度）。原来写成 w .95 / d 1.25，
+       等于造了一只比宽还厚的脚，立起来就是机主圈出来的那两片鱼鳍。 */
+    { k: 'foot_r', c: 'shoe', a: 'r_ankle', b: 'r_toe', perpTo: 'r_knee', m: ['calf_r'], w: 1.22, d: .52, stretch: 1.9,
+      p: [[0, .034], [.22, .036], [.58, .034], [.85, .027], [1, .013]] },
+    { k: 'foot_l', c: 'shoe', a: 'l_ankle', b: 'l_toe', perpTo: 'l_knee', m: ['calf_l'], w: 1.22, d: .52, stretch: 1.9,
+      p: [[0, .034], [.22, .036], [.58, .034], [.85, .027], [1, .013]] }
 ];
 
 /* 椭球件：头颅、三角肌、手掌。at 是中心关节，along 提供朝向（+Y 对齐到它），
@@ -192,13 +208,20 @@ const PARTS = [
 const BLOBS = [
     /* t 是"沿 along 方向再挪多少米"。这里写成 0.52 米时头颅直接飞到画面外，
        而 ndcMax 只统计关节点，判据照样绿——所以第 5 步把判据改成量外壳。 */
-    { k: 'skull', c: 'skin', at: 'neck', along: 'head', t: .044, r: [.076, .098, .090], m: [] },
+    { k: 'skull', c: 'skin', at: 'neck', along: 'head', t: .040, r: [.064, .092, .080], m: [] },
     { k: 'delt_r', c: 'skin', at: 'r_shoulder', along: 'r_elbow', t: .022, r: [.060, .062, .056], m: ['deltoid_r', 'shoulders'] },
     { k: 'delt_l', c: 'skin', at: 'l_shoulder', along: 'l_elbow', t: .022, r: [.060, .062, .056], m: ['deltoid_l', 'shoulders'] },
     { k: 'pelvis', c: 'skin', at: 'pelvis', along: 'sternum', t: -.055, r: [.104, .072, .086], m: ['glutes', 'pelvis'] },
-    { k: 'hair', c: 'hair', at: 'neck', along: 'head', t: .072, r: [.086, .096, .101], m: [] },
-    { k: 'hand_r', c: 'skin', at: 'r_wrist', along: 'r_elbow', out: 1, t: .055, r: [.030, .062, .026], m: ['arm_r'] },
-    { k: 'hand_l', c: 'skin', at: 'l_wrist', along: 'l_elbow', out: 1, t: .055, r: [.030, .062, .026], m: ['arm_l'] }
+    /* 肘、膝加关节帽：两根管子成角相接的地方原来是空的，弯下去看着像断掉 */
+    { k: 'elbow_r', c: 'skin', at: 'r_elbow', along: 'r_shoulder', t: 0, r: [.033, .033, .033], m: ['arm_r'] },
+    { k: 'elbow_l', c: 'skin', at: 'l_elbow', along: 'l_shoulder', t: 0, r: [.033, .033, .033], m: ['arm_l'] },
+    { k: 'knee_r', c: 'legging', at: 'r_knee', along: 'r_hip', t: 0, r: [.042, .042, .042], m: ['calf_r', 'hamstrings'] },
+    { k: 'knee_l', c: 'legging', at: 'l_knee', along: 'l_hip', t: 0, r: [.042, .042, .042], m: ['calf_l', 'hamstrings'] },
+    { k: 'hair', c: 'hair', at: 'neck', along: 'head', t: .056, r: [.071, .088, .091], m: [] },
+    /* 手原来是颗圆球（三轴 .030/.062/.026 太接近），改成巴掌：
+       沿手臂方向最长、左右次之、掌厚最薄。 */
+    { k: 'hand_r', c: 'skin', at: 'r_wrist', along: 'r_elbow', out: 1, t: .046, r: [.034, .068, .017], m: ['arm_r'] },
+    { k: 'hand_l', c: 'skin', at: 'l_wrist', along: 'l_elbow', out: 1, t: .046, r: [.034, .068, .017], m: ['arm_l'] }
 ];
 /* 线框全息风（机主给的参考图就是这种蓝色线框人）。每个体块两层：
    里面一层半透明暗芯负责挡住"后面的线穿过来"，外面一层亮线框负责好看。
@@ -231,7 +254,17 @@ function solve(target) {
         _dir.copy(target[toJoint]).sub(target[fromJoint]);
         _bindDir.copy(State.bindJoint[toJoint]).sub(State.bindJoint[fromJoint]);
         if (_dir.lengthSq() < 1e-8 || _bindDir.lengthSq() < 1e-8) continue;
+        const wantLen = _dir.length();
         _dir.normalize(); _bindDir.normalize();
+
+        if (State.bindChildPos[name]) {
+            let k = wantLen / State.bindLen[name];
+            k = Math.max(0.65, Math.min(1.55, k));
+            State.lenWant[name] = k;
+            State.lenScale[name] += (k - State.lenScale[name]) * 0.15;
+            State.bones[LEN_CHILD[name]].position
+                .copy(State.bindChildPos[name]).multiplyScalar(State.lenScale[name]);
+        }
 
         /* 世界系摆位：Δ = 从绑定轴转到目标轴的最短弧；
            局部旋转 = 父骨当前世界旋转的逆 · Δ · 该骨绑定时世界旋转。
@@ -322,13 +355,24 @@ function updateRig() {
         if (!(len > 1e-4)) { item.mesh.visible = item.line.visible = false; continue; }
         _dir.multiplyScalar(1 / len);
         if (item.part.perpTo) {
+            /* 脚向按小腿的倾斜度混合，不能一律掰成垂直：
+               小腿越竖直（站着、臀桥收脚）→ 脚越该垂直于小腿平踩在地面；
+               小腿躺平（跪姿、四点跪姿）→ 脚该顺着小腿往后，
+               一律垂直就把脚掰成两只朝天的兔耳朵（机主圈出来的第二处）。 */
             const ref = State.jointWorld[item.part.perpTo];
             if (ref) {
                 _bindDir.copy(a).sub(ref);
                 if (_bindDir.lengthSq() > 1e-8) {
                     _bindDir.normalize();
-                    _v.copy(_dir).addScaledVector(_bindDir, -_dir.dot(_bindDir));
-                    if (_v.lengthSq() > 1e-6) _dir.copy(_v.normalize());
+                    const axial = _dir.dot(_bindDir);
+                    _v.copy(_dir).addScaledVector(_bindDir, -axial);
+                    const perpLen = _v.length();
+                    const up = Math.min(1, Math.abs(_bindDir.y));
+                    _dir.set(0, 0, 0);
+                    if (perpLen > 1e-6) _dir.addScaledVector(_v, up / perpLen);
+                    if (Math.abs(axial) > 1e-6) _dir.addScaledVector(_bindDir, (axial < 0 ? -1 : 1) * (1 - up));
+                    if (_dir.lengthSq() > 1e-8) _dir.normalize();
+                    else if (perpLen > 1e-6) _dir.copy(_v).multiplyScalar(1 / perpLen);
                 }
             }
         }
@@ -360,6 +404,13 @@ function updateRig() {
         item.mesh.visible = true;
         item.mesh.position.copy(_v);
         item.mesh.scale.set(item.blob.r[0], item.blob.r[1], item.blob.r[2]);
+        /* 任何体块都不许沉到地面以下：四点跪位的支撑手原来沿着小臂方向
+           继续往前戳，半截穿进地垫里，看着像断掉的手。压在地面上才是对的。 */
+        // 球的基准几何半径是 1，scale 就是世界半径，不能再乘一次 r
+        const half = Math.max(item.mesh.scale.x, item.mesh.scale.y, item.mesh.scale.z);
+        if (item.mesh.position.y - half < State.floorY) {
+            item.mesh.position.y = State.floorY + half * 0.92;
+        }
         item.line.position.copy(item.mesh.position);
         item.line.quaternion.copy(item.mesh.quaternion);
         item.line.scale.copy(item.mesh.scale);
@@ -425,6 +476,9 @@ const Body3D = {
             drawCalls: State.drawCalls, solvedBones: State.solved,
             bones: Object.keys(State.bones).length, frames: State.frames,
             nanBones: State.nanBones, badFrame: State.badFrame,
+            // 骨长被改了多少：k 越偏离 1，说明姿态表与模型比例差得越远；
+            // 顶到夹紧边界（0.65/1.55）就是"再拉长就不像人了"。
+            lenScales: Object.keys(State.lenWant).map(k => +State.lenScale[k].toFixed(3)),
             // 相机与焦点：判据要能算"体长轴和视线是不是接近平行"，
             // 接近平行时什么动作都会画成一团，只看 triangles>0 是查不出来的。
             view: c ? {
@@ -461,10 +515,22 @@ const Body3D = {
             for (const name of SOLVE_ORDER) {
                 State.bindBoneQuat[name] = State.bones[name].getWorldQuaternion(new THREE.Quaternion());
                 State.bindBoneLocal[name] = State.bones[name].quaternion.clone();
+                const childName = LEN_CHILD[name];
+                if (childName && State.bones[childName]) {
+                    State.bindChildPos[name] = State.bones[childName].position.clone();
+                    State.lenScale[name] = 1;
+                }
             }
             for (const joint of Object.keys(JOINT_BONE)) {
                 State.bones[JOINT_BONE[joint]].getWorldPosition(_v);
                 State.bindJoint[joint] = _v.clone();
+            }
+            /* 骨长要等 bindJoint 填完才能算——放在上面那个循环里取到的是 undefined，
+               整个 3D 层会静默降级成 unavailable（画面退回 2D，谁都不报错）。 */
+            for (const name of Object.keys(State.bindChildPos)) {
+                const def = BONE_BY_NAME[name];
+                if (!def[2] || !def[3]) continue;
+                State.bindLen[name] = State.bindJoint[def[3]].distanceTo(State.bindJoint[def[2]]);
             }
             // 绑定姿态本身要站得住：头在骨盆上方、膝在髋踝之间。
             // 不校验的话映射或朝向写错也会"正常渲染"，只是画出来是个蜷起来的团。
@@ -556,6 +622,7 @@ const Body3D = {
         const r = State.camR;
         State.camY = cy;
         State.camCenter[0] = cx; State.camCenter[1] = cy; State.camCenter[2] = cz;
+        State.floorY = minY;        // 地面高度＝这一帧所有关节的最低点
         if (State.ground) {
             // 垫子跟着身体最低点走：躺姿的"地面"在背下面，不在脚底下
             State.ground.position.set(cx, minY - 0.012, cz);
@@ -619,7 +686,22 @@ const Body3D = {
            只钉一次等于拿"上一帧"的距离量"这一帧"的姿势，换动作时必然测歪。 */
         if (State.camWant) {
             State.camR = State.camWant;
+            for (const nm in State.lenWant) State.lenScale[nm] = State.lenWant[nm];
             if (!Body3D.setPose(p, plane || 'sagittal', yaw, [], pitch)) return { ok: false, reason: 'setPose 第二遍失败' };
+        }
+        /* 骨长残差：解算出来的"两个关节之间的距离"和姿态表要求的差多少。
+           不能拿关节的绝对坐标比——姿态表以身体中心为原点，而骨架站在模型自己的
+           位置上，绝对差 0.9m 是平移不是误差（第一版就是这么误判的）。
+           残差大就意味着"膝盖该落地却落不了"那一类悬空。 */
+        const tgt = poseTo3D(p, plane || 'sagittal');
+        let reach = 0, reachBone = '';
+        for (const nm in State.bindChildPos) {
+            const def = BONE_BY_NAME[nm];
+            const a0 = State.jointWorld[def[2]], b0 = State.jointWorld[def[3]];
+            if (!a0 || !b0 || !tgt[def[2]] || !tgt[def[3]]) continue;
+            const got = a0.distanceTo(b0);
+            const want = tgt[def[2]].distanceTo(tgt[def[3]]);
+            if (Math.abs(got - want) > reach) { reach = Math.abs(got - want); reachBone = nm; }
         }
         const gl = State.renderer.getContext();
         const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
@@ -700,7 +782,7 @@ const Body3D = {
         return { ok: coverage > 3 && fill > 45 && ndcMax <= 1.0 && orphan === 0, coverage: +coverage.toFixed(1),
                  fill: +fill.toFixed(1),
                  box: x1 > 0 ? [x1 - x0, y1 - y0] : null, buffer: w + 'x' + h,
-                 ndcMax: +ndcMax.toFixed(3), endOn: +endOn.toFixed(3), orphan: orphan,
+                 ndcMax: +ndcMax.toFixed(3), endOn: +endOn.toFixed(3), orphan: orphan, reach: +reach.toFixed(3), reachBone: reachBone,
                  alphaAny: alphaAny, centerPx: [buf[ci], buf[ci + 1], buf[ci + 2], buf[ci + 3]],
                  cam: [+State.camera.position.x.toFixed(2), +State.camera.position.y.toFixed(2), +State.camera.position.z.toFixed(2)],
                  aspect: +(State.camera.aspect || 0).toFixed(3), r: +State.camR.toFixed(2),

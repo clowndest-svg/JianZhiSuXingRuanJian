@@ -454,6 +454,46 @@ def main():
     # 宽度必须扣掉 left 的 8px，右边界才恒等于 64%，不随画布宽度变。
     check("信息标签右边界不随画布宽度漂移（宽度已扣掉 left 偏移）",
           "min(calc(64% - 8px)" in ov_css, ov_css[:120])
+    # --- 体块表的"解剖朝向"不变量 ---
+    # 机主圈出来的"鱼鳍脚"就是这张表写反：w 是左右宽、d 是脚底法线（厚度），
+    # 我写成 w .95 / d 1.25，等于造了一只比宽还厚的脚。表里的数字是解剖事实，
+    # 就该按解剖事实钉住，否则下次改配色/改比例还会犯同一个错。
+    b3_txt = read_asset("body3d.js")
+    parts_blk = b3_txt[b3_txt.find("const PARTS"):b3_txt.find("const BLOBS")]
+    blobs_blk = b3_txt[b3_txt.find("const BLOBS"):b3_txt.find("const HOLO")]
+
+    def shape_entry(block, key):
+        i = block.find("k: '%s'" % key)
+        return block[i:block.find("}", i)] if i >= 0 else ""
+
+    def num_of(entry, name):
+        m = re.search(r"[ ,]" + name + r":\s*([0-9.]+)", entry)
+        return float(m.group(1)) if m else None
+
+    fr = shape_entry(parts_blk, "foot_r")
+    check("脚是'宽>厚'的扁脚而不是竖起来的鱼鳍",
+          num_of(fr, "w") is not None and num_of(fr, "d") is not None
+          and num_of(fr, "d") < num_of(fr, "w"),
+          {"w": num_of(fr, "w"), "d": num_of(fr, "d")})
+    tr = shape_entry(parts_blk, "torso")
+    check("躯干按'宽>厚'压扁（人是扁的不是圆的）",
+          num_of(tr, "w") is not None and num_of(tr, "w") > num_of(tr, "d"),
+          {"w": num_of(tr, "w"), "d": num_of(tr, "d")})
+    hr = shape_entry(blobs_blk, "hand_r")
+    hand_r = re.search(r"r:\s*\[([0-9.,\s]+)\]", hr)
+    hand_axes = [float(x) for x in hand_r.group(1).split(",")] if hand_r else None
+    check("手是巴掌（长>宽>>厚）而不是圆球",
+          hand_axes is not None and len(hand_axes) == 3
+          and hand_axes[1] > hand_axes[0] > hand_axes[2]
+          and hand_axes[2] < hand_axes[0] * 0.7,
+          hand_axes)
+    sk = shape_entry(blobs_blk, "skull")
+    skull_axes = re.search(r"r:\s*\[([0-9.,\s]+)\]", sk)
+    skull_v = [float(x) for x in skull_axes.group(1).split(",")] if skull_axes else None
+    check("头颅竖直轴最长（不是气球）",
+          skull_v is not None and skull_v[1] == max(skull_v), skull_v)
+    check("肘、膝有关节帽（弯折不留空洞）",
+          "k: 'elbow_r'" in blobs_blk and "k: 'knee_r'" in blobs_blk, "")
     # 真机 320 档实测：聊天输入框把布局视口顶到 410，窄屏判据全部假通过。
     # flex:1 不等于能缩到固有宽度以下，表单控件必须显式 min-width:0。
     chat_css = css_txt[css_txt.find(".chat-input-bar input {"):css_txt.find("}", css_txt.find(".chat-input-bar input {"))]

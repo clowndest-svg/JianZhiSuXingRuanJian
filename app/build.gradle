@@ -10,8 +10,8 @@ android {
         applicationId "com.fitcoach.shapemaster"
         minSdk 24
         targetSdk 34
-        versionCode 20
-        versionName "1.8.2"
+        versionCode 21
+        versionName "1.8.3"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "String", "API_BASE_URL", '"' + (project.findProperty('qingsuApiBase') ?: 'https://124.220.54.64') + '"'
