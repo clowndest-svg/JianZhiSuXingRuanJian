@@ -57,6 +57,101 @@ public class DeviceSmokeTest {
         return activity;
     }
 
+    @Test(timeout=240000) public void toolDialogsAreReadableOnDevice() throws Exception {
+        // 这三块界面（分享与隐私 / 我的记录与设置 / 历史记录）机主实拍说"排版丑得离谱"。
+        // 观感只能靠看图，但"有没有越界、行高是否一致、开关是不是真控件、
+        // 屏上有没有印原始枚举"是能量的——先把可量的钉住，再看图。
+        String user="uqa"+System.currentTimeMillis();String password="UsbQaOnly!123";
+        org.json.JSONObject body=new org.json.JSONObject().put("username",user).put("password",password)
+                .put("age",30).put("height",170).put("weight_jin",160).put("target_weight_jin",140);
+        java.net.HttpURLConnection request=(java.net.HttpURLConnection)new URL(BuildConfig.API_BASE_URL+"/api/register").openConnection();
+        request.setRequestMethod("POST");request.setConnectTimeout(15000);request.setReadTimeout(15000);request.setDoOutput(true);
+        request.setRequestProperty("Content-Type","application/json");
+        request.setRequestProperty("X-App-Build",String.valueOf(instrumentation.getTargetContext()
+                .getPackageManager().getPackageInfo(instrumentation.getTargetContext().getPackageName(),0).versionCode));
+        try(java.io.OutputStream out=request.getOutputStream()){out.write(body.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+        assertEquals("夹具注册",200,request.getResponseCode());request.disconnect();
+        launchShell();
+        js("document.getElementById('login-username').value="+JSONObject.quote(user)+";document.getElementById('login-password').value="+JSONObject.quote(password)+";submitLogin();");
+        waitFor("state.dashboardLoaded===true");
+        js("postApi('/api/food/log',{slot:'早餐',food_name:'测试燕麦粥',cal:180}).catch(()=>{})");
+        waitFor("document.getElementById('account-tool-card')!==null");
+        try {
+            assertEquals("设置卡的行排版不对（行等宽、可点、有箭头、不越界、至少七行）","true",js(
+                    "(()=>{const rows=[...document.querySelectorAll('#account-tool-card .td-row')];"
+                    +"const w=rows.map(r=>Math.round(r.getBoundingClientRect().width));"
+                    +"const h=rows.map(r=>Math.round(r.getBoundingClientRect().height));"
+                    +"return rows.length>=7&&new Set(w).size===1&&h.every(x=>x>=44)"
+                    +"&&document.documentElement.scrollWidth<=innerWidth+1"
+                    +"&&rows.every(r=>!!r.querySelector('.td-chevron'));})()"));
+
+            js("openSharingSettings()");
+            waitFor("document.getElementById('account-tools-dialog')&&document.getElementById('account-tools-dialog').open");
+            Thread.sleep(500);
+            assertEquals("分享与隐私弹窗排版不对（六个真开关、行够高、弹窗不越界、主次按钮不同权重）","true",js(
+                    "(()=>{const d=document.getElementById('account-tools-dialog');"
+                    +"const sw=[...d.querySelectorAll('.td-switch')];"
+                    +"const rows=[...d.querySelectorAll('.td-row')];"
+                    +"const rect=d.getBoundingClientRect();"
+                    +"const btns=[...d.querySelectorAll('.td-actions button')];"
+                    +"return sw.length===6&&sw.every(s=>s.type==='checkbox')"
+                    +"&&rows.every(r=>r.getBoundingClientRect().height>=44)"
+                    +"&&rect.left>=0&&rect.right<=innerWidth&&rect.bottom<=innerHeight+1"
+                    +"&&btns.length===2&&new Set(btns.map(b=>getComputedStyle(b).backgroundImage)).size===2;})()"));
+            screenshot("dialog-sharing");
+            js("document.getElementById('account-tools-dialog').close()");
+
+            js("openRecordManager('food')");
+            waitFor("document.getElementById('account-tools-dialog')&&document.getElementById('account-tools-dialog').open");
+            Thread.sleep(500);
+            String text=js("document.getElementById('account-tools-dialog').innerText");
+            assertTrue("历史记录里印了原始枚举: "+text,text.contains("按名称粗估")||text.contains("本人填写"));
+            assertFalse("历史记录里印了原始枚举",text.contains("legacy_estimate")||text.contains("nutrition_kb"));
+            assertEquals("历史记录的分段控件不对（四等分、恰好一个选中、够高）","true",js(
+                    "(()=>{const s=document.querySelector('#account-tools-dialog .td-seg');"
+                    +"const b=[...s.querySelectorAll('button')];const w=b.map(x=>Math.round(x.getBoundingClientRect().width));"
+                    +"return b.length===4&&new Set(w).size===1"
+                    +"&&b.filter(x=>x.getAttribute('aria-selected')==='true').length===1"
+                    +"&&b.every(x=>x.getBoundingClientRect().height>=44);})()"));
+            screenshot("dialog-history");
+            js("document.getElementById('account-tools-dialog').close()");
+
+            js("openBackfill()");
+            waitFor("document.getElementById('backfill-kind')!==null");
+            Thread.sleep(300);
+            // 拆成三条分别断言，并把越界的控件数量放进失败消息：
+            // 合成一条只报"false"，看不出是数量、越界还是高度不够
+            int rows = Integer.parseInt(js("document.querySelectorAll('#account-tools-dialog .td-field-row').length"));
+            assertTrue("补录表单的行数不对（" + rows + "，标签应在输入框上方而不是挤在左侧）", rows >= 7);
+            assertEquals("补录表单的标签被挤成窄条（label 宽度不该小于控件）","true",js(
+                    "Array.from(document.querySelectorAll('#account-tools-dialog .td-field-row')).every(r=>{"
+                    +"const l=r.querySelector('.td-field-label').getBoundingClientRect();"
+                    +"const i=r.querySelector('input,select').getBoundingClientRect();"
+                    +"return l.width>=i.width-1&&l.height<=30;});"));
+            int over = Integer.parseInt(js("Array.from(document.querySelectorAll('#account-tools-dialog input,#account-tools-dialog select'))"
+                    + ".filter(x=>x.getBoundingClientRect().right>innerWidth+1).length"));
+            assertEquals("补录表单有控件超出屏幕右缘", 0, over);
+            int shortOn = Integer.parseInt(js("Array.from(document.querySelectorAll('#account-tools-dialog input,#account-tools-dialog select'))"
+                    + ".filter(x=>x.getBoundingClientRect().height<40).length"));
+            assertEquals("补录表单有控件高度不足 40px", 0, shortOn);
+            screenshot("dialog-backfill");
+            js("document.getElementById('account-tools-dialog').close()");
+
+            js("openDownloadModal()");
+            waitFor("document.getElementById('apk-fresh-line')!==null");
+            Thread.sleep(2500);
+            String fresh=js("document.getElementById('apk-fresh-line').innerText");
+            assertTrue("下载弹窗没写清包与手机版本: "+fresh,fresh.contains("build "));
+            String speed=js("document.getElementById('apk-speed-line').innerText");
+            assertFalse("下载耗时仍是写死的数",speed.contains("0.3 MB/s")&&speed.contains("330"));
+            assertTrue("测速没给出读数也没说未测: "+speed,speed.contains("实测约")||speed.contains("未测"));
+            screenshot("download-modal");
+            js("closeDownloadModal()");
+        } finally {
+            js("logoutUser&&logoutUser()");
+        }
+    }
+
     /** 强更门的两端都在真机上量：页面自报的号要和安装包一致，遮罩要真盖得住。 */
     @Test(timeout=150000) public void clientIdentifiesItselfAndBlocksTheScreen() throws Exception {
         launchShell();

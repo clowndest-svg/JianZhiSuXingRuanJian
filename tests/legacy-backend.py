@@ -1325,6 +1325,56 @@ def main():
         check("图标可由脚本一次重生成且会清掉同名旧层",
               "removed_stale" in make_icons and "ic_launcher_round.png" in make_icons, "")
 
+        # ── 排版层：三块界面重做后，形状要钉住，不能靠"我看着顺眼了" ──
+        feat_css = read_asset("features.css")
+        feat_js = read_asset("features.js")
+        check("开关是真 checkbox 且选中态有独立样式",
+              ".td-switch:checked" in feat_css and 'type="checkbox"' in feat_js, "")
+        check("分段控件靠 aria-selected 区分当前项，不是再画一颗胶囊",
+              'aria-selected="true"' in feat_css and "aria-selected" in feat_js, "")
+        _primary = feat_css.split(".td-btn{")[1].split("}")[0] if ".td-btn{" in feat_css else ""
+        _quiet = feat_css.split(".td-btn-quiet{")[1].split("}")[0] if ".td-btn-quiet{" in feat_css else ""
+        check("主按钮与次按钮必须不同权重（原来五颗绿描边胶囊长得一模一样）",
+              "linear-gradient" in _primary and bool(_quiet) and "linear-gradient" not in _quiet,
+              {"primary": _primary[:60], "quiet": _quiet[:60]})
+        _body = feat_css.split(".td-body{")[1].split("}")[0] if ".td-body{" in feat_css else ""
+        check("对话框正文可滚动、标题固定，长列表不会顶穿屏幕",
+              "overflow:auto" in _body, _body[:80])
+        check("触摸目标不低于 44px",
+              "min-height:44px" in feat_css and "min-height:52px" in feat_css, "")
+        # 屏上印 nutrition_kb_partial 这种词等于把调试面板交给用户；来源必须过一层映射
+        # 旧版本没有这张映射表，直接 .index 会把整轮判据带走（缺实现要记成红，不是崩）
+        _map_at = feat_js.find("TD_SOURCE_CN")
+        if _map_at < 0:
+            check("餐食来源枚举全部映射成人话，屏上不印原始代码", False, "features.js 里没有 TD_SOURCE_CN 映射表")
+            _map_body = ""
+            _outside = feat_js
+        else:
+            _map_body = feat_js[_map_at:].split("};")[0]
+            _outside = feat_js[:_map_at] + feat_js[_map_at + len(_map_body):]
+        _mapped = set(_rx.findall(r"([a-z_]+)\s*:", _map_body))
+        _known = ("direct", "manual", "legacy_estimate", "nutrition_heuristic", "nutrition_kb_partial")
+        _used = set(e for e in _rx.findall(r"'([a-z_]+)'", _outside) if e in _known)
+        if _map_at >= 0:
+            check("餐食来源枚举全部映射成人话，屏上不印原始代码",
+                  bool(_used) and _used <= _mapped and '"+ x.source +"' not in feat_js,
+                  {"文件里用到": sorted(_used), "映射表有": sorted(_mapped)})
+        check("下载耗时改成真测，不再写死 0.3 MB/s",
+              "330000" not in js_txt_for_build and "实测下行约 0.3" not in js_txt_for_build
+              and "probeDownloadRate" in js_txt_for_build, "")
+        check("测速失败要显示未测而不是回落到一个好看的数",
+              "下载速度未测" in js_txt_for_build and "r.status !== 206" in js_txt_for_build, "")
+        check("下载按钮旁要看得见手机现装版本与包指纹",
+              "apk-fresh-line" in js_txt_for_build and 'id="apk-fresh-line"' in html_txt, "")
+        # App 里页面源是 assets 域，根相对路径既取不到清单也下不了包
+        check("取线上资源一律带 API_BASE，不用根相对路径",
+              'fetch(API_BASE + "/version.json"' in js_txt_for_build
+              and 'fetch(API_BASE + "/qingsu.apk"' in js_txt_for_build
+              and 'link.href = API_BASE + "/qingsu.apk' in js_txt_for_build, "")
+        check("App 里点下载要交给系统浏览器（WebView 自己不会下 apk）",
+              "AndroidBridge.openBrowser" in js_txt_for_build
+              and "return onDirectDownloadClick(event)" in html_txt, "")
+
     # 评测里抓到的两条真 bug，各钉一条
     reset_ask_limiter(m)
     q("DELETE FROM kb_entries")

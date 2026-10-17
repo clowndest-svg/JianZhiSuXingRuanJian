@@ -1,19 +1,103 @@
-.account-tools nav,.tool-dialog nav{display:flex;gap:8px;flex-wrap:wrap}
-.account-tools button,.tool-dialog button,#public-view button{min-height:44px;padding:8px 14px;border:1px solid #059669;border-radius:10px;background:white;color:#065f46;font:inherit;cursor:pointer}
-.tool-dialog{box-sizing:border-box;max-width:min(94vw,620px);max-height:88dvh;border:0;border-radius:16px;padding:20px;color:#1e293b;overflow:auto;font-size:15px}
-.tool-dialog::backdrop{background:#0f172a99}
-.tool-dialog header{display:flex;justify-content:space-between;align-items:center;gap:12px}
-.tool-dialog label{display:block;margin:14px 0}
-.tool-dialog input:not([type=checkbox]),.tool-dialog textarea,.tool-dialog select{display:block;box-sizing:border-box;width:100%;min-height:44px;border:1px solid #94a3b8;padding:8px;border-radius:8px;font:inherit}
-.tool-dialog input[type=checkbox]{width:20px;height:20px;vertical-align:middle;margin-right:8px}
-.history-row{padding:14px 0;border-bottom:1px solid #cbd5e1;overflow-wrap:anywhere}
-button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #0284c7;outline-offset:2px}
+/* 工具对话框与设置卡的排版层。
+   结构一律走「分组列表 + 开关 + 分段控件 + 主次按钮」这套成熟形状：
+   原来每个动作都是同一颗绿色描边胶囊，五颗排下去既没有层级也没有分组，
+   机主实拍直接说"丑得离谱"。 */
+
+/* ---------- 对话框外壳：标题与操作区固定，中间滚动 ---------- */
+.tool-dialog{box-sizing:border-box;display:flex;flex-direction:column;width:min(94vw,560px);max-height:88dvh;border:0;border-radius:18px;padding:0;background:#fff;color:#0F172A;font-size:15px;overflow:hidden;box-shadow:0 18px 48px rgba(15,23,42,.22)}
+.tool-dialog::backdrop{background:rgba(15,23,42,.55)}
+.tool-dialog>header{display:flex;align-items:flex-start;gap:12px;padding:18px 18px 14px;border-bottom:1px solid #EEF2F6;flex:0 0 auto}
+.tool-dialog>header h2{margin:0;font-size:17px;font-weight:800;letter-spacing:-.01em;line-height:1.4;flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.tool-dialog .td-close{flex:0 0 auto;width:34px;height:34px;min-height:0;padding:0;border:1px solid #E2E8F0;border-radius:10px;background:#F8FAFC;color:#64748B;font-size:17px;line-height:1;cursor:pointer}
+.td-body{padding:16px 18px 18px;overflow:auto;flex:1 1 auto}
+.td-lead{margin:0 0 14px;color:#64748B;font-size:13.5px;line-height:1.65}
+.td-note{margin:10px 0 0;color:#64748B;font-size:12.5px;line-height:1.6}
+.td-empty{padding:26px 12px;text-align:center;color:#94A3B8;font-size:14px;border:1px dashed #E2E8F0;border-radius:14px}
+.td-status{margin:12px 0 0;font-size:13.5px;line-height:1.6;color:#047857;overflow-wrap:anywhere}
+.td-status[data-err="1"]{color:#B91C1C}
+
+/* ---------- 分组列表 ---------- */
+.td-group{margin:0 0 14px;border:1px solid #E2E8F0;border-radius:14px;background:#fff;overflow:hidden}
+.td-group+.td-group-label,.td-group-label{margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:.04em;color:#94A3B8;text-transform:uppercase}
+.td-row{display:flex;align-items:center;gap:12px;padding:11px 14px;border-top:1px solid #EEF2F6;min-height:52px}
+.td-row:first-child{border-top:0}
+.td-row-main{flex:1 1 auto;min-width:0}
+.td-row-title{display:block;font-size:15px;font-weight:600;line-height:1.35;color:#0F172A;overflow-wrap:anywhere}
+.td-row-hint{display:block;margin-top:2px;font-size:12px;line-height:1.5;color:#64748B;overflow-wrap:anywhere}
+.td-row-value{flex:0 0 auto;font-size:13.5px;font-weight:700;color:#0F172A;font-variant-numeric:tabular-nums}
+
+/* ---------- 开关：appearance 归零的 checkbox，键盘与读屏照旧可用 ---------- */
+.td-switch{appearance:none;-webkit-appearance:none;flex:0 0 auto;position:relative;width:46px;height:27px;margin:0;border:0;border-radius:999px;background:#CBD5E1;cursor:pointer;transition:background .16s ease}
+.td-switch::after{content:"";position:absolute;top:3px;left:3px;width:21px;height:21px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.3);transition:transform .16s ease}
+.td-switch:checked{background:#10B981}
+.td-switch:checked::after{transform:translateX(19px)}
+.td-switch:disabled{background:#E2E8F0;cursor:not-allowed}
+
+/* ---------- 分段控件（历史记录的类型切换） ---------- */
+.td-seg{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:3px;margin:0 0 14px;padding:3px;border:1px solid #E2E8F0;border-radius:12px;background:#F1F5F9}
+.td-seg button{min-height:44px;padding:0 6px;border:0;border-radius:9px;background:transparent;color:#64748B;font:inherit;font-size:14px;font-weight:600;cursor:pointer;overflow-wrap:anywhere}
+.td-seg button[aria-selected="true"]{background:#fff;color:#065F46;box-shadow:0 1px 4px rgba(15,23,42,.14)}
+
+/* ---------- 按钮：主、次、行内、危险四档，不许同权重 ---------- */
+.tool-dialog button,.account-tools button,#public-view button{font:inherit;cursor:pointer;min-height:44px;border-radius:12px}
+.td-btn{flex:1 1 0;min-width:0;padding:11px 16px;border:0;background:linear-gradient(135deg,#10B981,#059669);color:#fff;font-weight:700;font-size:15px;line-height:1.3}
+.td-btn:active{transform:scale(.99)}
+.td-btn-quiet{flex:1 1 0;min-width:0;padding:11px 16px;border:1px solid #CBD5E1;background:#fff;color:#334155;font-weight:600;font-size:15px;line-height:1.3}
+.td-btn-danger{flex:1 1 0;min-width:0;padding:11px 16px;border:1px solid #FECACA;background:#FEF2F2;color:#B91C1C;font-weight:600;font-size:15px;line-height:1.3}
+.td-actions{display:flex;gap:10px;margin-top:14px}
+.td-actions[hidden]{display:none}
+.td-mini{flex:0 0 auto;min-height:36px;padding:6px 12px;border:1px solid #CBD5E1;border-radius:9px;background:#fff;color:#065F46;font-size:13px;font-weight:600}
+.td-mini:disabled{opacity:.45;cursor:default}
+
+/* ---------- 记录条目 ---------- */
+.td-items{margin:0;padding:0;list-style:none}
+.td-item{display:flex;align-items:flex-start;gap:10px;padding:12px 0;border-top:1px solid #EEF2F6}
+.td-item:first-child{border-top:0;padding-top:2px}
+.td-item-main{flex:1 1 auto;min-width:0}
+.td-item-title{font-size:14.5px;font-weight:600;line-height:1.45;color:#0F172A;overflow-wrap:anywhere}
+.td-item-meta{margin-top:3px;font-size:12.5px;line-height:1.5;color:#64748B;overflow-wrap:anywhere}
+.td-chip{display:inline-block;padding:1px 8px;border-radius:999px;background:#F1F5F9;color:#475569;font-size:11.5px;font-weight:600;vertical-align:middle}
+.td-item-acts{display:flex;flex-direction:row;gap:6px;flex:0 0 auto}
+.td-pager{display:flex;align-items:center;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid #EEF2F6}
+.td-pager-pos{flex:1 1 auto;min-width:0;text-align:center;font-size:12.5px;color:#64748B;font-variant-numeric:tabular-nums}
+
+/* ---------- 表单 ---------- */
+.td-field-row{display:block;padding:11px 14px;border-top:1px solid #EEF2F6}
+.td-field-row:first-child{border-top:0}
+.td-field-row>.td-field-label{margin:0 0 6px}
+.td-field-row .td-field-hint{display:block;margin:4px 0 0;font-size:12px;line-height:1.5;color:#64748B}
+.td-field{display:block;margin:0 0 12px}
+.td-field-label{display:block;margin-bottom:6px;font-size:13px;font-weight:600;color:#334155}
+.td-field input:not([type=checkbox]),.td-row input:not([type=checkbox]),.td-row select,.td-row textarea,.td-field-row input:not([type=checkbox]),.td-field-row select,.td-field-row textarea,.tool-dialog input[type=number],.tool-dialog input[type=date],.tool-dialog input[type=time],.tool-dialog select,.tool-dialog textarea{display:block;box-sizing:border-box;width:100%;min-height:46px;padding:10px 12px;border:1px solid #CBD5E1;border-radius:11px;background:#fff;color:#0F172A;font:inherit;font-size:15px}
+.td-field input[type=number]{font-variant-numeric:tabular-nums}
+.td-inline{display:flex;align-items:center;gap:10px}
+.td-inline input{flex:0 0 96px;width:96px}
+.td-row input[type=number],.td-row input[type=time]{flex:0 0 auto;width:112px}
+
+/* ---------- 仪表盘顶部那张设置卡 ---------- */
+.account-tools{padding:0!important;overflow:hidden}
+.account-tools h3{margin:0;padding:14px 16px 10px;font-size:15px;font-weight:800;color:#0F172A;border-bottom:1px solid #EEF2F6}
+.account-tools nav{display:block}
+.account-tools .td-row{width:100%;border:0;border-top:1px solid #EEF2F6;background:#fff;text-align:left;padding:11px 16px;min-height:52px;border-radius:0;cursor:pointer}
+.account-tools .td-row:first-of-type{border-top:0}
+.account-tools .td-row:active{background:#F8FAFC}
+.td-glyph{display:grid;flex:0 0 auto;place-items:center;width:30px;height:30px;border-radius:9px;background:#ECFDF5;color:#047857;font-size:15px;font-weight:700}
+.td-chevron{flex:0 0 auto;width:8px;height:8px;border-top:2px solid #CBD5E1;border-right:2px solid #CBD5E1;transform:rotate(45deg)}
+.account-tools .td-foot{padding:10px 16px 12px;border-top:1px solid #EEF2F6;background:#F8FAFC}
+.account-tools .td-foot .field-hint{margin:8px 0 0}
+.td-badge{display:inline-block;min-width:20px;padding:0 6px;border-radius:999px;background:#FEF2F2;color:#B91C1C;font-size:11.5px;font-weight:700;line-height:18px;text-align:center}
+.td-badge[data-empty="1"]{background:#F1F5F9;color:#64748B}
+
+/* ---------- 其余既有规则 ---------- */
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #0284C7;outline-offset:2px}
 .public-readonly>header,.public-readonly>#app-main,.public-readonly>.bottom-nav,.public-readonly>.floating-dl-btn,.public-readonly>.modal-overlay{display:none!important}
 #public-view{max-width:760px;margin:0 auto;padding:24px 16px;font-size:16px;line-height:1.6}
 #public-view header{margin-bottom:20px}#public-view h1{font-size:25px}#public-view dt{color:#64748b}#public-view dd{font-weight:700;font-size:22px;margin:0 0 14px}
+#public-view button{padding:11px 16px;border:1px solid #CBD5E1;background:#fff;color:#065F46;font-weight:600}
 .ai-engine-bar{flex-wrap:wrap;max-width:100%}
 .ai-engine-bar .eng-why{min-width:0;overflow-wrap:anywhere}
 .shared-photo{max-width:100%;max-height:520px;object-fit:contain}
+.history-row{padding:14px 0;border-bottom:1px solid #cbd5e1;overflow-wrap:anywhere}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
 /* Let fixed header controls wrap instead of enlarging narrow WebView viewports. */
@@ -24,4 +108,8 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
  .mode-btn{min-width:0;flex:1 1 120px;white-space:normal}
  .water-cups-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
  .water-cup-btn{min-width:0;min-height:44px}
+ .tool-dialog{width:96vw;border-radius:16px}
+ .td-body{padding:14px 14px 16px}
+ .td-item-acts{flex-direction:column}
+ .td-actions{flex-wrap:wrap}
 }

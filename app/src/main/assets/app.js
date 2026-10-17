@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 22;
+const APP_BUILD = 23;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer"];
 
@@ -4386,6 +4386,24 @@ function initViewMode() {
 
 // ============ 第六批补：下载弹窗的版本与体积一律现读，不留写死字 ============
 /**
+ * 量一次真实下行：只取 256KB 分段，别为了测速把整个包拖下来。
+ * 服务器不支持 Range（不是 206）就放弃并说明，不拿默认值糊一个"实测"。
+ */
+async function probeDownloadRate() {
+    const want = 262144;
+    const r = await fetch(API_BASE + "/qingsu.apk", { cache: "no-store", headers: { "Range": "bytes=0-" + (want - 1) } });
+    if (r.status !== 206) {
+        try { if (r.body && r.body.cancel) await r.body.cancel(); } catch (e) {}
+        throw new Error("服务器不支持分段读取");
+    }
+    const started = Date.now();
+    const blob = await r.blob();
+    const seconds = (Date.now() - started) / 1000;
+    if (blob.size < want * 0.5 || seconds <= 0) throw new Error("测速样本不足");
+    return blob.size / seconds;
+}
+
+/**
  * 线上包的真实指纹来自 /version.json（由 make_version_json.py 从 build.gradle 与
  * 实际 apk 现算）。读不到就写"未知"，绝不回落到旧的字面量——那正是这次要修的 bug。
  */
@@ -4396,7 +4414,7 @@ async function loadApkMeta() {
     };
     let v = null;
     try {
-        const r = await fetch("/version.json", { cache: "no-store" });
+        const r = await fetch(API_BASE + "/version.json", { cache: "no-store" });
         if (r.ok) v = await r.json();
     } catch (e) { v = null; }
     if (!v || !v.version_name) {
@@ -4411,12 +4429,27 @@ async function loadApkMeta() {
     put("apk-ver-top", "v" + v.version_name + "（build " + v.version_code + "）");
     put("apk-ver-line", "v" + v.version_name + " · build " + v.version_code);
     put("apk-size-line", sizeTxt);
-    // 这台服务器下行实测约 0.33 MB/s，按它估耗时；不写"高速"这种没量过的形容词
-    put("apk-speed-line", v.size ?
-        ("实测下行约 0.3 MB/s，这个包大约要 " + Math.max(1, Math.round(v.size / 330000)) + " 秒") :
-        "下载速度未测");
+    // 耗时按"这个人现在这条链路"实测，不沿用别人机器上量过一次、之后再也不变的数
+    const fresh = document.getElementById("apk-fresh-line");
+    if (fresh) {
+        let mine = 0;
+        try { if (window.AndroidBridge && AndroidBridge.getAppVersionCode) mine = Number(AndroidBridge.getAppVersionCode()) || 0; } catch (e) {}
+        const stamp = String(v.sha256 || "").slice(0, 8);
+        // 两边号都要写出来并说明关系：只说"你已经是最新"在手机比服务器还新时就是假话
+        const rel = !mine ? "" : (mine < v.version_code ? " · 你的手机需要更新"
+            : (mine > v.version_code ? " · 你的手机比服务器上的包更新" : " · 与手机一致"));
+        fresh.textContent = "这个包 build " + v.version_code + "（指纹 " + (stamp || "未知") + "）"
+            + (mine ? " · 手机上 build " + mine : " · 手机版本读不到") + rel;
+    }
+    put("apk-speed-line", v.size ? "正在测你这条链路的下载速度…" : "下载速度未测");
+    if (v.size) probeDownloadRate().then(rate => {
+        const secs = Math.max(1, Math.round(v.size / rate));
+        put("apk-speed-line", "实测约 " + (rate / 1048576).toFixed(1) + " MB/s，这个包大约要 " + secs + " 秒");
+    }).catch(() => put("apk-speed-line", "下载速度未测（测速请求没成功）"));
     const link = document.getElementById("apk-direct-link");
     if (link) {
+        // href 必须带源：App 里根相对路径指向 assets 域，点下去什么都不会发生
+        link.href = API_BASE + "/qingsu.apk?v=" + String(v.sha256 || "").slice(0, 12);
         link.setAttribute("download", "轻塑_" + v.version_name + "_b" + v.version_code + ".apk");
     }
     state.apkMeta = v;
@@ -4468,7 +4501,17 @@ function copyApkDownloadUrl() {
     }
 }
 
-function onDirectDownloadClick() {
+function onDirectDownloadClick(event) {
+    const link = document.getElementById("apk-direct-link");
+    const url = link ? link.href : "";
+    if (window.AndroidBridge && AndroidBridge.openBrowser && url.indexOf("http") === 0) {
+        // WebView 自己不会下载 .apk（没有 DownloadListener），交给系统浏览器
+        if (event && event.preventDefault) event.preventDefault();
+        AndroidBridge.openBrowser(url);
+        callNativeToast("已交给系统浏览器下载，完成后在通知栏或文件管理里安装");
+        callNativeVibrate(50);
+        return false;
+    }
     callNativeToast("⬇️ 正在启动下载轻塑 APK 安装包，下载完成后即可直接安装！");
     callNativeVibrate(50);
 }

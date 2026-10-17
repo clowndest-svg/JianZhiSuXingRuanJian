@@ -1219,11 +1219,12 @@
                     <div style="font-size: 13px; font-weight: 800; color: var(--text-main); margin-bottom: 8px;">
                         📥 方式二：直接点击下载软件安装包
                     </div>
-                    <a id="apk-direct-link" href="/qingsu.apk" download="qingsu.apk" class="btn-direct-download" onclick="onDirectDownloadClick()">
+                    <a id="apk-direct-link" href="/qingsu.apk" download="qingsu.apk" class="btn-direct-download" onclick="return onDirectDownloadClick(event)">
                         <span style="font-size: 20px;">⬇️</span>
                         <div style="text-align: left;">
                             <div style="font-size: 14px; font-weight: 800;">直接下载 APK 安装包 (<span id="apk-size-line">体积待读取</span>)</div>
                             <div style="font-size: 10px; opacity: 0.85;">安装后点击即用 · 纯净无广告 · 饭点门禁</div>
+                        <div id="apk-fresh-line" style="font-size: 10px; opacity: 0.9; margin-top: 3px;">包信息读取中</div>
                         </div>
                     </a>
                 </div>
