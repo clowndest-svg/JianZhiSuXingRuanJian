@@ -100,18 +100,26 @@
 
 ## 9. 线上对账与清理
 
-- 包体 5,343,269 → **5,355,557** 字节（+12KB，新增定位与个人中心代码）。
-- `verify_live.py` 8 项通过；公网独立复核：`release=r147`、
-  `source_revision` 等于本次提交、清单 sha256 == 本机 APK == 公网回读 APK、
-  `/api/account/recovery-status` 免登录可达且报 `mail=down`。
-- CI：`integration`、`android` 两个 job 对 r146 提交均 `success`。
-- 测试账号：本轮真机与自检产生的 `uqa*/usbqa*` 按显式 id 删除，
-  删后仅剩 `tiangang`、`木木`，`foreign_key_check` 空、真实账号逐表行数未变。
+- 包体 5,343,269 → **5,355,557** 字节（+12,288，新增定位与个人中心代码）。
+- `verify_live.py`（服务器内网）r146、r147 各跑一次，均 **8 项通过**。
+- 公网独立复核 **19 项全绿**：`release=r147`、
+  `source_revision=ef166397f7cf0a57dafcc1269d6a67d2a0b90e73`（等于本次提交）、
+  清单 `version_code/min_version_code=30`、清单 `sha256` == 本机 APK == 公网回读 APK
+  （5,355,557 字节）、`/api/account` 未登录 401、`/api/account/recovery-status` 免登录 200
+  且如实报 `mail=down`、线上 `app.js` 含 `AVOID_RULES`/`TAKEOUT_CUISINE` 且豁免清单含找回密码、
+  线上 `features.css` 里没有那条新断点（`max-width:360px` 不在）。
+- CI：`46596fe` 的 `integration`、`android` 两个 job 均 `success`（远端 ref 已核到 `ef16639`）。
+- 测试账号：本轮真机与自检产生 16 个 `uqa*/usbqa*`（id 134–150，缺 140），
+  按显式 id 删除子表 **119 行 + 16 行 users**（含新表 `user_cities` 8 行，
+  说明清理脚本按"所有带 user_id 的表"扫，新表不用另外登记）；
+  删后 `remaining_users=[2,3]`（tiangang、木木），`foreign_key_check` 空、
+  `integrity_check=ok`、无孤儿行、两个真实账号在各表行数逐表比对**未变**。
 
 ## 10. 抬门仍然要机主亲手做
 
 `/health/ready` 仍是 `min_build=0` + `build_override=true`（刹车踩着）。
 装完 1.9.8 后收口：`python3 /opt/qingsu/set-min-build.py 30`。
+（r146 那次文档里写的 29 已经过期——版本号连着跳了两格，抬门以 30 为准。）
 
 ## 11. 没做到 / 别当成已通过
 
