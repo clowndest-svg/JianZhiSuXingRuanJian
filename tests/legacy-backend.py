@@ -1324,6 +1324,34 @@ def main():
         make_icons = io.open(os.path.join(ROOT, "scripts", "make-icons.py"), encoding="utf-8").read()
         check("图标可由脚本一次重生成且会清掉同名旧层",
               "removed_stale" in make_icons and "ic_launcher_round.png" in make_icons, "")
+        # ── 品牌位：顶栏/下载弹窗/监督页都必须是真图，不许再拿文字或 emoji 顶替 ──
+        brand_html = read_asset("index.html")
+        check("顶栏品牌位是图片而不是「塑」字占位",
+              '<img class="brand-icon" src="app-icon.png"' in brand_html
+              and 'class="brand-icon">塑<' not in brand_html, "顶栏还在用文字当 logo")
+        check("下载弹窗头部用真 logo，不是手机 emoji",
+              '<img class="brand-mark" src="app-icon.png"' in brand_html
+              and "📱" not in brand_html[brand_html.index("download-apk-modal"):
+                                     brand_html.index("download-apk-modal") + 1200], "")
+        check("访客监督页标题也带品牌图", "public-brand" in read_asset("features.js"), "")
+        check("品牌图有显式公网路由", '"app-icon.png"' in srv_txt, "")
+        # 原生源码也要跟着 --mutant 取反样本：磁盘直读会让这条判据在旧版上恒绿，
+        # 等于从来没被标定过（这个错在同一份台子里已经犯过一次）。
+        _notif_rel = "app/src/main/java/com/fitcoach/shapemaster/WebAppInterface.java"
+        if mutant:
+            import subprocess as _s2
+            notif = _s2.run(["git", "show", MUT_REF + ":" + _notif_rel], cwd=ROOT,
+                            capture_output=True).stdout.decode("utf-8")
+        else:
+            notif = io.open(os.path.join(ROOT, _notif_rel), encoding="utf-8").read()
+        check("通知栏小图标不再借用系统警告三角",
+              "android.R.drawable." not in notif and "R.drawable.ic_stat_qingsu" in notif,
+              "状态栏里挂的是 Android 自带的告警图标，和用户说明不了这是轻塑的提醒")
+        missing_stat = [d for d in ("mdpi", "hdpi", "xhdpi", "xxhdpi")
+                      if not os.path.exists(os.path.join(res, "drawable-" + d, "ic_stat_qingsu.png"))]
+        check("通知小图标四档密度都在", not missing_stat, missing_stat)
+        check("通知小图标由脚本从同一张 artwork 生成（白色剪影+透明底）",
+              "ic_stat_qingsu" in make_icons and "silhouette" in make_icons, "")
 
         # ── 排版层：三块界面重做后，形状要钉住，不能靠"我看着顺眼了" ──
         feat_css = read_asset("features.css")

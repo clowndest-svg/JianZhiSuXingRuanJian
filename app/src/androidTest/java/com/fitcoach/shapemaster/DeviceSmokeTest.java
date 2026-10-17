@@ -77,6 +77,19 @@ public class DeviceSmokeTest {
         js("postApi('/api/food/log',{slot:'早餐',food_name:'测试燕麦粥',cal:180}).catch(()=>{})");
         waitFor("document.getElementById('account-tool-card')!==null");
         try {
+            // 品牌位换成图片后，最容易坏的是"图根本没加载出来"和"被拉成椭圆"
+            assertEquals("顶栏品牌图没加载成功或比例不对", "true", js(
+                    "(()=>{const i=document.querySelector('.app-brand img.brand-icon');"
+                    +"if(!i||!i.complete||i.naturalWidth<64)return false;"
+                    +"const r=i.getBoundingClientRect();"
+                    +"return Math.abs(r.width-r.height)<=1&&r.width>=28&&r.width<=44;})()"));
+            js("openDownloadModal()");
+            waitFor("document.querySelector('#download-apk-modal img.brand-mark')!==null");
+            assertEquals("下载弹窗的品牌图没加载成功", "true", js(
+                    "(()=>{const i=document.querySelector('#download-apk-modal img.brand-mark');"
+                    +"return !!i&&i.complete&&i.naturalWidth>=64&&i.getBoundingClientRect().width>=28;})()"));
+            screenshot("brand-header");
+            js("closeDownloadModal()");
             assertEquals("设置卡的行排版不对（行等宽、可点、有箭头、不越界、至少七行）","true",js(
                     "(()=>{const rows=[...document.querySelectorAll('#account-tool-card .td-row')];"
                     +"const w=rows.map(r=>Math.round(r.getBoundingClientRect().width));"

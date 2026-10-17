@@ -72,7 +72,7 @@ public class WebAppInterface {
     public void showNotification(String title, String content) {
         try {
             NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
-                    .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                    .setSmallIcon(R.drawable.ic_stat_qingsu)
                     .setContentTitle(title)
                     .setContentText(content)
                     .setStyle(new NotificationCompat.BigTextStyle().bigText(content))

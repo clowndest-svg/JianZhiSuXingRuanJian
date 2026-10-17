@@ -86,6 +86,14 @@ def main():
             art.resize((px, px), Image.LANCZOS).save(target)
             written.append(str(target.relative_to(ROOT)))
 
+    # 通知栏小图标：Android 会把它整体染成单色，所以只能给白色剪影 + 透明底，
+    # 直接拿彩色启动图标去当小图标，在状态栏里会糊成一团黑块。
+    for density, px in {"mdpi": 24, "hdpi": 36, "xhdpi": 48, "xxhdpi": 72}.items():
+        folder = RES / ("drawable-" + density)
+        folder.mkdir(parents=True, exist_ok=True)
+        silhouette(art, px, 1.0).save(folder / "ic_stat_qingsu.png")
+        written.append(str((folder / "ic_stat_qingsu.png").relative_to(ROOT)))
+
     nodpi = RES / "drawable-nodpi"
     nodpi.mkdir(parents=True, exist_ok=True)
     on_canvas(art, ADAPTIVE, (0, 0, 0, 0), SAFE_FILL).save(nodpi / "ic_launcher_foreground.png")

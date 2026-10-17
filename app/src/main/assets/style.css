@@ -80,18 +80,36 @@ body {
     gap: 8px;
 }
 
-.brand-icon {
+.brand-icon,
+.brand-mark {
+    display: block;
+    flex: 0 0 auto;
     width: 34px;
     height: 34px;
-    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-    color: #FFFFFF;
+    object-fit: cover;
     border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 800;
-    font-size: 17px;
-    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.25);
+    background: #000;
+}
+
+.brand-icon {
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+}
+
+/* 下载弹窗头部是绿色渐变，黑底 logo 要一圈白边才不显得陷进去 */
+.brand-mark {
+    border: 2px solid rgba(255, 255, 255, 0.9);
+    box-shadow: 0 2px 8px rgba(6, 78, 59, 0.3);
+}
+
+.public-brand {
+    display: inline-block;
+    vertical-align: middle;
+    width: 40px;
+    height: 40px;
+    margin-right: 10px;
+    object-fit: cover;
+    border-radius: 11px;
+    background: #000;
 }
 
 .brand-text h1 {
@@ -2790,7 +2808,7 @@ header *, .header-tools, .header-row-1 {
     overflow-wrap: anywhere;
 }
 
-/* 320px 一档实测只剩副标题被省略号截断（65<88）。那颗 logo 已经写着「塑」，
+/* 320px 一档实测只剩副标题被省略号截断（65<88）。品牌位现在是 logo 图，
    副标题在这个宽度没有信息量，直接隐藏比留半行字干净。 */
 @media (max-width: 340px) {
     .header-subtitle,
