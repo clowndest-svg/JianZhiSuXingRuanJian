@@ -259,6 +259,8 @@ public class DeviceSmokeTest {
         StringBuilder layout=new StringBuilder("[");
         final java.util.Set<Integer> distinctWidths=new java.util.TreeSet<>();
         final double cssDensity=Double.parseDouble(js("devicePixelRatio"));
+        final String inkProbe = "JSON.stringify((function(){var c=document.getElementById('ex-detail-canvas');var g2=c.getContext('2d');var W=c.width,H=c.height;var d=g2.getImageData(0,0,W,H).data;var minX=W,minY=H,maxX=-1,maxY=-1,ink=0;for(var y=0;y<H;y+=2){for(var x=0;x<W;x+=2){var i=(y*W+x)*4;var dark=(255-d[i])+(255-d[i+1])+(255-d[i+2]);if(dark>150){ink++;if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;}}}var el=document.getElementById('ex-detail-canvas').getBoundingClientRect();var top=document.elementFromPoint(el.left+el.width*0.5,el.top+el.height*0.5);return {W:W,H:H,ink:ink,minX:minX,minY:minY,maxX:maxX,maxY:maxY,name:document.getElementById('ex-detail-name').innerText,covered:!(top&&top.id==='ex-detail-canvas'),cssW:document.getElementById('ex-detail-canvas').clientWidth,dpr:window.devicePixelRatio||1};})())";
+        final StringBuilder narrowLog = new StringBuilder();
         for(int width:new int[]{320,360,390,768,1440}){
             final int requested=width;
             // 宽度用"改窗口 + device-width"来驱动，别在 meta 里写死 width=N：
@@ -283,6 +285,34 @@ public class DeviceSmokeTest {
                 js("switchTab('"+tab+"')");Thread.sleep(50);
                 assertEquals(width+"/"+tab+" document overflow","true",js("document.documentElement.scrollWidth<=window.innerWidth+1"));
             }
+            if (requested == 320 || requested == 360) {
+                // 遮挡与裁切在窄屏才暴露：浮层按百分比排布、弹窗卡片被挤到 288 宽时，
+                // 宽屏那档看着一切都好。这里真开弹窗、真从画布回读像素。
+                js("switchTab('workout');openExerciseDetail(0)");
+                Thread.sleep(900);
+                String narrow = js(inkProbe);
+                org.json.JSONObject nk = new org.json.JSONObject(new org.json.JSONArray("[" + narrow + "]").getString(0));
+                assertFalse(requested + " 档画面被别的元素盖住了: " + narrow, nk.getBoolean("covered"));
+                assertTrue(requested + " 档画布上几乎没有笔画: " + narrow, nk.getInt("ink") > 150);
+                int nW = nk.getInt("W"), nH = nk.getInt("H");
+                assertTrue(requested + " 档人形被裁在画布外: " + narrow,
+                        nk.getInt("minX") > 0 && nk.getInt("minY") > 0
+                                && nk.getInt("maxX") < nW && nk.getInt("maxY") < nH);
+                assertTrue(requested + " 档画布位图没按 dpr 建: " + narrow,
+                        nW >= (int) Math.round(nk.getDouble("cssW") * nk.getDouble("dpr")) - 2);
+                // 320 档另一处真翻车点：控制栏里那颗说明被两颗按钮挤成四个字一列，
+                // 一句话排了十几行。要么够宽、要么整句换到按钮下面，二选一都量得出来。
+                String ctl = js("JSON.stringify((function(){var n=document.querySelector('.exd-note').getBoundingClientRect();var b=document.getElementById('ex-detail-play').getBoundingClientRect();return {noteW:Math.round(n.width),noteH:Math.round(n.height),below:n.top>=b.bottom-2};})())");
+                org.json.JSONObject cn = new org.json.JSONObject(new org.json.JSONArray("[" + ctl + "]").getString(0));
+                assertTrue(requested + " 档说明被挤成竖排（宽 " + cn.getInt("noteW") + "）: " + ctl,
+                        cn.getBoolean("below") || cn.getInt("noteW") >= 150);
+                assertTrue(requested + " 档说明排了 " + cn.getInt("noteH") + "px 高，行数失控: " + ctl,
+                        cn.getInt("noteH") <= 90);
+                narrowLog.append(requested).append("档 ").append(nk.toString()).append("\n");
+                screenshot("stick-" + requested);
+                js("closeExerciseDetail()");
+                Thread.sleep(200);
+            }
             double settled=Double.parseDouble(js("innerWidth"));
             // 弹回更宽＝这一档的窄屏判据其实没在窄屏上跑。把三种口径一起打出来，
             // 才能分清是 View 被重新量了，还是 WebView 自己钳了布局视口。
@@ -294,6 +324,7 @@ public class DeviceSmokeTest {
         layout.append(']');
         File layoutFile=new File(instrumentation.getTargetContext().getExternalFilesDir(null),"qa/layout.json");
         try(FileOutputStream out=new FileOutputStream(layoutFile)){out.write(layout.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+        try(FileOutputStream out=new FileOutputStream(new File(instrumentation.getTargetContext().getExternalFilesDir(null),"qa/stick-narrow.txt"))){out.write(narrowLog.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
         File vpFile=new File(instrumentation.getTargetContext().getExternalFilesDir(null),"qa/viewport-env.txt");
         // 判据放在留档之后：这一档红的时候，我要能在产物里看到它到底跑成了多宽，
         // 而不是只拿到一个"没生效"的结论。
@@ -335,99 +366,74 @@ public class DeviceSmokeTest {
             assertEquals(tab+" horizontal overflow","true",js("document.documentElement.scrollWidth<=window.innerWidth+1"));
         }
         js("switchTab('workout');openExerciseDetail(0)");Thread.sleep(700);
-        // 用户报的 bug：3D 视角工具栏叠在画布上把人体遮住。这里用几何量出来，
-        // 不靠"看着好像没挡"。overlap>0 就是真挡住了。
-        // getBoundingClientRect 是视口绝对坐标，画布左侧还有页面边距（模拟器上画布
-        // 从 x=81 起），占比必须减去 canvas.left，否则量到的是"标签离屏幕左边多远"。
-        String geo = js("JSON.stringify((function(){            var c=document.getElementById('ex-detail-canvas').getBoundingClientRect();            var b=document.querySelector('.exd-camera-bar').getBoundingClientRect();            var bs=[].slice.call(document.querySelectorAll('.exd-cam-btn')).map(function(x){return Math.round(x.getBoundingClientRect().top);});            var ov=document.querySelector('.exd-viewport-overlay').getBoundingClientRect();            return {canvasBottom:Math.round(c.bottom),canvasWidth:Math.round(c.width),canvasLeft:Math.round(c.left),ovLeftRel:Math.round(ov.left-c.left),ovRightRel:Math.round(ov.right-c.left),clearanceRight:Math.round(c.right-ov.right),barTop:Math.round(b.top),                overlap:Math.max(0,Math.round(c.bottom-b.top)),                barHeight:Math.round(b.height),rowTops:bs,                overlayRightFrac:+((ov.right-c.left)/c.width).toFixed(2),barWidthFrac:+(b.width/c.width).toFixed(2)};            })())");
+        // 火柴人演示只问两件事：有没有东西盖在画布上，人形有没有被裁在画面外。
+        // 上一版在视口上叠了三处 absolute 浮层，还把 three.js 的机位函数挂在 window 上，
+        // 机主的原话是"手机看网页还有各种遮挡动画，真难看"。这里全部用真坐标量出来。
+        String geo = js("JSON.stringify((function(){var c=document.getElementById('ex-detail-canvas').getBoundingClientRect();var pts=[[0.5,0.06],[0.5,0.5],[0.12,0.5],[0.88,0.5],[0.5,0.94],[0.25,0.25],[0.75,0.75]];var hit=[];for(var i=0;i<pts.length;i++){var x=c.left+c.width*pts[i][0],y=c.top+c.height*pts[i][1];var el=document.elementFromPoint(x,y);if(!el||el.id!=='ex-detail-canvas')hit.push(pts[i].join(',')+'->'+(el?(el.id||el.className||el.tagName):'null'));}var strip=document.querySelector('.exd-strip').getBoundingClientRect();var ctl=document.querySelector('.exd-ctl').getBoundingClientRect();return {w:Math.round(c.width),h:Math.round(c.height),hits:hit,stripGap:Math.round(strip.top-c.bottom),ctlGap:Math.round(ctl.top-c.bottom),dpr:window.devicePixelRatio||1,body3d:typeof window.Body3D,cam:typeof window.setEx3DAngle,reset:typeof window.resetEx3DAngle};})())");
         org.json.JSONObject g = new org.json.JSONObject(new org.json.JSONArray("[" + geo + "]").getString(0));
-        assertEquals("视角工具栏与画布零重叠（不遮人体）: " + geo, 0, g.getInt("overlap"));
-        org.json.JSONArray tops = g.getJSONArray("rowTops");
-        int lo = Integer.MAX_VALUE, hi = Integer.MIN_VALUE;
-        for (int k = 0; k < tops.length(); k++) { int t = tops.getInt(k); lo = Math.min(lo, t); hi = Math.max(hi, t); }
-        assertTrue("四个视角按钮仍在同一行: " + geo, hi - lo <= 2);
-        assertTrue("工具栏不宽于画布: " + geo, g.getDouble("barWidthFrac") <= 1.0);
-        assertTrue("信息标签紧贴画布左缘: " + geo, g.getInt("ovLeftRel") <= 10);
-        assertTrue("信息标签右边界留在画布 2/3 以内（按画布自身坐标算，不含页面左边距）: " + geo,
-                g.getDouble("overlayRightFrac") <= 0.66);
-        assertTrue("右上角至少留出 48px 给厂商悬浮侧栏: " + geo, g.getInt("clearanceRight") >= 48);
-        // 3D 骨骼演示：必须证明"真画出人形、骨骼真的被驱动、而且这一帧在屏幕上
-        // 是个能看的人"。coverage>6 只能证明画了东西，裁掉半身、相机顺着体长轴
-        // 看过去（压成一团）这两种都能照样绿。selfTest 在同帧内渲染并回读像素。
-        String s3d = js("JSON.stringify(window.Body3D ? Body3D.selfTest(            poseFromTable(exActivePoseKey, exActiveArch, 0.3), posePlane(exActivePoseKey), ex3DCamera.yaw)             : {status:'none'})");
-        org.json.JSONObject j3d = new org.json.JSONObject(new org.json.JSONArray("[" + s3d + "]").getString(0));
-        // evaluateJavascript 回传的是 JSON 编码后的字符串字面量，先过一层 JSONArray 取回原文。
-        String st3dRaw = js("JSON.stringify(Body3D.stats())");
-        org.json.JSONObject st3d = new org.json.JSONObject(new org.json.JSONArray("[" + st3dRaw + "]").getString(0));
-        assertEquals("3D 模型在这台设备上应可用（否则退回画块）: " + s3d, "ready", st3d.getString("status"));
-        assertTrue("3D 自测必须真的画出人形: " + s3d, j3d.getBoolean("ok"));
-        assertTrue("画面上几乎没有墨迹: " + s3d, j3d.getDouble("coverage") > 3.0);
-        assertTrue("人体只占画面一小条，取景没贴住身体: " + s3d, j3d.getDouble("fill") > 45.0);
-        assertTrue("有肢体被裁在画面外，取景没包住全身: " + s3d, j3d.getDouble("ndcMax") <= 0.99);
-        assertEquals("有体块离所有关节都太远（装错位置或飞出画面）: " + s3d, 0, j3d.optInt("orphan", -1));
-        assertTrue("相机几乎沿体长轴看过去，任何姿势都会压成一团: " + s3d, j3d.getDouble("endOn") <= 0.5);
-        assertTrue("骨骼没有被驱动，等于站桩假动画: " + st3d.toString(), st3d.getInt("solvedBones") >= 10);
-        assertTrue("取景算出过荒谬相机距离（坏帧会让画面歪掉而不自知）: " + st3d.toString(),
-                st3d.isNull("badFrame"));
-        assertEquals("有骨骼被算成 NaN 后退回绑定姿态: " + st3d.toString(), 0, st3d.getInt("nanBones"));
-        // 骨长校正量：姿态表与模型比例差多少。超过 ±50% 就不是"校正"而是"拉长成橡皮筋"，
-        // 说明表或模型选错了，画面会诡异但不会触发任何其它判据。
-        org.json.JSONArray lenScales = st3d.getJSONArray("lenScales");
-        assertTrue("四肢骨长没有参与校正（表与模型比例脱节时这里会空）: " + st3d.toString(),
-                lenScales.length() >= 8);
-        double worst = 0;
-        for (int k = 0; k < lenScales.length(); k++)
-                worst = Math.max(worst, Math.abs(lenScales.getDouble(k) - 1.0));
-        assertTrue("骨长校正幅度过大（|k-1|>0.5），姿态表与模型比例不兼容: " + lenScales, worst <= 0.5);
-        assertTrue("骨长顶到了夹紧边界，说明姿态表要求的长度超出可接受范围: " + s3d,
-                j3d.getDouble("reach") <= 0.02);
-        js("setEx3DAngle('front')"); Thread.sleep(600);
-        screenshot("exercise-3d-front");
-        String sFront = js("JSON.stringify(Body3D.selfTest(            poseFromTable(exActivePoseKey, exActiveArch, 0.3), posePlane(exActivePoseKey), ex3DCamera.yaw))");
-        org.json.JSONObject jFront = new org.json.JSONObject(new org.json.JSONArray("[" + sFront + "]").getString(0));
-        assertTrue("转到正面视角后仍要画得出人体: " + sFront, jFront.getBoolean("ok"));
-        assertTrue("正面视角把肢体裁出了画面: " + sFront, jFront.getDouble("ndcMax") <= 0.99);
-        assertTrue("正面视角几乎沿体长轴看: " + sFront, jFront.getDouble("endOn") <= 0.5);
-        js("setEx3DAngle('side')"); Thread.sleep(600);
-        File b3dFile=new File(instrumentation.getTargetContext().getExternalFilesDir(null),"qa/body3d.json");
-        try(FileOutputStream out=new FileOutputStream(b3dFile)){
-            out.write(("{\"current\":"+j3d+",\"front\":"+jFront+",\"stats\":"+st3d+"}")
-                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertEquals("画布上任何一点都不许被别的元素盖住: " + geo, 0, g.getJSONArray("hits").length());
+        assertTrue("信息条挤进了画布区域: " + geo, g.getInt("stripGap") >= 0);
+        assertTrue("控制栏挤进了画布区域: " + geo, g.getInt("ctlGap") >= 0);
+        assertTrue("画布宽度没跟着视口走: " + geo, g.getInt("w") >= 240);
+        assertEquals("3D 层已下线，页面不该再有 Body3D", "undefined", g.getString("body3d"));
+        assertEquals("3D 层已下线，不该再有视角切换函数", "undefined", g.getString("cam"));
+        assertEquals("3D 层已下线，不该再有机位重置函数", "undefined", g.getString("reset"));
+        // 墨迹回读：直接从这块 2D 画布取像素，量出笔画的外接框。
+        // 只断言"画了东西"不够——上一版人形被裁掉一半时画面照样有墨。
+        // 所以判据是"笔画一个像素都不能贴到画布边缘"，加"人形至少占住一条边的 45%"。
+        String inkRaw = js(inkProbe);
+        org.json.JSONObject ink = new org.json.JSONObject(new org.json.JSONArray("[" + inkRaw + "]").getString(0));
+        assertTrue("画布上几乎没有笔画，动画没画出来: " + inkRaw, ink.getInt("ink") > 150);
+        assertTrue("画布位图没按 dpr 建，手机上看是糊的: " + inkRaw,
+                ink.getInt("W") >= (int) Math.round(g.getInt("w") * g.getDouble("dpr")) - 2);
+        final double edge = 0.02;
+        assertTrue("人形贴到画布边缘，肢体被裁: " + inkRaw,
+                ink.getInt("minX") > (int) (ink.getInt("W") * edge)
+                        && ink.getInt("maxX") < (int) (ink.getInt("W") * (1 - edge))
+                        && ink.getInt("minY") > (int) (ink.getInt("H") * edge)
+                        && ink.getInt("maxY") < (int) (ink.getInt("H") * (1 - edge)));
+        assertTrue("人形只占画面一小条，取景没包住身体: " + inkRaw,
+                Math.max((ink.getDouble("maxX") - ink.getInt("minX")) / ink.getInt("W"),
+                        (ink.getDouble("maxY") - ink.getInt("minY")) / ink.getInt("H")) > 0.45);
+        try (FileOutputStream out = new FileOutputStream(
+                new File(instrumentation.getTargetContext().getExternalFilesDir(null), "qa/stick-figure.json"))) {
+            out.write(("{\"geo\":" + g + ",\"ink\":" + ink + "}").getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
-        screenshot("exercise-3d-side");
-        js("setEx3DAngle('3d')"); Thread.sleep(300);
-        // 只测第一个动作＝只测了"躺着的那一个"。整套训练计划里每个动作都要
-        // 画得完整（不裁肢体）、不压成一条线，逐个过一遍。
+        // 只测第一个动作等于只测了"躺着的那一个"。整套计划逐个过：
+        // 有没有被盖住、有没有画全、站姿与躺姿的轮廓是不是都还在画面里。
         int exCount = Integer.parseInt(js("window.__currentExercises ? __currentExercises.length : 0"));
-        assertTrue("训练计划至少给出 3 个动作供 3D 检查", exCount >= 3);
+        assertTrue("训练计划至少给出 3 个动作供火柴人检查", exCount >= 3);
         StringBuilder exBad = new StringBuilder();
         String standingShot = null;
         for (int i = 0; i < exCount; i++) {
-            js("openExerciseDetail(" + i + ")"); Thread.sleep(1200);
-            String each = js("JSON.stringify(Body3D.selfTest(                poseFromTable(exActivePoseKey, exActiveArch, 0.5), posePlane(exActivePoseKey), ex3DCamera.yaw))");
+            js("openExerciseDetail(" + i + ")");
+            Thread.sleep(900);
+            String each = js(inkProbe);
             org.json.JSONObject e = new org.json.JSONObject(new org.json.JSONArray("[" + each + "]").getString(0));
-            String label = js("document.getElementById('ex-detail-name').innerText")
-                    .replace("\\u0022", "").replace("\"", "");
-            if (!e.optBoolean("ok", false)) exBad.append("[").append(i).append(label)
-                    .append(" 没画全 cov=").append(e.optDouble("coverage", -1))
-                    .append(" fill=").append(e.optDouble("fill", -1))
-                    .append(" ndc=").append(e.optDouble("ndcMax", -1)).append("]");
-            else if (e.optDouble("ndcMax", 9) > 0.99) exBad.append("[").append(i).append(label).append(" 肢体被裁 ").append(e.optDouble("ndcMax", 9)).append("]");
-            else if (e.optInt("orphan", -1) != 0) exBad.append("[").append(i).append(label).append(" 有 ").append(e.optInt("orphan", -1)).append(" 块体块飞离关节]");
-            else if (e.optDouble("endOn", 0) > 0.6) exBad.append("[").append(i).append(label).append(" 几乎沿体长轴看 ").append(e.optDouble("endOn", 0)).append("]");
-            // 站姿和躺姿是两套完全不同的轮廓：肩宽、脚朝向只在站着做的动作里才暴露问题，
-            // 所以遇到冠状面动作留一张证据。
-            if ("true".equals(js("posePlane(exActivePoseKey)===\"frontal\"")) && standingShot == null) {
-                standingShot = "exercise-3d-standing";
+            String label = e.getString("name");
+            int W = e.getInt("W"), H = e.getInt("H");
+            if (e.getBoolean("covered")) exBad.append("[").append(i).append(label).append(" 画面被盖住]");
+            if (e.getInt("ink") < 150) exBad.append("[").append(i).append(label).append(" 没画出笔画]");
+            else if (e.getInt("minX") <= (int) (W * edge) || e.getInt("maxX") >= (int) (W * (1 - edge))
+                    || e.getInt("minY") <= (int) (H * edge) || e.getInt("maxY") >= (int) (H * (1 - edge)))
+                exBad.append("[").append(i).append(label).append(" 肢体被裁 x=").append(e.getInt("minX"))
+                        .append("..").append(e.getInt("maxX")).append("/").append(W)
+                        .append(" y=").append(e.getInt("minY")).append("..").append(e.getInt("maxY"))
+                        .append("/").append(H).append("]");
+            else if (Math.max((e.getDouble("maxX") - e.getInt("minX")) / W,
+                    (e.getDouble("maxY") - e.getInt("minY")) / H) <= 0.45)
+                exBad.append("[").append(i).append(label).append(" 人形只占一小条]");
+            // 站姿和躺姿是两套完全不同的轮廓，只在站着做的动作里才暴露比例问题
+            if (standingShot == null && "true".equals(js("posePlane(exActivePoseKey)===\"frontal\""))) {
+                standingShot = "exstick-standing";
             }
-            // 每个动作都留一张：上一版"鱼鳍脚"就藏在第 4 个动作里，
-            // 只截两张图等于把最难看的那张跳过了。
-            screenshot("ex3d-" + i);
+            screenshot("exstick-" + i);
         }
-        assertEquals("每个动作的 3D 演示都要画全: " + exBad, "", exBad.toString());
+        assertEquals("每个动作的火柴人都要画全、不被盖住: " + exBad, "", exBad.toString());
         assertNotNull("这一版训练计划里没有站着做的动作，站姿外观没被截图覆盖", standingShot);
-        js("openExerciseDetail(0)"); Thread.sleep(900);
-        screenshot("exercise-3d");
+        js("openExerciseDetail(0)");
+        Thread.sleep(900);
+        screenshot("exercise-stick");
         screenshot("exercise");
         js("closeExerciseDetail()");
         js("switchTab('gemini');document.getElementById('chat-input').value='我现在多重';sendChatMessage();");

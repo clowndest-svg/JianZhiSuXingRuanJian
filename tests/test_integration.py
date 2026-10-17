@@ -318,7 +318,7 @@ class Integration(unittest.TestCase):
         import shutil
         web = Path(os.environ['QINGSU_WEB_DIR']); web.mkdir(parents=True, exist_ok=True)
         names = ["app.js", "style.css", "features.js", "features.css", "sw.js",
-                 "manifest.webmanifest", "app-icon.png", "guidance.json", "body3d.js",
+                 "manifest.webmanifest", "app-icon.png", "guidance.json",
                  "exercise_poses.json"]
         expect = {"js": "application/javascript", "css": "text/css", "png": "image/png",
                   "webmanifest": "application/manifest+json", "json": "application/json"}

@@ -403,6 +403,16 @@ def main():
     check("缺口图配了文字摘要节点", 'id="chart-deficit-summary"' in html_txt, "")
     check("摘要由 JS 生成而不是写死", 'function describeDeficit' in js_txt
           and 'chart-deficit-summary' in js_txt, "")
+    # 动作详情控制栏：说明在 320 档被两颗按钮挤成四个字一列，一句话排了十几行。
+    # flex:1 单独用等于"能压到 0"，必须给基准宽并允许换行，让整句落到按钮下面。
+    _ctl_at = css_txt.find(".exd-ctl {")
+    _ctl = css_txt[_ctl_at:css_txt.find("}", _ctl_at)]
+    _note_at = css_txt.find(".exd-note {")
+    _note = css_txt[_note_at:css_txt.find("}", _note_at)]
+    check("控制栏允许换行且说明有基准宽",
+          "flex-wrap: wrap" in _ctl and "flex: 1 1 200px" in _note and "min-width: 0" in _note,
+          (_ctl[:60], _note[:80]))
+
     check("达标状态用文字而不只是颜色", all(w in js_txt for w in ("达标 ", "未达 ", "超支 ", "未记录 ")), "")
     check("注册了键盘监听", 'document.addEventListener("keydown"' in js_txt, "")
     check("弹窗打开时屏蔽背景内容", 'setAttribute("aria-hidden"' in js_txt and "node.inert = true" in js_txt, "")
@@ -434,107 +444,87 @@ def main():
     check("主按钮有最小触控高度", bool(btn_h) and int(btn_h.group(1)) >= 44, btn_h and btn_h.group(1))
     check("样式表支持减少动画", "prefers-reduced-motion" in css_txt, "")
     check("焦点框可见", ":focus-visible" in css_txt, "")
-    # 3D 视角工具栏曾经 absolute 浮在画布上、窄屏折成三行，把人体整个盖住。
-    # 结构判据：它必须是视口框的兄弟节点，且样式不再 absolute。
-    box_at = html_txt.find('class="exd-viewport-box"')
-    bar_at = html_txt.find('class="exd-camera-bar"')
-    box_close = html_txt.find('<!-- 视角工具栏放在画面下方正常流里', box_at)
-    check("视角工具栏在画布之外而不是叠在上面",
-          -1 < box_at < box_close < bar_at, (box_at, box_close, bar_at))
-    bar_css = css_txt[css_txt.find(".exd-camera-bar {"):css_txt.find("}", css_txt.find(".exd-camera-bar {"))]
-    check("视角工具栏不再 absolute 浮层", "position: absolute" not in bar_css, bar_css[:80])
-    check("视角工具栏四键等宽单行",
-          "flex-wrap: nowrap" in bar_css
-          and "flex: 1 1 0" in css_txt[css_txt.find(".exd-cam-btn {"):css_txt.find("}", css_txt.find(".exd-cam-btn {"))],
-          "")
-    ov_css = css_txt[css_txt.find(".exd-viewport-overlay {"):css_txt.find("}", css_txt.find(".exd-viewport-overlay {"))]
-    check("画面信息标签靠左竖排，不给系统悬浮侧栏留遮挡位",
-          "flex-direction: column" in ov_css and "right: auto" in ov_css, ov_css[:80])
-    # 模拟器上画布比 vivo 窄，left 偏移在百分比里占比更大，实测右边界漂到 69%。
-    # 宽度必须扣掉 left 的 8px，右边界才恒等于 64%，不随画布宽度变。
-    check("信息标签右边界不随画布宽度漂移（宽度已扣掉 left 偏移）",
-          "min(calc(64% - 8px)" in ov_css, ov_css[:120])
-    # --- 体块表的"解剖朝向"不变量 ---
-    # 机主圈出来的"鱼鳍脚"就是这张表写反：w 是左右宽、d 是脚底法线（厚度），
-    # 我写成 w .95 / d 1.25，等于造了一只比宽还厚的脚。表里的数字是解剖事实，
-    # 就该按解剖事实钉住，否则下次改配色/改比例还会犯同一个错。
-    b3_txt = read_asset("body3d.js")
-    parts_blk = b3_txt[b3_txt.find("const PARTS"):b3_txt.find("const BLOBS")]
-    blobs_blk = b3_txt[b3_txt.find("const BLOBS"):b3_txt.find("const HOLO")]
+    # 火柴人演示：画布上不许再叠浮层。上一版在视口上挂了视角提示、相位徽标、
+    # 说明三处 absolute，手机上正好压在人形上，机主的原话是"各种遮挡动画，真难看"。
+    stage_at = html_txt.find('class="exd-stage"')
+    strip_at = html_txt.find('class="exd-strip"')
+    ctl_at = html_txt.find('class="exd-ctl"')
+    check("画布区块与信息条各自独立，信息条排在画布之后",
+          -1 < stage_at < strip_at < ctl_at, (stage_at, strip_at, ctl_at))
+    stage_html = html_txt[stage_at:html_txt.find("</div>", stage_at)]
+    check("舞台里只有一张画布，没有第二个 canvas 也没有叠层 div",
+          stage_html.count("<canvas") == 1 and "<div" not in stage_html, stage_html[:100])
+    for gone in ("exd-viewport-overlay", "exd-view-indicator", "exd-phase-badge",
+                 "exd-hud-foot", "exd-body-canvas", "exd-camera-bar", "exd-cam-btn"):
+        check("叠层控件 " + gone + " 已从界面和样式里撤掉",
+              gone not in html_txt and ("." + gone) not in css_txt, gone)
+    for sel in (".exd-stage {", ".exd-strip {", ".exd-canvas {"):
+        at = css_txt.find(sel)
+        rule = css_txt[at:css_txt.find("}", at)] if at >= 0 else ""
+        check("样式里 %s 不是浮层" % sel,
+              "position: absolute" not in rule and "position: fixed" not in rule, rule[:90])
+    canvas_at = css_txt.find(".exd-canvas {")
+    canvas_css = css_txt[canvas_at:css_txt.find("}", canvas_at)]
+    check("画布按宽度自适应并限高，窄屏不会被顶出屏幕",
+          "width: 100%" in canvas_css and "aspect-ratio" in canvas_css
+          and "max-height" in canvas_css, canvas_css[:120])
+    # 相位与发力提示改回 CSS 类，不再用 inline style 涂深色面板上那两种荧光色
+    phase_at = css_txt.find(".exd-phase {")
+    check("相位条有正反两态样式",
+          phase_at >= 0 and ".exd-phase.back {" in css_txt
+          and "badge.classList.toggle(\"back\"" in js_txt, css_txt[phase_at:phase_at + 60])
 
-    def shape_entry(block, key):
-        i = block.find("k: '%s'" % key)
-        return block[i:block.find("}", i)] if i >= 0 else ""
+    # --- 11c. 火柴人演示层：3D 全息人体整条链路已下线 ---
+    adir = os.path.join(ROOT, "app", "src", "main", "assets")
+    for gone in ("body3d.js", "vendor", "models"):
+        check("3D 残留 %s 已从资产目录删除" % gone,
+              not os.path.exists(os.path.join(adir, gone)), gone)
+    check("页面不再用 ES 模块挂 3D 层", 'type="module"' not in html_txt, "")
+    check("前端没有摄像机与模型残留",
+          "Body3D" not in js_txt and "ex3DCamera" not in js_txt
+          and "setEx3DAngle" not in js_txt and "MUSCLE_VOLUMES" not in js_txt, "")
+    srv_src = get_source(mutant)
+    check("服务端不再暴露 vendor/models 静态子目录",
+          "_STATIC_SUBDIRS" not in srv_src and "/vendor/{name}" not in srv_src, "")
+    check("已删除的 3D 模块没有留在公网静态件清单里",
+          "body3d.js" not in srv_src and "body3d.js" not in io.open(
+              os.path.join(ROOT, "tests", "test_integration.py"), encoding="utf-8").read(), "")
+    # 画布位图要在弹窗 show 之后再量，而且只能量 clientWidth：未 show 时是 display:none，
+    # 而卡片带 slideUp 动画（起手 scale(0.97)），getBoundingClientRect 把瞬时缩放算进去，
+    # 位图就小 3%，显示时再拉回来又糊一层。MuMu 320 档实测到 W=357 而不是 368，就是它。
+    js_open = js_txt[js_txt.find("function openExerciseDetail"):]
+    show_at = js_open.find('modal.classList.add("show")')
+    rect_at = js_open.find("cv.clientWidth")
+    check("画布尺寸量在弹窗显示之后且取的是布局宽度", -1 < show_at < rect_at, (show_at, rect_at))
+    # 发力高亮改用半透明垫线：canvas 阴影在 2 倍 dpr 上会糊成一团绿
+    check("火柴人不使用 canvas 阴影", "shadowBlur" not in js_txt, "")
+    check("火柴人画在浅色底上而不是深色全息面板",
+          'bg.addColorStop(0, "#FFFFFF")' in js_txt and "#020617" not in js_txt, "")
+    # 取景框按这组动作全部关键帧的并集算，不随单帧缩放，否则人形呼吸式忽大忽小。
+    # "包住每帧每个关节"这种行为判据在前端套件里真跑 stickBox 量坐标，这里只钉
+    # "取景是个独立函数且画之前一定调用它"——源码里出现 e.frames 证明不了它被用上。
+    check("取景是独立函数且在 drawFrame 里被调用",
+          js_txt.find("function stickBox") >= 0
+          and js_txt.find("const box = stickBox(poseKey, arch)") > js_txt.find("function drawFrame"), "")
+    # 头的大小必须由恒定骨长推，不能按肩宽：矢状面动作里左右肩几乎重合，
+    # 按肩宽推就画出一个没有头的火柴人。
+    torso_at = js_txt.find("const torso = Math.hypot(pv[0] - st[0]")
+    head_at = js_txt.find("const headR")
+    pad_at = js_txt.find("const padX")
+    check("头半径按恒定骨长推且不取肩宽",
+          -1 < torso_at < head_at < pad_at and "l_shoulder" not in js_txt[head_at:pad_at], "")
+    # 正视动作左右等权；只有矢状面才把背向镜头那一侧画细画淡
+    check("左右肢体远近只在矢状面区分", 'if (!sagittal) return seg.side ? "near"' in js_txt, "")
+    check("演示说明写的是火柴人关节示意", "火柴人关节示意" in js_txt, "")
+    check("动作详情界面不再宣称 3D 或拖拽",
+          "3D" not in html_txt[html_txt.find('id="ex-detail-modal"'):html_txt.find('id="ex-detail-steps"')]
+          and "拖拽" not in html_txt, "")
 
-    def num_of(entry, name):
-        m = re.search(r"[ ,]" + name + r":\s*([0-9.]+)", entry)
-        return float(m.group(1)) if m else None
-
-    fr = shape_entry(parts_blk, "foot_r")
-    check("脚是'宽>厚'的扁脚而不是竖起来的鱼鳍",
-          num_of(fr, "w") is not None and num_of(fr, "d") is not None
-          and num_of(fr, "d") < num_of(fr, "w"),
-          {"w": num_of(fr, "w"), "d": num_of(fr, "d")})
-    tr = shape_entry(parts_blk, "torso")
-    check("躯干按'宽>厚'压扁（人是扁的不是圆的）",
-          num_of(tr, "w") is not None and num_of(tr, "w") > num_of(tr, "d"),
-          {"w": num_of(tr, "w"), "d": num_of(tr, "d")})
-    hr = shape_entry(blobs_blk, "hand_r")
-    hand_r = re.search(r"r:\s*\[([0-9.,\s]+)\]", hr)
-    hand_axes = [float(x) for x in hand_r.group(1).split(",")] if hand_r else None
-    check("手是巴掌（长>宽>>厚）而不是圆球",
-          hand_axes is not None and len(hand_axes) == 3
-          and hand_axes[1] > hand_axes[0] > hand_axes[2]
-          and hand_axes[2] < hand_axes[0] * 0.7,
-          hand_axes)
-    sk = shape_entry(blobs_blk, "skull")
-    skull_axes = re.search(r"r:\s*\[([0-9.,\s]+)\]", sk)
-    skull_v = [float(x) for x in skull_axes.group(1).split(",")] if skull_axes else None
-    check("头颅竖直轴最长（不是气球）",
-          skull_v is not None and skull_v[1] == max(skull_v), skull_v)
-    check("肘、膝有关节帽（弯折不留空洞）",
-          "k: 'elbow_r'" in blobs_blk and "k: 'knee_r'" in blobs_blk, "")
     # 真机 320 档实测：聊天输入框把布局视口顶到 410，窄屏判据全部假通过。
     # flex:1 不等于能缩到固有宽度以下，表单控件必须显式 min-width:0。
-    chat_css = css_txt[css_txt.find(".chat-input-bar input {"):css_txt.find("}", css_txt.find(".chat-input-bar input {"))]
+    chat_at = css_txt.find(".chat-input-bar input {")
+    chat_css = css_txt[chat_at:css_txt.find("}", chat_at)]
     check("聊天输入框允许压到视口宽度以内", "min-width: 0" in chat_css, chat_css[:90])
-    # --- 11c. 3D 骨骼演示层 ---
-    body3d_txt = read_asset("body3d.js")
-    check("3D 层以 ES 模块方式被页面加载",
-          "import * as THREE" in body3d_txt
-          and 'type="module" src="body3d.js"' in html_txt, "")
-    # 少发一个文件，线上就只剩画块兜底，看着像"3D 没生效"而不是"漏发文件"
-    pkg_txt = io.open(os.path.join(ROOT, "scripts", "package-release.py"), encoding="utf-8").read()
-    check("发布归档包含 vendor 与 models", "vendor" in pkg_txt and "models" in pkg_txt, "")
-    vend = os.path.join(ROOT, "app", "src", "main", "assets", "vendor")
-    for need in ("three.module.js", "GLTFLoader.js", "BufferGeometryUtils.js"):
-        check("3D 依赖已入库 " + need, os.path.isfile(os.path.join(vend, need)), need)
-    check("模型已入库",
-          os.path.isfile(os.path.join(ROOT, "app", "src", "main", "assets",
-                                      "models", "cesium_man.glb")), "")
-    check("模型授权说明随包附带",
-          os.path.isfile(os.path.join(ROOT, "app", "src", "main", "assets",
-                                      "models", "CREDITS.md")), "")
-    # 依赖必须全部本地化：裸 'three' 说明符在 APK 里解析不到，等于线上必挂
-    loader_txt = io.open(os.path.join(vend, "GLTFLoader.js"), encoding="utf-8").read()
-    utils_txt = io.open(os.path.join(vend, "BufferGeometryUtils.js"), encoding="utf-8").read()
-    check("vendor 内没有裸 three 说明符",
-          "from 'three'" not in loader_txt and "from 'three'" not in utils_txt, "")
-    # 服务端只能下发白名单文件，绝不能变成任意路径读取
-    srv_src = get_source(mutant)
-    check("静态子目录走白名单而不是任意路径",
-          "_STATIC_SUBDIRS" in srv_src and "name not in allowed" in srv_src, "")
-    # 兜底不能被删：WebGL 不可用时必须还能画
-    check("3D 不可用时保留画块兜底",
-          'Body3D.status === "ready"' in js_txt and '"blocks"' in js_txt, "")
-    # 一根骨都没驱动时必须退回，而不是画个站桩模型冒充动画
-    check("零驱动时不冒充动画生效", "State.solved === 0" in body3d_txt, "")
-    # 绑定姿态要自检：头在骨盆上方、膝在髋踝之间，映射或朝向错了要当场失败
-    check("初始化会自检绑定姿态",
-          "bj.head.y > bj.pelvis.y" in body3d_txt and "bj.r_knee.y < bj.r_hip.y" in body3d_txt, "")
-    # 文案必须跟着实际渲染方式走，不能真模型还写"程序化体块"
-    check("说明文案区分两种渲染模式",
-          "3D 人体模型按关键帧驱动" in js_txt and "程序按关键帧算出来的立体体块" in js_txt, "")
 
     # 就绪上报必须是"读出来的"，不能是写死的：写死时部署脚本拿同一个字自比，
     # 发错版本也照样判就绪。

@@ -2774,42 +2774,11 @@ def extension_asset(name):
         return FileResponse(path,media_type=media,headers=headers)
     return serve
 
-# 3D 依赖与模型：体积大且按版本发布，同样走内容哈希强缓存。
-# 路径必须限定在 vendor/ 与 models/ 白名单里，绝不能变成任意文件读取。
-_STATIC_SUBDIRS = {
-    "vendor": {"three.module.js", "GLTFLoader.js", "BufferGeometryUtils.js"},
-    "models": {"cesium_man.glb", "CREDITS.md"},
-}
-_SUBDIR_MEDIA = {
-    ".js": "application/javascript",
-    ".glb": "model/gltf-binary",
-    ".md": "text/markdown; charset=utf-8",
-}
-
-def static_subdir(folder, name):
-    allowed = _STATIC_SUBDIRS.get(folder)
-    if not allowed or name not in allowed:
-        raise HTTPException(status_code=404, detail="资源未部署")
-    path = os.path.join(WEB_DIR, folder, name)
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail="资源未部署")
-    ext = name[name.rfind("."):].lower()
-    return FileResponse(path, media_type=_SUBDIR_MEDIA.get(ext, "application/octet-stream"),
-                        headers=_asset_headers(path, None))
-
-@app.get("/vendor/{name}")
-def get_vendor(name: str):
-    return static_subdir("vendor", name)
-
-@app.get("/models/{name}")
-def get_models(name: str):
-    return static_subdir("models", name)
-
 ASSET_MEDIA = {"js": "application/javascript", "css": "text/css", "svg": "image/svg+xml",
                "png": "image/png", "webmanifest": "application/manifest+json",
                "json": "application/json"}
 PUBLIC_ASSETS = ("features.js", "features.css", "sw.js", "manifest.webmanifest",
-                 "app-icon.png", "guidance.json", "body3d.js")
+                 "app-icon.png", "guidance.json")
 # 扩展名没登记类型就要在启动时炸，不能等到用户请求才发现是 500：
 # app-icon.png 换图标那次正是这么静默上线的，页面只是不显示图标，没人会去点它。
 for asset in PUBLIC_ASSETS:

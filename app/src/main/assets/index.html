@@ -1272,14 +1272,14 @@
         <span class="floating-dl-text">下载App</span>
     </div>
 
-    <!-- 动作详情：3D 人物标准动作演示模块与要点避坑 -->
+    <!-- 动作详情：火柴人标准动作演示与要点避坑 -->
     <div class="modal-overlay" id="ex-detail-modal">
         <div class="modal-card ex-detail" role="dialog" aria-modal="true" aria-label="动作标准演示与要点" tabindex="-1">
             <!-- 头部：动作名称与组数 -->
             <div class="exd-head">
                 <div class="exd-head-info">
                     <div class="exd-title-row">
-                        <span class="exd-badge-3d">3D 动作教练</span>
+                        <span class="exd-badge-demo">动作演示</span>
                         <div class="exd-name" id="ex-detail-name">动作</div>
                     </div>
                     <div class="exd-meta-row">
@@ -1290,35 +1290,17 @@
                 <button type="button" class="exd-close" onclick="closeExerciseDetail()" aria-label="关闭">×</button>
             </div>
 
-            <!-- 3D 动作视口容器 -->
-            <div class="exd-viewport-box">
-                <canvas id="ex-detail-canvas" class="exd-canvas" width="340" height="360"></canvas>
-                <!-- 真模型画在独立的 WebGL 画布上：同一个 canvas 不能既要 2d 又要 webgl，
-                     抢了之后 getContext("2d") 直接返回 null，动画循环根本起不来 -->
-                <canvas id="ex-body-canvas" class="exd-body-canvas"></canvas>
-                
-                <!-- 3D 悬浮视口提示与 HUD -->
-                <div class="exd-viewport-overlay">
-                    <div class="exd-view-indicator">
-                        <span class="exd-view-icon">🔄</span>
-                        <span id="ex-view-angle-text">3D 自由视角 (画面可拖拽旋转)</span>
-                    </div>
-                    <div class="exd-phase-badge" id="ex-phase-badge">
-                        <span class="phase-dot"></span>
-                        <span id="ex-phase-text">相位未开始</span>
-                    </div>
-                </div>
-                <!-- 说明跟着实际渲染方式变：真模型不能再写"程序化体块" -->
-                <div class="exd-hud-foot" id="ex-hud-foot"></div>
-
+            <!-- 画布独占这一块。以前视口上叠了三处 absolute 浮层（视角提示、相位徽标、
+                 说明），手机上正好糊在人形上；现在画布里只有人，信息走画布下方正常流 -->
+            <div class="exd-stage">
+                <canvas id="ex-detail-canvas" class="exd-canvas" width="340" height="340"></canvas>
             </div>
-            <!-- 视角工具栏放在画面下方正常流里：以前它 absolute 浮在画布上，
-                 窄屏还会折成三行，正好把人体整个盖住 -->
-            <div class="exd-camera-bar">
-                <button type="button" class="exd-cam-btn active" id="cam-btn-3d" onclick="setEx3DAngle('3d')">📐 立体</button>
-                <button type="button" class="exd-cam-btn" id="cam-btn-front" onclick="setEx3DAngle('front')">🎯 正面</button>
-                <button type="button" class="exd-cam-btn" id="cam-btn-side" onclick="setEx3DAngle('side')">🔍 侧面</button>
-                <button type="button" class="exd-cam-btn" id="cam-btn-reset" onclick="resetEx3DAngle()">🔄 重置</button>
+            <div class="exd-strip">
+                <span class="exd-phase" id="ex-phase-badge">
+                    <span class="phase-dot"></span>
+                    <span id="ex-phase-text">相位未开始</span>
+                </span>
+                <span class="exd-caption" id="ex-hud-foot"></span>
             </div>
 
             <!-- 播放控制栏 -->
@@ -1327,7 +1309,7 @@
                     <button type="button" class="btn-exd-ctl" id="ex-detail-play" onclick="toggleExDetailPlay()">⏸️ 暂停</button>
                     <button type="button" class="btn-secondary" id="ex-detail-slow" onclick="toggleExDetailSlow()">慢放：关</button>
                 </div>
-                <span class="exd-note" id="ex-render-note">画面是程序按关键帧算出来的立体体块，用来看发力顺序与幅度，不是真人示范视频，也不是动作医学判断；按住拖拽可转动视角。</span>
+                <span class="exd-note">画面是按关键帧插值画出的火柴人，用来看关节顺序与幅度，不是真人示范视频，也不是动作医学判断。</span>
             </div>
 
             <!-- 动作规范分解步骤 -->
@@ -1347,7 +1329,6 @@
         </div>
     </div>
 
-    <script type="module" src="body3d.js"></script>
     <script src="app.js"></script>
     <script src="features.js"></script>
 </body>

@@ -29,8 +29,8 @@ def copy_files(src,dst):
     dst.mkdir(exist_ok=True)
     for file in src.iterdir():
         if file.is_dir():
-            # web/vendor 与 web/models 是 3D 的子目录：只拷文件会静默少一整个目录，
-            # 页面退回 2D 画块，而部署本身照样报成功。先整体落到临时名再换。
+            # web/ 下可能有子目录：只拷文件会静默少掉整一层，页面缺件却部署成功。
+            # 先整体落到临时名再换。
             temp=dst/(file.name+'.new')
             if temp.exists():shutil.rmtree(temp)
             shutil.copytree(file,temp)

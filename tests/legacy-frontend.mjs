@@ -955,6 +955,124 @@ check("每帧 16 个关节齐全且帧数够", poseBad.length === 0, poseBad.sli
 check("姿态表已接进渲染器", jsSrcForEx.includes("poseFromTable(poseKey, arch, t)"), "");
 check("取不到姿态表时回落程序化而不是画静图",
       jsSrcForEx.includes("return poseAt(arch, t);"), "");
+
+// 火柴人不许被裁：三种屏宽 × 32 个动作 × 全相位，逐帧记下每个落笔坐标，
+// 只要有一个出界就是红。上一版"人被裁掉一半"正是取景按当前帧算出来的，
+// 光看源码里"有没有留 padding"证明不了没裁，所以这里真跑 drawFrame。
+run(h.context, `EX_POSES = ${POSE_SRC}`);
+const STICK_CLIP = run(h.context, `(function(){
+  var keys = Object.keys(EX_POSES), bad = [], thin = [], seen = {};
+  var sizes = [[288,288],[324,324],[440,340]];
+  function mkctx(pts, colors, body) {
+    // pts 收全部落笔点（出界判据用它）；body 只收人形本身的点（占幅判据用它）。
+    // 背景矩形和地面/垫子不属于人，混进 body 就会永远"占满画面"，判据失效。
+    var ground = false, inGround = false;
+    body = body || [];
+    return {
+      clearRect: function(){ ground = true; }, save: function(){}, restore: function(){},
+      beginPath: function(){}, closePath: function(){},
+      stroke: function(){ colors.push(this.strokeStyle); },
+      fill: function(){ colors.push(this.fillStyle); },
+      moveTo: function(x, y){
+        pts.push([x, y]);
+        if (ground) inGround = true;
+        else body.push([x, y]);
+      },
+      lineTo: function(x, y){
+        pts.push([x, y]);
+        if (inGround) { inGround = false; ground = false; return; }
+        body.push([x, y]);
+      },
+      arc: function(x, y, r){ body.push([x - r, y - r], [x + r, y - r], [x - r, y + r], [x + r, y + r]); },
+      fillRect: function(x, y, w, h){ pts.push([x, y], [x + w, y + h]); },
+      createLinearGradient: function(){ return { addColorStop: function(){} }; },
+      strokeStyle: "", fillStyle: "", lineWidth: 0, lineCap: "", lineJoin: ""
+    };
+  }
+  for (var ki = 0; ki < keys.length; ki++) {
+    var k = keys[ki];
+    var arch = detectArchetype(EX_STEPS[k] || {}, { name: EX_POSES[k].name });
+    seen[arch] = 1;
+    for (var si = 0; si < sizes.length; si++) {
+      var W = sizes[si][0], H = sizes[si][1], colors = [];
+      var span = { minX: 1e9, minY: 1e9, maxX: -1e9, maxY: -1e9 };
+      for (var q = 0; q < 10; q++) {
+        var t = q / 10, pts = [];
+        var body = [];
+        var g2 = mkctx(pts, colors, body);
+        drawFrame(g2, W, H, poseFromTable(k, arch, t), arch, t, k);
+        for (var pi = 0; pi < pts.length; pi++) {
+          var p = pts[pi];
+          if (!isFinite(p[0]) || !isFinite(p[1]) || p[0] < -1 || p[0] > W + 1 || p[1] < -1 || p[1] > H + 1) {
+            bad.push(k + " " + W + "x" + H + " t=" + t.toFixed(1) + " 出界 " + Math.round(p[0]) + "," + Math.round(p[1]));
+          }
+        }
+        for (var bi = 0; bi < body.length; bi++) {
+          span.minX = Math.min(span.minX, body[bi][0]); span.maxX = Math.max(span.maxX, body[bi][0]);
+          span.minY = Math.min(span.minY, body[bi][1]); span.maxY = Math.max(span.maxY, body[bi][1]);
+        }
+      }
+      // 人形必须真占住画面：取景框一旦被写死成整张画布，线条全部落在里面、
+      // "不出界"照样绿，但手机上看到的就是缩在中间的一小条。这条单独计，
+      // 红的时候才分得清是"裁了"还是"缩了"。
+      var fracW = (span.maxX - span.minX) / W, fracH = (span.maxY - span.minY) / H;
+      if (Math.max(fracW, fracH) <= 0.45) {
+        thin.push(k + " " + W + "x" + H + " 人形只占宽 " + fracW.toFixed(2) + " 高 " + fracH.toFixed(2));
+      }
+      // 正视动作左右等权；矢状面才把背向镜头那一侧画淡。画淡色只允许出现在矢状面。
+      var far = colors.indexOf("#A9B7C6") >= 0;
+      if (EX_POSES[k].plane === "frontal" && far) bad.push(k + " 正视动作出现了淡色远侧肢体");
+      if (EX_POSES[k].plane === "sagittal" && !far) bad.push(k + " 矢状面动作没区分远近侧");
+    }
+  }
+  var litBad = [];
+  Object.keys(ACTIVE_MUSCLES).forEach(function(a){
+    var pts = [], colors = [];
+    drawFrame(mkctx(pts, colors), 300, 300, poseFromTable(keys[0], a, 0.2), a, 0.2, keys[0]);
+    if (colors.indexOf("#059669") < 0) litBad.push(a);
+  });
+  return { bad: bad.slice(0, 8), n: bad.length, thin: thin.slice(0, 8), tn: thin.length,
+           poses: keys.length, litBad: litBad, archs: Object.keys(seen).length };
+})()`);
+check("32 个动作在三种屏宽下都没有被裁", STICK_CLIP.n === 0,
+      `${STICK_CLIP.n} 处出界: ` + JSON.stringify(STICK_CLIP.bad));
+check("32 个动作都占住画面一半以上，没缩成一小条", STICK_CLIP.tn === 0,
+      `${STICK_CLIP.tn} 处过窄: ` + JSON.stringify(STICK_CLIP.thin));
+check("动作覆盖到 11 类以上原型", STICK_CLIP.archs >= 11, STICK_CLIP.archs);
+check("每个发力肌群标签都真有一根线段会亮", STICK_CLIP.litBad.length === 0,
+      JSON.stringify(STICK_CLIP.litBad));
+
+// 取景框必须包住这组动作每一帧的每个关节。上一版"人被裁掉一半"就是因为取景
+// 按当前帧算；光在源码里钉一句"读了 e.frames"证明不了包得住，这里真量坐标。
+try {
+  const BOX = run(h.context, `(function(){
+    var out = [], keys = Object.keys(EX_POSES);
+    for (var ki = 0; ki < keys.length; ki++) {
+      var k = keys[ki], b = stickBox(k, detectArchetype(EX_STEPS[k] || {}, { name: EX_POSES[k].name }));
+      var f = EX_POSES[k].frames, n = 0;
+      // 期望框：这组动作全部帧全部关节的并集。框必须正好等于它——
+      // 只要求"包住"的话，把框写死成整张画布也能绿，人缩成一小条却没人报警。
+      var u = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+      for (var i = 0; i < f.length; i++) {
+        for (var jn in f[i].pose) {
+          var p = f[i].pose[jn];
+          if (p[0] < b.minX - 1e-6 || p[0] > b.maxX + 1e-6 || p[1] < b.minY - 1e-6 || p[1] > b.maxY + 1e-6) n++;
+          u.minX = Math.min(u.minX, p[0]); u.maxX = Math.max(u.maxX, p[0]);
+          u.minY = Math.min(u.minY, p[1]); u.maxY = Math.max(u.maxY, p[1]);
+        }
+      }
+      if (n) out.push(k + " 有 " + n + " 个关节在框外，实得框 " + [b.minX, b.maxX, b.minY, b.maxY]
+                       + " 期望 " + [u.minX, u.maxX, u.minY, u.maxY]);
+      else if (Math.abs(b.minX - u.minX) > 1e-6 || Math.abs(b.maxX - u.maxX) > 1e-6
+            || Math.abs(b.minY - u.minY) > 1e-6 || Math.abs(b.maxY - u.maxY) > 1e-6)
+        out.push(k + " 框没贴住身体 期望 " + [u.minX, u.maxX, u.minY, u.maxY] + " 实得 " + [b.minX, b.maxX, b.minY, b.maxY]);
+    }
+    return { bad: out.slice(0, 5), n: out.length, total: keys.length };
+  })()`);
+  check("取景框等于全部帧关节的并集（既不漏也缩）", BOX.n === 0 && BOX.total === 32, JSON.stringify(BOX.bad));
+} catch (e) {
+  check("取景框等于全部帧关节的并集（既不漏也缩）", false, "取景函数没跑起来: " + String(e && e.message).slice(0, 70));
+}
 }
 
 
@@ -1111,13 +1229,23 @@ check("打印样式只留复盘页",
 
   // 7) 动作详情弹窗
   const odBody = rJs.slice(rJs.indexOf("function openExerciseDetail"), rJs.indexOf("function resetChecklist"));
-  check("画布位图按显示尺寸建", odBody.includes("getBoundingClientRect()") && /cv\.width\s*=/.test(odBody),
+  check("画布位图按显示尺寸建", odBody.includes("cv.clientWidth") && /cv\.width\s*=/.test(odBody),
         odBody.slice(0, 130));
   check("弹窗里没有写死的组数占位",
         /id="ex-detail-reps"><\/span>/.test(rHtml) && /id="ex-detail-target-muscle"><\/span>/.test(rHtml), "");
   check("画面文案不声称生物力学解算",
-        !rJs.includes("生物力学") && !rHtml.includes("生物力学") && rJs.includes("程序化体块示意 · 非真人实拍"),
+        !rJs.includes("生物力学") && !rHtml.includes("生物力学") && rJs.includes("火柴人关节示意 · 非真人实拍"),
         [rJs.includes("生物力学"), rHtml.includes("生物力学")]);
+  // 撤了 3D 就不许再有任何对外文案宣称是模型/体块，否则说明与实际画法对不上。
+  // 只钉屏幕上真出现的那两处（说明函数 + 首页静态文案），不扫全份 js——注释里
+  // 提一句"不能再写成 3D 模型"是给人看的，扫进来只会误伤。
+  const capAt = rJs.indexOf("function stickCaption");
+  const capBody = rJs.slice(capAt, rJs.indexOf("\n}", capAt) + 2);
+  const exdHtml = rHtml.slice(rHtml.indexOf('id="ex-detail-modal"'), rHtml.indexOf('id="ex-detail-steps"'));
+  check("说明文案只说火柴人，不提模型或体块",
+        capAt >= 0 && capBody.includes("火柴人") && !capBody.includes("3D") && !capBody.includes("体块")
+        && !exdHtml.includes("3D") && !exdHtml.includes("体块") && !exdHtml.includes("拖拽"),
+        capBody.slice(0, 120));
   check("相位只报屏上看得见的半程",
         rJs.includes("前半程（起身/推起方向）") && !rJs.includes("向心收缩 (爆发发力)"), "");
 
@@ -1161,7 +1289,7 @@ check("打印样式只留复盘页",
   // 8) 标签说要亮的肌肉，屏幕上必须真有一块体块会亮（正向核对，不是"包含于"）
   try {
     const list = run(h.context, `Object.keys(ACTIVE_MUSCLES)`);
-    const types = run(h.context, `MUSCLE_VOLUMES.map(v => v.type)`);
+    const types = run(h.context, `STICK_SEGMENTS.map(s => s.type)`);
     const dead = (list || []).filter(k => {
       const lit = run(h.context, `expandMuscleTargets(ACTIVE_MUSCLES[${JSON.stringify(k)}].targets)`);
       return !(lit || []).some(t => (types || []).includes(t));

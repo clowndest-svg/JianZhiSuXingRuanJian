@@ -2414,7 +2414,7 @@ header *, .header-tools, .header-row-1 {
 .public-refresh-stamp.bad { color: #DC2626; white-space: normal; }
 .pub-tools-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .pub-tools-note { margin-top: 8px; font-size: 11px; color: #94A3B8; line-height: 1.5; }
-/* ================= 3D 人物动作全息演示系统与弹窗全面排版升级 ================= */
+/* ================= 动作详情（火柴人演示）与弹窗排版 ================= */
 .ex-detail {
     max-width: 480px;
     padding: 20px 20px 28px;
@@ -2441,15 +2441,15 @@ header *, .header-tools, .header-row-1 {
     gap: 8px;
     flex-wrap: wrap;
 }
-.exd-badge-3d {
-    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-    color: #FFFFFF;
+.exd-badge-demo {
+    background: #F1F5F9;
+    color: #475569;
     font-size: 10px;
     font-weight: 800;
     padding: 2px 7px;
     border-radius: 99px;
     letter-spacing: 0.5px;
-    box-shadow: 0 2px 6px rgba(16, 185, 129, 0.25);
+    border: 1px solid #E2E8F0;
 }
 .exd-name {
     font-size: 17px;
@@ -2503,135 +2503,72 @@ header *, .header-tools, .header-row-1 {
     color: #0F172A;
 }
 
-/* 3D 动作视口容器 */
-.exd-viewport-box {
-    position: relative;
+/* 火柴人舞台：浅色卡片，跟设计系统同一套底色，不再有那块深色全息面板 */
+.exd-stage {
     width: 100%;
-    border-radius: 16px;
+    border-radius: 14px;
     overflow: hidden;
-    background: radial-gradient(ellipse at 50% 25%, #1E293B 0%, #0A0F1D 100%);
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-    margin-bottom: 12px;
-    cursor: grab;
-    user-select: none;
-}
-.exd-viewport-box:active {
-    cursor: grabbing;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    margin-bottom: 8px;
 }
 .exd-canvas {
     display: block;
     width: 100%;
     height: auto;
-    aspect-ratio: 340 / 360;
-    margin: 0 auto;
+    aspect-ratio: 1 / 1;
+    max-height: 340px;
 }
-/* 竖排在左上角：横排到右上角时，会被手机厂商的悬浮侧栏（返回/音量条）压住。
-   宽度扣掉 left 的 8px，右边界才恒等于 64%（否则画布越窄，偏移占比越大，右侧留给侧栏的空间越小）。 */
-.exd-viewport-overlay {
-    position: absolute;
-    top: 8px;
-    left: 8px;
-    right: auto;
-    max-width: min(calc(64% - 8px), calc(100% - 24px));
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 5px;
-    pointer-events: none;
-}
-.exd-view-indicator {
+/* 相位与说明写在画布下方的正常流里：画布上不再叠任何 absolute 浮层。
+   以前左上角挂视角提示、下面挂相位徽标、右下角挂说明，手机上正好压在人形上。 */
+.exd-strip {
     display: flex;
     align-items: center;
-    gap: 5px;
-    max-width: 100%;
-    white-space: normal;
-    line-height: 1.35;
-    text-align: left;
-    background: rgba(15, 23, 42, 0.75);
-    backdrop-filter: blur(6px);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 99px;
-    padding: 3px 10px;
-    font-size: 10.5px;
-    color: #E2E8F0;
-    font-weight: 600;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    margin-bottom: 10px;
+    padding: 2px 2px 0;
 }
-.exd-phase-badge {
-    display: flex;
+.exd-phase {
+    display: inline-flex;
     align-items: center;
     gap: 6px;
-    max-width: 100%;
-    white-space: normal;
-    line-height: 1.35;
-    background: rgba(16, 185, 129, 0.2);
-    border: 1px solid rgba(16, 185, 129, 0.4);
-    backdrop-filter: blur(6px);
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #047857;
+    background: #ECFDF5;
+    border: 1px solid #A7F3D0;
     border-radius: 99px;
     padding: 3px 10px;
-    font-size: 11px;
-    color: #34D399;
-    font-weight: 700;
+}
+.exd-phase.back {
+    color: #0369A1;
+    background: #F0F9FF;
+    border-color: #BAE6FD;
 }
 .phase-dot {
     width: 6px;
     height: 6px;
-    background: #34D399;
+    background: currentColor;
     border-radius: 50%;
-    box-shadow: 0 0 6px #34D399;
     animation: pulseDot 1.4s infinite ease-in-out;
 }
 @keyframes pulseDot {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.4; transform: scale(0.8); }
 }
-
-/* 3D 视角切换栏 */
-/* 视角工具栏：以前 absolute 浮在画布底部，窄屏折成三行后把人体整个盖住。
-   现在走正常流放在画面下方，四个按钮等宽单行，不再和画布抢位置。 */
-.exd-camera-bar {
-    display: flex;
-    flex-wrap: nowrap;
-    align-items: stretch;
-    gap: 6px;
-    width: 100%;
-    margin: -6px 0 12px;
-    background: #0F172A;
-    padding: 5px;
-    border-radius: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    z-index: 5;
-}
-.exd-cam-btn {
-    flex: 1 1 0;
-    min-width: 0;
-    white-space: nowrap;
-    padding: 7px 4px;
-    border-radius: 10px;
-    justify-content: center;
-    text-align: center;
-    background: transparent;
-    border: none;
-    color: #94A3B8;
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-.exd-cam-btn:hover {
-    color: #FFFFFF;
-    background: rgba(255, 255, 255, 0.1);
-}
-.exd-cam-btn.active {
-    background: #10B981;
-    color: #FFFFFF;
-    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
+.exd-caption {
+    font-size: 11.5px;
+    color: #64748B;
+    line-height: 1.45;
 }
 
 /* 动作播放控制栏 */
 .exd-ctl {
     display: flex;
     align-items: center;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 8px 10px;
     margin-bottom: 12px;
     background: #F8FAFC;
     border: 1px solid #E2E8F0;
@@ -2661,11 +2598,14 @@ header *, .header-tools, .header-row-1 {
     background: #F1F5F9;
     border-color: #94A3B8;
 }
+/* 说明给一个 200px 的基准宽：320 档放不下就整句换到按钮下面。
+   以前 flex:1 在窄屏被两颗按钮挤成四个字一列，一句话排了十行。 */
 .exd-note {
     font-size: 11px;
     color: #64748B;
     line-height: 1.5;
-    flex: 1;
+    flex: 1 1 200px;
+    min-width: 0;
 }
 
 /* 分解步骤 */
@@ -3113,26 +3053,6 @@ body.kiosk-mode .callout {
 .day-complete-state { font-size: 11.5px; color: #D97706; font-weight: 700; }
 .day-complete-state.done { color: var(--primary-dark); }
 
-
-.exd-hud-foot {
-    position: absolute;
-    left: 10px;
-    bottom: 8px;
-    font-size: 11px;
-    line-height: 1.4;
-    color: rgba(148, 163, 184, 0.9);
-    pointer-events: none;
-    max-width: calc(100% - 20px);
-}
-
-/* 叠在 2D 画布上：透明背景、不吃指针，拖拽旋转仍然由下层画布接收 */
-.exd-body-canvas {
-    position: absolute;
-    left: 0; top: 0;
-    width: 100%; height: 100%;
-    pointer-events: none;
-    display: block;
-}
 
 /* ── 强制更新门：整屏盖住，底下所有控件都不该再被点到 ── */
 body.update-blocked { overflow: hidden; }
