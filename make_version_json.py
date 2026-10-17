@@ -15,6 +15,36 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 GRADLE = os.path.join(ROOT, "app", "build.gradle")
 APK = os.path.join(ROOT, "qingsu.apk")
 OUT = os.path.join(ROOT, "app", "src", "main", "web_version.json")
+ASSET_JS = os.path.join(ROOT, "app", "src", "main", "assets", "app.js")
+
+
+def sync_asset_build(code):
+    """把构建号烧进 app.js 的 APP_BUILD——服务端那道强更门只认这个数。
+
+    不手抄：漏改一次的后果是"新包被自己的门挡在门外"，而现场看起来像服务器坏了。
+    """
+    text = io.open(ASSET_JS, encoding="utf-8", newline="").read()
+    hit = re.search(r"const APP_BUILD = (\d+);", text)
+    if not hit:
+        raise SystemExit("app.js 里找不到 APP_BUILD 常量，客户端将无法自报构建号")
+    if int(hit.group(1)) != code:
+        io.open(ASSET_JS, "w", encoding="utf-8", newline="").write(
+            text.replace(hit.group(0), "const APP_BUILD = %d;" % code))
+    return int(hit.group(1))
+
+
+def apk_embedded_build():
+    """读包里真正那份 assets/app.js，确认装出去的就是当前构建号。
+
+    清单指纹对得上但资产常量是上一版的，正是"先发版后改常量"会踩的顺序坑。
+    """
+    import zipfile
+    with zipfile.ZipFile(APK) as zf:
+        for name in zf.namelist():
+            if name.endswith("assets/app.js"):
+                return re.search(rb"const APP_BUILD = (\d+);", zf.read(name))
+    return None
+
 
 
 def read_gradle_version():
@@ -54,12 +84,19 @@ def latest_release_note():
 
 def main():
     code, name = read_gradle_version()
+    sync_asset_build(code)
     if not os.path.exists(APK):
         raise SystemExit("找不到 qingsu.apk，先打包再生成清单")
+    embedded = apk_embedded_build()
+    if not embedded or int(embedded.group(1)) != code:
+        raise SystemExit("包内 assets/app.js 的 APP_BUILD 不是 %s，装出去的客户端会自报旧构建号" % code)
     blob = io.open(APK, "rb").read()
     out = {
         "version_code": code,
         "version_name": name,
+        # 默认策略就是"只许最新版"；要放行旧版得在服务器上放一个 min_build 文件踩刹车，
+        # 这样"忘了抬门"不会变成静默失效。
+        "min_version_code": code,
         "apk_url": "https://124.220.54.64/qingsu.apk",
         "size": len(blob),
         "md5": hashlib.md5(blob).hexdigest(),
@@ -68,8 +105,8 @@ def main():
     }
     io.open(OUT, "w", encoding="utf-8", newline="").write(
         json.dumps(out, ensure_ascii=False, indent=1))
-    print("version_code=%d version_name=%s size=%d md5=%s"
-          % (code, name, out["size"], out["md5"][:8]))
+    print("version_code=%d version_name=%s min_version_code=%d size=%d md5=%s"
+          % (code, name, out["min_version_code"], out["size"], out["md5"][:8]))
     print("已写 %s" % os.path.relpath(OUT, ROOT))
     return 0
 

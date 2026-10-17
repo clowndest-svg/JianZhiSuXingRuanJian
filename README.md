@@ -50,8 +50,13 @@ python scripts/package-release.py --output release.tar
 
 详细操作见 [运维手册](docs/operations.md)；变更与验收见 [r134 执行记录](docs/optimization-execution-r134.md)、[r132 执行记录](docs/optimization-execution-r132.md)、[r131 执行记录](docs/optimization-execution-2026-10-16.md) 和 [原始审查方案](docs/optimization-plan-2026-10-16.md)。原审查证据与 r130/r131 记录属于历史快照，不能当作 r132 当前状态。
 
+**强制更新**：`/api/*` 业务请求必须带 `X-App-Build`。构建号由 `make_version_json.py` 从 `build.gradle` 同步进 `app.js`，并回查已打出来的包里那份 `assets/app.js`；低于清单里的 `min_version_code` 或缺这个头（旧包根本不会发）一律 403 `update_required`，客户端整屏盖住并给出下载地址。
+访客侧 `/api/public/*` 与 `/api/cheer` 不参与强更——把来看监督大屏的人挡在门外没有意义。默认策略就是"只许最新版"，所以发版即抬门；要放行旧版，在服务器上 `python3 /opt/qingsu/set-min-build.py 0|22|auto|show`，改完会独立回读 `/health/ready` 核对服务真的读到了，门的状态与还在调用的构建号也都在 `/health/ready` 里可见。
+
 ## 验证边界
 
 真实设备为 vivo V2309A / Android 16。单机实测不能代表所有 Android 版本、桌面浏览器、省电策略或整夜锁屏行为。相机实拍、系统文件选择器实际确认、多系统矩阵、放大字号后的可读性与键盘遮挡仍需人工验收；原生按钮的回车激活在自动化按键通道下不可验证（该通道只送非可信事件），也已留作人工项。不将编译或回调测试写成这些项目已经通过。提醒为系统非精确定时，可能被厂商省电策略延迟。一般成人之外的适用情况不自动生成成人预算。
 
 旧客户端升级兼容：HTTP `/version.json` 仅返回公开版本元数据，安装包地址为HTTPS；这是为不跟随跨协议重定向的旧Java客户端保留的升级引导，不提供登录/业务/照片接口。其余轻塑HTTP入口跳转HTTPS。旧客户端在升级前自身发出的HTTP请求无法由服务端追溯加密，应尽快安装正式版本。
+强更门的拦截效果由真实中间件用例加四条变异覆盖（缺头当新号、把访客接口一起挡、运维刹车不生效、门扩到静态件——各红一条）。本轮没有抬起线上 `min_build`，所以"已装的 1.8.3 在真人手机上被挡"没有实拍证据：抬门前得先确认真实用户装得上新包。
+

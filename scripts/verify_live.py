@@ -3,8 +3,12 @@ import json,urllib.request,urllib.error,secrets,sqlite3,os
 base=os.environ.get('QINGSU_VERIFY_BASE','http://172.17.0.1:8000')
 opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
 username='releasecheck_'+secrets.token_hex(5)
+# 抬门之后，不带构建号的调用方和旧包长得一样，会被一起挡掉——发布自检必须扮成最新版
+with opener.open(base+'/version.json',timeout=15) as response:
+    build=str(json.load(response).get('version_code') or 0)
+assert build!='0','线上清单没有 version_code，自检无法冒充现行客户端'
 def api(path,body=None,token=None):
-    req=urllib.request.Request(base+path,data=None if body is None else json.dumps(body).encode(),headers={'Content-Type':'application/json',**({'Authorization':'Bearer '+token} if token else {})})
+    req=urllib.request.Request(base+path,data=None if body is None else json.dumps(body).encode(),headers={'Content-Type':'application/json','X-App-Build':build,**({'Authorization':'Bearer '+token} if token else {})})
     try:
         with opener.open(req,timeout=15) as response:return response.status,json.load(response)
     except urllib.error.HTTPError as e:return e.code,json.load(e)
@@ -29,6 +33,10 @@ try:
     assert api('/api/dashboard',token=token)[1]['checklist']['test'];checks.append('checklist persistence')
     assert api('/api/logout',{},token)[0]==200 and api('/api/dashboard',token=token)[0]==401
     assert api('/api/dashboard',token=login['token'])[0]==200;checks.append('session revocation')
+    with opener.open(base+'/health/ready',timeout=15) as response:ready=json.load(response)
+    # 门开没开必须落在发布记录里：抬不动门最坏的形状是"以为生效了"
+    assert 'min_build' in ready and 'gate' in ready,'健康检查没上报强更门状态'
+    checks.append('update gate min_build=%s override=%s blocked=%s'%(ready['min_build'],ready['build_override'],ready['gate']['blocked']))
     print(json.dumps({'passed':checks},ensure_ascii=False))
 finally:
     db=sqlite3.connect(os.environ.get('QINGSU_VERIFY_DB','/opt/qingsu/data/qingsu.db'));db.execute('PRAGMA foreign_keys=ON')

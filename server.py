@@ -40,10 +40,14 @@ app = FastAPI(title="轻塑·减脂塑形严管伴侣 API", version="5.0.0")
 async def response_policy(request: Request, call_next):
     request_id=uuid.uuid4().hex
     started=time.monotonic()
-    try:response=await call_next(request)
-    except Exception as error:
-        logging.getLogger('uvicorn.error').error('application_failure id=%s error=%s',request_id,type(error).__name__)
-        response=JSONResponse({'detail':'服务器暂时无法处理，请稍后重试','request_id':request_id},status_code=500)
+    gate=update_gate(request)
+    if gate is not None:
+        response=gate
+    else:
+        try:response=await call_next(request)
+        except Exception as error:
+            logging.getLogger('uvicorn.error').error('application_failure id=%s error=%s',request_id,type(error).__name__)
+            response=JSONResponse({'detail':'服务器暂时无法处理，请稍后重试','request_id':request_id},status_code=500)
     response.headers["X-Request-ID"]=request_id
     response.headers["X-Content-Type-Options"]="nosniff"
     response.headers["Referrer-Policy"]="no-referrer"
@@ -433,6 +437,111 @@ def _public_allowed(ip):
     """公开接口按 IP 限 60 次/分，堵住用户名枚举与拖库脚本。"""
     ok, _where, _n = rate_hit("pub:" + ip, 60, 60)
     return ok
+
+
+# ── 强制更新门 ────────────────────────────────────────────────────────
+# 旧包的代码已经装在用户手机上了，改不动，所以唯一能打得到它的杠杆在服务端：
+# 业务请求必须自带 X-App-Build，旧版根本不会发这个头，缺头即按"太旧"处理。
+BUILD_HEADER = "x-app-build"
+# 访客侧的两个大屏读数与打气不参与强更：把来看监督页的人挡在门外没有任何意义，
+# 它们本来就要求分享密钥并按 IP 限流。
+GATE_EXEMPT_PATHS = ("/api/public/dashboard", "/api/public/charts", "/api/cheer")
+
+_version_policy_cache = {"key": None, "data": {}}
+_min_build_cache = {"key": None, "data": None}
+gate_stats = {"blocked": 0, "builds": {}}
+
+
+def min_build_file():
+    return os.environ.get("QINGSU_MIN_BUILD_FILE", os.path.join(DB_DIR, "min_build"))
+
+
+def _cached_json(path, cache):
+    try:
+        stat = os.stat(path)
+        key = "%s:%s" % (stat.st_size, stat.st_mtime_ns)
+    except OSError:
+        return None
+    if cache["key"] != key:
+        try:
+            with io.open(path, "r", encoding="utf-8") as f:
+                cache["data"] = json.load(f)
+            cache["key"] = key
+        except Exception as error:
+            logging.getLogger("uvicorn.error").warning("policy_file_unreadable path=%s error=%s",
+                                                       os.path.basename(path), type(error).__name__)
+            return None
+    return cache["data"]
+
+
+def version_policy():
+    """线上版本清单（按 mtime 缓存，每请求只 stat 不读盘）。读不到返回空，
+    此时按"没有策略"放行——门坏了不该把全站关死，但必须在 /health/ready 看得见。"""
+    return _cached_json(os.path.join(WEB_DIR, "version.json"), _version_policy_cache) or {}
+
+
+def min_build_required():
+    """最低可用构建号。
+
+    运维文件（DB_DIR/min_build）在时以它为准，这是"把自己锁在门外"的那道刹车；
+    不在时回落到清单的 min_version_code——于是每次发版自动抬门，不需要谁记得去改。
+    """
+    raw = _cached_json(min_build_file(), _min_build_cache)
+    if raw is not None:
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            logging.getLogger("uvicorn.error").warning("min_build_not_a_number，回落到版本清单")
+    try:
+        return int(version_policy().get("min_version_code", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def request_build(request):
+    raw = (request.headers.get(BUILD_HEADER) or "").strip()
+    # 缺头、非数字、零一律算 0：旧版就是这么发的，正是要拦的那批
+    return int(raw[:9]) if raw[:9].isdigit() else 0
+
+
+def note_build(request):
+    """记下"现在还有哪些构建号在调用"，抬门之前得先量清楚会被挡在外面的是谁。"""
+    seen = gate_stats["builds"]
+    key = str(request_build(request))
+    if key not in seen and len(seen) >= 64:
+        return
+    seen[key] = seen.get(key, 0) + 1
+
+
+def update_gate(request):
+    """放行返回 None；否则返回该给客户端的 403。"""
+    path = request.url.path
+    if request.method == "OPTIONS" or not path.startswith("/api/") or path in GATE_EXEMPT_PATHS:
+        return None
+    note_build(request)
+    need = min_build_required()
+    if need <= 0:
+        return None
+    got = request_build(request)
+    if got >= need:
+        return None
+    gate_stats["blocked"] += 1
+    policy = version_policy()
+    logging.getLogger("uvicorn.error").warning("update_gate_blocked path=%s build=%s min=%s ip=%s",
+                                               path, got, need, _ip(request))
+    name = str(policy.get("version_name") or "")
+    return JSONResponse({
+        "detail": "当前 App 版本已停用，请更新到 %s 后再继续使用" % (("v" + name) if name else "最新版"),
+        "code": "update_required",
+        "min_build": need,
+        "your_build": got,
+        "latest": {
+            "version_code": int(policy.get("version_code") or need),
+            "version_name": name,
+            "apk_url": policy.get("apk_url") or (SITE_BASE + "/qingsu.apk"),
+            "size": int(policy.get("size") or 0),
+        },
+    }, status_code=403)
 
 
 def hash_pw(pw: str) -> str:
@@ -2458,6 +2567,10 @@ def health():
     finally: conn.close()
     info = release_identity()
     info["status"] = "ok"
+    info["min_build"] = min_build_required()
+    # 门是不是被人工刹住，必须一眼看得见：抬门抬不动时最怕的就是"以为生效了"
+    info["build_override"] = os.path.exists(min_build_file())
+    info["gate"] = {"blocked": gate_stats["blocked"], "builds": dict(gate_stats["builds"])}
     return info
 
 
@@ -2554,5 +2667,5 @@ def get_vendor(name: str):
 def get_models(name: str):
     return static_subdir("models", name)
 
-for asset in ("features.js","features.css","sw.js","manifest.webmanifest","app-icon.svg","guidance.json","body3d.js"):
+for asset in ("features.js","features.css","sw.js","manifest.webmanifest","app-icon.png","guidance.json","body3d.js"):
     app.get("/"+asset)(extension_asset(asset))

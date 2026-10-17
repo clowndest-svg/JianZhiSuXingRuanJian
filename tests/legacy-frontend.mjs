@@ -1348,6 +1348,84 @@ check("打印样式只留复盘页",
     JSON.stringify(hBad.log.toasts.slice(-3)));
 }
 
+// ===== 16. 强制更新门：请求自报构建号，被挡时整屏盖住 =====
+{
+  const hg = makeCtx();
+  loadJs(hg.context);
+  const css = fs.readFileSync(path.join(ROOT, "app/src/main/assets/style.css"), "utf8");
+  const gradle = fs.readFileSync(path.join(ROOT, "app/build.gradle"), "utf8");
+  const gcode = (gradle.match(/versionCode\s+(\d+)/) || [])[1] || "?";
+  const drain = async () => { for (let i = 0; i < 4; i++) await new Promise(r => setImmediate(r)); };
+  const reported = String(run(hg.context, "typeof APP_BUILD === 'number' ? String(APP_BUILD) : '?'"));
+  check("构建号就是 gradle 那一版，不是 app.js 里另一套手抄", reported === gcode,
+        "app.js=" + reported + " gradle=" + gcode);
+
+  hg.sandbox.__fetchHandler = () => Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+  run(hg.context, 'fetch(API_BASE + "/api/dashboard", { headers: { Authorization: "Bearer tk" } })');
+  await drain();
+  const last = hg.log.fetches[hg.log.fetches.length - 1] || [null, {}];
+  const hdr = (last[1] && last[1].headers) || {};
+  check("业务请求自报构建号", String(hdr["X-App-Build"]) === gcode, JSON.stringify(hdr));
+  check("加头没把鉴权头挤掉", String(hdr["Authorization"] || "").startsWith("Bearer "), JSON.stringify(hdr));
+
+  hg.log.fetches.length = 0;
+  run(hg.context, 'fetch(API_BASE + "/api/cheer", { method: "POST", body: "{}" })');
+  await drain();
+  const vhdr = ((hg.log.fetches[hg.log.fetches.length - 1] || [null, {}])[1] || {}).headers;
+  check("访客接口不被当成待更新客户端", !vhdr || !("X-App-Build" in vhdr), JSON.stringify(vhdr));
+
+  const policy = { code: "update_required", detail: "请更新到 v1.9.0", min_build: 22, your_build: 21,
+                   latest: { version_code: 22, version_name: "1.9.0",
+                             apk_url: "https://124.220.54.64/qingsu.apk", size: 5322721 } };
+  const gated403 = (payload) => () => Promise.resolve(
+    { ok: false, status: 403, json: async () => payload, clone() { return this; } });
+  hg.sandbox.__fetchHandler = gated403(policy);
+  run(hg.context, 'fetch(API_BASE + "/api/dashboard", { headers: { Authorization: "Bearer tk" } })');
+  await drain();
+  const d = hg.sandbox.document;
+  const wall = d.getElementById("update-wall");
+  check("被挡时整屏盖住", hg.sandbox.document.body.classList.contains("update-blocked")
+        && String(wall.innerHTML).includes("uw-card"), String(wall.innerHTML).slice(0, 90));
+  check("遮罩写清当前版本与最低可用版本",
+        String(d.getElementById("uw-mine").textContent).indexOf("21") >= 0
+        && String(d.getElementById("uw-min").textContent).indexOf("22") >= 0,
+        d.getElementById("uw-mine").textContent + " / " + d.getElementById("uw-min").textContent);
+  check("包体积按清单现算", String(d.getElementById("uw-size").textContent).includes("5.1"),
+        String(d.getElementById("uw-size").textContent));
+  check("App 内给的是去下载而不是刷新", String(wall.innerHTML).includes("去下载"), "");
+
+  const noSize = JSON.parse(JSON.stringify(policy)); noSize.latest.size = 0;
+  hg.sandbox.__fetchHandler = gated403(noSize);
+  run(hg.context, 'fetch(API_BASE + "/api/dashboard")');
+  await drain();
+  check("体积读不到就显示未知，不回落成上一版的数字",
+        String(d.getElementById("uw-size").textContent).includes("未知"),
+        String(d.getElementById("uw-size").textContent));
+
+  const hw = makeCtx();
+  delete hw.sandbox.window.AndroidBridge;
+  loadJs(hw.context);
+  hw.sandbox.__fetchHandler = gated403(policy);
+  run(hw.context, 'fetch(API_BASE + "/api/dashboard")');
+  await drain();
+  const wallW = hw.sandbox.document.getElementById("update-wall");
+  check("网页版只让人刷新，不诱导下载 APK", String(wallW.innerHTML).includes("刷新页面")
+        && !String(wallW.innerHTML).includes("去下载"), String(wallW.innerHTML).slice(0, 120));
+
+  const hn = makeCtx();
+  loadJs(hn.context);
+  hn.sandbox.__fetchHandler = gated403({ detail: "不能改别人的记录" });
+  run(hn.context, 'fetch(API_BASE + "/api/records/weight/1/update", { method: "POST", body: "{}" })');
+  await drain();
+  check("普通 403 不会误触发强更遮罩",
+        !hn.sandbox.document.body.classList.contains("update-blocked"), "");
+
+  const at = css.indexOf(".update-wall");
+  check("遮罩压得住整屏且在最上层",
+        at >= 0 && /position:\s*fixed/.test(css.slice(at, at + 260))
+        && /z-index:\s*9{3,}/.test(css.slice(at, at + 260)), at < 0 ? "找不到 .update-wall" : css.slice(at, at + 120));
+}
+
 const bad = R.filter(x => !x[1]);
 console.log(`\n=== ${MUTANT ? "变异样本(HEAD 改动前)" : "当前源码"}：${R.length} 条，绿 ${R.length - bad.length}，红 ${bad.length} ===`);
 for (const [name, ok, detail] of R) console.log(`  ${ok ? "绿" : "红"} ${name}${ok ? "" : "  -> " + detail}`);

@@ -3115,3 +3115,59 @@ body.kiosk-mode .callout {
     pointer-events: none;
     display: block;
 }
+
+/* ── 强制更新门：整屏盖住，底下所有控件都不该再被点到 ── */
+body.update-blocked { overflow: hidden; }
+.update-wall {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 9999;
+    background: rgba(248, 250, 252, 0.97);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.uw-card {
+    width: 100%;
+    max-width: 420px;
+    background: #FFFFFF;
+    border: 1px solid var(--primary-border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 12px 32px rgba(6, 78, 59, 0.14);
+    padding: 22px 20px;
+}
+.uw-badge {
+    display: inline-block;
+    background: var(--danger-soft);
+    color: var(--danger-dark);
+    border: 1px solid #FECACA;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 700;
+}
+.uw-title { margin: 12px 0 6px; font-size: 18px; line-height: 1.4; color: var(--text-main); }
+.uw-why { margin: 0 0 14px; font-size: 13px; line-height: 1.6; color: var(--text-light); }
+.uw-facts {
+    margin: 0 0 18px;
+    padding: 12px 14px 12px 30px;
+    background: var(--primary-soft);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    line-height: 1.9;
+    color: var(--text-main);
+}
+.uw-facts b { color: var(--primary-deep); }
+.uw-btn { width: 100%; }
+.uw-note { margin: 10px 0 0; font-size: 12px; line-height: 1.6; color: var(--text-light); }
+.uw-alt {
+    width: 100%;
+    margin-top: 12px;
+    min-height: 40px;
+    background: none;
+    border: 1px solid var(--border, #E2E8F0);
+    border-radius: var(--radius-md);
+    color: var(--text-light);
+    font-size: 13px;
+}

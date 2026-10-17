@@ -309,4 +309,53 @@ class Integration(unittest.TestCase):
         self.assertEqual(gap['record_status'], 'missing')
         self.assertFalse(gap['has_records'])
 
+    def test_forced_update_gate(self):
+        """强更门：旧包不会发 X-App-Build，所以"缺头"是唯一打得着它们的判据。"""
+        import json as _json
+        web = Path(os.environ['QINGSU_WEB_DIR']); web.mkdir(parents=True, exist_ok=True)
+        def publish(min_code):
+            (web / 'version.json').write_text(_json.dumps({
+                'version_code': 22, 'version_name': '1.9.0', 'min_version_code': min_code,
+                'apk_url': 'https://124.220.54.64/qingsu.apk', 'size': 5322721,
+                'md5': 'ab' * 16, 'notes': 'r139 强更'}, ensure_ascii=False), encoding='utf-8')
+            # 缓存按 size+mtime 认文件，同一秒内换内容会读到上一份，测试必须显式作废
+            self.m._version_policy_cache['key'] = None
+        publish(22)
+        blocked = self.c.get('/api/dashboard', headers=self.auth)
+        self.assertEqual(blocked.status_code, 403, '旧包不带构建号却放行了')
+        body = blocked.json()
+        self.assertEqual(body['code'], 'update_required')
+        self.assertEqual(body['your_build'], 0)
+        self.assertIn('1.9.0', body['detail'], body['detail'])   # 版本号取自清单，不是写死
+        self.assertEqual(body['latest']['size'], 5322721)
+        for raw, want in (('21', 403), ('22', 200), ('23', 200), ('abc', 403), ('', 403)):
+            with self.subTest(build=raw):
+                self.assertEqual(self.c.get('/api/dashboard', headers=dict(self.auth, **{'X-App-Build': raw})).status_code, want)
+        # 访客侧不参与强更：把来看监督页的人挡在门外没有任何意义
+        d = self.c.get('/api/dashboard', headers=dict(self.auth, **{'X-App-Build': '22'})).json()
+        key = d['public_url'].split('?k=')[1]
+        self.assertEqual(self.c.get('/api/public/dashboard', params={'username': 'owner', 'k': key}).status_code, 200)
+        self.assertNotEqual(self.c.post('/api/cheer', json={'username': 'owner', 'k': key, 'kind': 'on_track'}).status_code, 403)
+        # 更新通道本身绝不能被挡：否则用户连新包都下不到，等于把自己锁死
+        self.assertEqual(self.c.get('/version.json').status_code, 200)
+        self.assertEqual(self.c.get('/health/ready').status_code, 200)
+        # CORS 预检不带自定义头，被门拦下等于所有跨源请求一起废掉
+        pre = self.c.options('/api/dashboard', headers={'Origin': 'https://appassets.androidplatform.net',
+                                                       'Access-Control-Request-Method': 'GET',
+                                                       'Access-Control-Request-Headers': 'authorization,x-app-build'})
+        self.assertEqual(pre.status_code, 200, pre.text)
+        # 运维刹车：文件在时以它为准；写 0 立刻放行，删掉又回落到清单策略
+        override = Path(os.environ['QINGSU_DB_DIR']) / 'min_build'
+        def reset(): self.m._min_build_cache['key'] = None
+        override.write_text('0', encoding='utf-8'); reset()
+        self.assertEqual(self.c.get('/api/dashboard', headers=self.auth).status_code, 200, '刹车没生效，机主会被锁在门外')
+        override.write_text('22', encoding='utf-8'); reset()
+        self.assertEqual(self.c.get('/api/dashboard', headers=self.auth).status_code, 403)
+        override.unlink(); reset()
+        self.assertEqual(self.c.get('/api/dashboard', headers=self.auth).status_code, 403, '删了刹车却把门也放开了')
+        ready = self.c.get('/health/ready').json()
+        self.assertEqual(ready['min_build'], 22)
+        self.assertGreaterEqual(ready['gate']['blocked'], 5, ready)
+        self.assertIn('0', ready['gate']['builds'], '抬门前看不见还有谁在调用')
+
 if __name__=='__main__':unittest.main(verbosity=2)

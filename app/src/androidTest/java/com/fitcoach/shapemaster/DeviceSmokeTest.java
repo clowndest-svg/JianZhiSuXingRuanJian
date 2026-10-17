@@ -41,11 +41,57 @@ public class DeviceSmokeTest {
         try(FileOutputStream out=new FileOutputStream(new File(dir,name+".png"))){image.compress(Bitmap.CompressFormat.PNG,100,out);}
         image.recycle();
     }
+    private MainActivity launchShell() throws Exception {
+        Intent intent=new Intent(instrumentation.getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        instrumentation.getTargetContext().startActivity(intent);
+        AtomicReference<MainActivity> resumed=new AtomicReference<>();
+        for(int i=0;i<100 && resumed.get()==null;i++){
+            instrumentation.runOnMainSync(()->{
+                for(android.app.Activity a:androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED))
+                    if(a instanceof MainActivity)resumed.set((MainActivity)a);
+            });Thread.sleep(100);
+        }
+        MainActivity activity=resumed.get();assertNotNull("App activity did not resume",activity);
+        instrumentation.runOnMainSync(()->web=(WebView)((ViewGroup)activity.findViewById(android.R.id.content)).getChildAt(0));
+        waitFor("document.readyState==='complete' && typeof submitLogin==='function'");
+        return activity;
+    }
+
+    /** 强更门的两端都在真机上量：页面自报的号要和安装包一致，遮罩要真盖得住。 */
+    @Test(timeout=150000) public void clientIdentifiesItselfAndBlocksTheScreen() throws Exception {
+        launchShell();
+        int packaged=instrumentation.getTargetContext().getPackageManager()
+                .getPackageInfo(instrumentation.getTargetContext().getPackageName(),0).versionCode;
+        assertEquals("页面自报的构建号不是安装包那一版","true",js("String(APP_BUILD)==='"+packaged+"'"));
+        // 网关判定要在真 Blink 上量：访客接口要是被当成业务请求，来看大屏的人会被挡在门外
+        assertEquals("真引擎上的接口分类不对","true",
+                js("isGatedApi('https://x/api/dashboard')===true"
+                   +"&&isGatedApi('https://x/api/public/dashboard?k=1')===false"
+                   +"&&isGatedApi('https://x/api/cheer')===false"
+                   +"&&isGatedApi('https://x/version.json')===false"));
+        assertEquals("遮罩不该在正常版本下出现","true",js("!document.body.classList.contains('update-blocked')"));
+        js("showUpdateWall({code:'update_required',min_build:"+(packaged+1)+",your_build:"+packaged
+           +",latest:{version_code:"+(packaged+1)+",version_name:'9.9.9',apk_url:'https://124.220.54.64/qingsu.apk',size:5322721}})");
+        waitFor("!!document.getElementById('update-wall')");
+        assertEquals("强更遮罩没盖满整屏","true",js("(()=>{const w=document.getElementById('update-wall');"
+                +"return w.offsetHeight>=innerHeight-2&&w.offsetWidth>=innerWidth-2;})()"));
+        assertEquals("强更遮罩不是最上层，底下还能点","true",
+                js("(()=>{const e=document.elementFromPoint(Math.round(innerWidth/2),Math.round(innerHeight/2));"
+                   +"return !!e&&!!e.closest('#update-wall');})()"));
+        assertTrue("屏上没写最低可用版本",js("document.getElementById('update-wall').innerText").contains("构建 "+(packaged+1)));
+        assertTrue("屏上没写包体积",js("document.getElementById('update-wall').innerText").contains("5.1 MB"));
+        screenshot("update-wall");
+        js("document.getElementById('update-wall').remove();document.body.classList.remove('update-blocked');");
+    }
+
     @Test(timeout=240000) public void releaseUserJourney() throws Exception {
         String user="usbqa"+System.currentTimeMillis();String password="UsbQaOnly!123";
         JSONObject body=new JSONObject().put("username",user).put("password",password).put("age",30).put("height",170).put("weight_jin",160).put("target_weight_jin",140);
         HttpsURLConnection request=(HttpsURLConnection)new URL(BuildConfig.API_BASE_URL+"/api/register").openConnection();
         request.setRequestMethod("POST");request.setConnectTimeout(15000);request.setReadTimeout(15000);request.setDoOutput(true);request.setRequestProperty("Content-Type","application/json");
+        // 抬门之后不带构建号的请求会被 403，夹具自己就是一个"新版客户端"
+        request.setRequestProperty("X-App-Build",String.valueOf(instrumentation.getTargetContext()
+                .getPackageManager().getPackageInfo(instrumentation.getTargetContext().getPackageName(),0).versionCode));
         try(java.io.OutputStream output=request.getOutputStream()){output.write(body.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
         assertEquals("Fixture registration",200,request.getResponseCode());request.disconnect();
         File fixtureDir=new File(instrumentation.getTargetContext().getExternalFilesDir(null),"qa");fixtureDir.mkdirs();

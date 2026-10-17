@@ -9,6 +9,107 @@ const API_BASE = window.AndroidBridge && window.AndroidBridge.getApiBase ? windo
 const TOKEN_KEY = "QINGSU_AUTH_TOKEN";
 const USER_KEY = "QINGSU_AUTH_USER";
 
+// ── 强制更新门（客户端这一半）────────────────────────────────────────
+// 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
+const APP_BUILD = 22;
+// 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
+const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer"];
+
+function isGatedApi(url) {
+    const text = String(url || "");
+    const at = text.indexOf("/api/");
+    if (at < 0) return false;
+    return !VIEWER_API_PATHS.some(p => text.indexOf(p) === at);
+}
+
+let updateWallPolicy = null;
+
+function showUpdateWall(policy) {
+    updateWallPolicy = policy;
+    document.body.classList.add("update-blocked");
+    let wall = document.getElementById("update-wall");
+    if (!wall) {
+        wall = document.createElement("div");
+        wall.id = "update-wall";
+        wall.classList.add("update-wall");
+        wall.setAttribute("role", "alertdialog");
+        wall.setAttribute("aria-live", "assertive");
+        document.body.appendChild(wall);
+    }
+    const inApp = !!(window.AndroidBridge && window.AndroidBridge.openBrowser);
+    wall.innerHTML = [
+        '<div class="uw-card">',
+        '<div class="uw-badge">版本已停用</div>',
+        '<h2 class="uw-title" id="uw-title">需要更新后才能继续使用</h2>',
+        '<p class="uw-why" id="uw-why"></p>',
+        '<ul class="uw-facts">',
+        '<li>你现在的版本 <b id="uw-mine"></b></li>',
+        '<li>最低可用版本 <b id="uw-min"></b></li>',
+        '<li>安装包大小 <b id="uw-size"></b></li>',
+        '</ul>',
+        inApp
+            ? '<button class="btn-primary uw-btn" id="uw-go">去下载最新版</button>'
+              + '<p class="uw-note">下载会交给系统浏览器；安装仍要在系统设置里放行。</p>'
+            : '<button class="btn-primary uw-btn" id="uw-go">刷新页面获取最新版</button>'
+              + '<p class="uw-note">网页版是服务器上的最新版，刷新一下就恢复了。</p>',
+        '<button class="uw-alt" id="uw-retry">我已经装好了，重新检查</button>',
+        '</div>'
+    ].join("");
+    const latest = policy.latest || {};
+    const name = String(latest.version_name || "");
+    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = String(value); };
+    setText("uw-title", inApp
+        ? ("需要更新到 " + (name ? "v" + name : "最新版") + " 才能继续使用")
+        : "请刷新页面获取最新版");
+    setText("uw-why", inApp
+        ? "旧版本里的记录与提醒会照常保留在服务器上，装完新版登录就能接着用。"
+        : "服务器刚发布过新版本，这个页面还是旧的。");
+    setText("uw-mine", policy.your_build ? ("构建 " + policy.your_build) : "未上报（这就是旧版）");
+    setText("uw-min", "构建 " + (policy.min_build || "?"));
+    setText("uw-size", latest.size ? (latest.size / 1048576).toFixed(1) + " MB" : "未知");
+    const go = document.getElementById("uw-go");
+    if (go) go.onclick = () => {
+        if (inApp) window.AndroidBridge.openBrowser(String(latest.apk_url || ""));
+        else window.location.reload();
+    };
+    const retry = document.getElementById("uw-retry");
+    if (retry) retry.onclick = () => window.location.reload();
+}
+
+(function installBuildHeader() {
+    const global = typeof globalThis !== "undefined" ? globalThis : window;
+    const original = global.fetch;
+    if (typeof original !== "function") return;
+    const wrapped = function (input, init) {
+        let url = typeof input === "string" ? input : (input && input.url) || "";
+        if (!isGatedApi(url)) return original.call(global, input, init);
+        const base = (typeof input === "object" && input) ? input : {};
+        const opts = Object.assign({}, base, init || {});
+        const src = opts.headers || base.headers;
+        const headers = {};
+        if (src) {
+            if (typeof src.forEach === "function") src.forEach((v, k) => { headers[k] = v; });
+            else Object.assign(headers, src);
+        }
+        headers["X-App-Build"] = String(APP_BUILD);
+        opts.headers = headers;
+        const target = typeof input === "object" && input ? input : url;
+        return original.call(global, target, opts).then(res => {
+            try {
+                if (res && res.status === 403 && typeof res.clone === "function") {
+                    res.clone().json().then(policy => {
+                        if (policy && policy.code === "update_required") showUpdateWall(policy);
+                    }).catch(() => {});
+                }
+            } catch (e) {}
+            return res;
+        });
+    };
+    global.fetch = wrapped;
+    if (typeof window !== "undefined") window.fetch = wrapped;
+})();
+
+
 // 初始状态（全部真实数据，无伪造数据）
 let state = {
     user: null,

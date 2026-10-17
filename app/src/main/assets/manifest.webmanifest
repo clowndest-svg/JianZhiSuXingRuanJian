@@ -1,1 +1,1 @@
-{"name":"轻塑记录","short_name":"轻塑","start_url":"/","scope":"/","display":"standalone","background_color":"#f8fafc","theme_color":"#059669","icons":[{"src":"/app-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]}
+{"name": "轻塑记录", "short_name": "轻塑", "start_url": "/", "scope": "/", "display": "standalone", "background_color": "#f8fafc", "theme_color": "#000000", "icons": [{"src": "/app-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}, {"src": "/app-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}]}

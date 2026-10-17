@@ -52,8 +52,8 @@ try:
     shutil.copy2(stage/'server.py',root/'server.py.new');os.replace(root/'server.py.new',root/'server.py')
     if (root/'app_modules').exists():shutil.rmtree(root/'app_modules')
     shutil.copytree(stage/'app_modules',root/'app_modules');copy_files(stage/'web',root/'web')
-    for name in ('backup.py','monitor.py'):shutil.copy2(stage/'scripts'/name,root/name)
-    for name in ('server.py','app_modules','web','backup.py','monitor.py'):protect_code(root/name)
+    for name in ('backup.py','monitor.py','set-min-build.py'):shutil.copy2(stage/'scripts'/name,root/name)
+    for name in ('server.py','app_modules','web','backup.py','monitor.py','set-min-build.py'):protect_code(root/name)
     ips=[run('docker','inspect','-f','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}',name) for name in ('xiaoye-release','qingsu-tls')]
     config=unit.read_text();import re
     config=re.sub(r'--forwarded-allow-ips=\S+','--forwarded-allow-ips='+','.join(ips),config)

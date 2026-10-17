@@ -1231,6 +1231,85 @@ def main():
                "夹带下一节": "## r" in note, "长度": len(note)})
         q("DELETE FROM kb_entries")
 
+        # ── 强制更新门：三份构建号必须同源，且豁免清单前后端一致 ──
+        import re as _rx
+        gradle_code = None
+        g_hit = _rx.search(r"versionCode\s+(\d+)",
+                           io.open(os.path.join(ROOT, "app", "build.gradle"), encoding="utf-8").read())
+        if g_hit:
+            gradle_code = int(g_hit.group(1))
+        js_txt_for_build = read_asset("app.js")
+        b_hit = _rx.search(r"const APP_BUILD = (\d+);", js_txt_for_build)
+        check("客户端会自报构建号（服务端门的前提）", b_hit is not None,
+              "app.js 里找不到 APP_BUILD，旧包新包在服务端长得一样")
+        check("客户端自报的构建号就是 gradle 那一版",
+              b_hit is not None and gradle_code is not None and int(b_hit.group(1)) == gradle_code,
+              {"app.js": b_hit.group(1) if b_hit else "?", "gradle": gradle_code})
+        embedded_build = None
+        if os.path.exists(apkpath):
+            import zipfile
+            with zipfile.ZipFile(apkpath) as zf:
+                member = [n for n in zf.namelist() if n.endswith("assets/app.js")]
+                if member:
+                    hit = _rx.search(rb"const APP_BUILD = (\d+);", zf.read(member[0]))
+                    embedded_build = int(hit.group(1)) if hit else -1
+        check("打出来的包里那份 app.js 也是当前构建号",
+              gradle_code is not None and embedded_build == gradle_code,
+              {"包内": embedded_build, "gradle": gradle_code})
+        check("清单声明最低可用构建，默认策略就是只许最新版",
+              vj.get("min_version_code") == vj.get("version_code"),
+              {"min": vj.get("min_version_code"), "version_code": vj.get("version_code")})
+        mvj = io.open(os.path.join(ROOT, "make_version_json.py"), encoding="utf-8").read()
+        check("构建号由脚本从 gradle 同步并回查包内资产，不靠手抄",
+              "sync_asset_build" in mvj and "apk_embedded_build" in mvj, "")
+        # 旧版本没有这两个名字，直接 .index 会把整轮判据带走——缺实现要记成红，不是崩
+        def _listed_in(source, marker, closer):
+            at = source.find(marker)
+            if at < 0:
+                return None
+            window = source[at:]
+            end = window.find(closer)
+            return set(_rx.findall(r'"(/api/[^"]+)"', window[:end if end > 0 else 200]))
+        srv_exempt = _listed_in(srv_txt, "GATE_EXEMPT_PATHS", ")")
+        cli_exempt = _listed_in(js_txt_for_build, "VIEWER_API_PATHS", "]")
+        check("访客接口豁免清单前后端逐条一致",
+              bool(srv_exempt) and srv_exempt == cli_exempt,
+              {"服务端": sorted(srv_exempt or []), "客户端": sorted(cli_exempt or [])})
+        check("缺构建号按太旧处理而不是按未知放行",
+              "if raw[:9].isdigit() else 0" in srv_txt,
+              "request_build 不再把缺头当 0，就不会有旧包被挡")
+        check("门只作用于 /api/，更新通道不参与",
+              'path.startswith("/api/")' in srv_txt, "门扩大到静态件会让用户下不到新包")
+        deploy_txt = io.open(os.path.join(ROOT, "scripts", "deploy.py"), encoding="utf-8").read()
+        knob_txt = io.open(os.path.join(ROOT, "scripts", "set-min-build.py"), encoding="utf-8").read()
+        check("部署会把强更刹车脚本发到服务器", "set-min-build.py" in deploy_txt, "")
+        check("改完刹车会独立回读健康检查而不是写完就算",
+              "/health/ready" in knob_txt and "min_build" in knob_txt, "")
+        check("健康检查看得见门的状态与还在调用的构建号",
+              '"min_build"' in srv_txt and '"build_override"' in srv_txt and '"builds"' in srv_txt, "")
+
+        # ── 图标：一次生成八份，漏一份就是"桌面新、设置里旧" ──
+        res = os.path.join(ROOT, "app", "src", "main", "res")
+        icon_files = ["mipmap-%s/ic_launcher.png" % d for d in
+                      ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi")]
+        icon_files += ["drawable-nodpi/ic_launcher_foreground.png", "drawable-nodpi/ic_launcher_monochrome.png"]
+        icon_missing = [f for f in icon_files if not os.path.exists(os.path.join(res, f))]
+        check("五档密度与自适应两层图标都在", not icon_missing, icon_missing)
+        stale_icons = [f for f in ("drawable/ic_launcher_foreground.xml", "drawable/ic_launcher_monochrome.xml")
+                       if os.path.exists(os.path.join(res, f))]
+        check("旧的矢量图标层已删除，不会与新位图抢同名资源", not stale_icons, stale_icons)
+        web_manifest = json.loads(io.open(os.path.join(ROOT, "app", "src", "main", "assets",
+                                                       "manifest.webmanifest"), encoding="utf-8").read())
+        icon_src = [i["src"].lstrip("/") for i in web_manifest.get("icons", [])]
+        bad_icons = [s for s in icon_src
+                     if not os.path.exists(os.path.join(ROOT, "app", "src", "main", "assets", s))
+                     or ('"%s"' % s) not in srv_txt]
+        check("网页清单指向的图标文件存在且有显式公网路由", bool(icon_src) and not bad_icons,
+              {"清单": icon_src, "有问题": bad_icons})
+        make_icons = io.open(os.path.join(ROOT, "scripts", "make-icons.py"), encoding="utf-8").read()
+        check("图标可由脚本一次重生成且会清掉同名旧层",
+              "removed_stale" in make_icons and "ic_launcher_round.png" in make_icons, "")
+
     # 评测里抓到的两条真 bug，各钉一条
     reset_ask_limiter(m)
     q("DELETE FROM kb_entries")
