@@ -63,7 +63,18 @@ r137 为了让站姿不"踮脚"，把脚向对小腿做了正交化。量过之�
   `ndcMax` ≤0.90、`fill` 77~86、`nanBones=0`、`badFrame=null`、单帧 1.2ms。
 - 反样本两次都红（体块表 3 条、骨长 1 条），不是"写完就算有判据"。
 
-## 5. 仍未覆盖（不写成通过）
+## 5. 发布与线上对账
+
+- 线上提交 `54a5e757a9b0b80625067fdf5d76b6292e74be49`，`/health/ready` 逐字回读，`release=r138`；
+  回退快照 `/opt/qingsu/backups/release-20261017-165404`。
+- `qingsu.apk` 5322721 字节、MD5 `51aeac55…`，公网回读与本地一致；
+  `body3d.js`、`vendor/three.module.js`、`models/cesium_man.glb`、`exercise_poses.json`
+  四个资产线上 SHA-256 逐个 MATCH。归档两端 MD5 一致（`2ae6c2d573b0f1cf29584a39444d6c2a`）。
+- `verify_live.py` 七项全过；本轮真机产生的 7 个 `usbqa*` 账号按 id 删净，
+  删前断言"要删的正好 91~97、剩下正好 2 和 3"，删后 `foreign_key_check` 0 条、
+  两个真实账号各表行数逐项未变。VERDICT=OK。
+
+## 6. 仍未覆盖（不写成通过）
 
 - **躯干骨长没有参与校正**（`pelvis`/`spine` 共用关节对，缩放会重复计入）。
   所以俯身类动作里肩高与髋高的关系仍可能和姿态表差几厘米。
