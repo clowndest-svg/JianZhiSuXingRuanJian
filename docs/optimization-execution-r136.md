@@ -50,4 +50,17 @@ Keep / Nike Training Club 那类健身 3D 演示看着顺眼，主要就是因�
   也就是说**"GitHub 上直接能下、授权能写进商用仓库、比例还是真人的骨骼模型"这一轮依然没找到**。
   剩下的现实路径是买一份带再分发授权的（ActorCore / CGTrader 的商业授权），或者接受现在这个风格。
 - 站姿的脚虽然不再踮，但鞋是一颗椭球，落地没有接触形变；走路类动作的脚掌翻转没有做。
+
+## 5. 发布与线上对账
+
+- 线上提交 `7ab99d7c97985c89a2e7afa552e68bddc6ade337`，`GET /health/ready` 逐字回读到它，
+  `release` 为 `r136`；回退快照 `/opt/qingsu/backups/release-20261017-134101`。
+- `qingsu.apk`：5318625 字节，MD5 `4da619da...`，由 `make_version_json.py` 现算进 `/version.json`
+  （版本 1.8.1 / 19，更新说明取 CHANGELOG 首条、不夹带下一节）。
+- 归档两端 MD5 一致（`6324f0455ddbedf2b35319faf609ba80`）；公网回读安装包与本地 MD5 一致；
+  `body3d.js`、`vendor/three.module.js`、`models/cesium_man.glb` 三个资产 SHA-256 逐个 MATCH。
+- `scripts/verify_live.py` 七项全过。
+- 生产数据收尾：本轮真机产生的 3 个 `usbqa*` 账号按 id 删除，动手前先断言
+  "要删的正好是 84/85/86、剩下的正好是 2 和 3"，删后 `users` 只剩 `tiangang`、`木木`，
+  `foreign_key_check` 0 条，两个真实账号各表行数删前后逐项相同。VERDICT=OK。
 - vivo 真机仍未连接，3D 在真实 GPU 上的表现依旧未知。
