@@ -1285,6 +1285,21 @@ def main():
         check("部署会把强更刹车脚本发到服务器", "set-min-build.py" in deploy_txt, "")
         check("改完刹车会独立回读健康检查而不是写完就算",
               "/health/ready" in knob_txt and "min_build" in knob_txt, "")
+        # show 只回退出码等于"我跑过了"，什么都没告诉运维——这条是被自己抓出来的：
+        # 第一次在服务器上跑 show，文件在、退出码 0、一个字没打印。
+        import subprocess as _sp
+        _env = dict(os.environ,
+                    QINGSU_MIN_BUILD_FILE=os.path.join(ROOT, "_audit_sandbox", "probe-min_build"),
+                    QINGSU_LOCAL_API="http://127.0.0.1:1")
+        _shown = _sp.run([sys.executable, os.path.join(ROOT, "scripts", "set-min-build.py"), "show"],
+                         capture_output=True, text=True, env=_env, timeout=60)
+        try:
+            _parsed = json.loads(_shown.stdout)
+        except Exception:
+            _parsed = {}
+        check("强更刹车的 show 会把门状态打印出来",
+              {"override", "manifest_min_version_code", "effective_min_build_live"} <= set(_parsed),
+              "stdout=" + _shown.stdout[:120] + " stderr=" + _shown.stderr[:80])
         check("健康检查看得见门的状态与还在调用的构建号",
               '"min_build"' in srv_txt and '"build_override"' in srv_txt and '"builds"' in srv_txt, "")
 

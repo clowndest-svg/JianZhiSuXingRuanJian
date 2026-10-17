@@ -34,14 +34,15 @@ def live():
 def show():
     override = TARGET.read_text(encoding="utf-8").strip() if TARGET.exists() else None
     ready = live()
-    print(json.dumps({
+    report = {
         "override_file": str(TARGET), "override": override,
         "manifest_min_version_code": manifest_min(),
         "effective_min_build_live": ready.get("min_build"),
         "build_override_present_live": ready.get("build_override"),
         "gate": ready.get("gate"), "release": ready.get("release"),
-    }, ensure_ascii=False, indent=1))
-    return ready
+    }
+    print(json.dumps(report, ensure_ascii=False, indent=1))
+    return report
 
 
 def write(value):
@@ -54,7 +55,8 @@ def write(value):
 def main():
     action = sys.argv[1] if len(sys.argv) > 1 else "show"
     if action == "show":
-        return 0 if "error" not in live() else 1
+        # show 必须把门的状态打印出来：只回一个退出码等于"我跑过了"，什么都没告诉运维
+        return 0 if "error" not in show() else 1
     if action == "auto":
         if TARGET.exists():
             removed = str(TARGET)
