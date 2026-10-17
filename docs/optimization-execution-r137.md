@@ -42,7 +42,19 @@
   现在暗芯把轮廓填住，`coverage` 量的仍是人体剪影，阈值不用动。
   这条留着提醒：**判据的口径要跟着渲染方式一起复核，不能默认它一直成立。**
 
-## 4. 仍未覆盖（不写成通过）
+## 4. 发布与线上对账
+
+- 线上提交 `62f8ca3c90b51155312b650450c714b0cfe767ff`，`/health/ready` 逐字回读到它，
+  `release` 为 `r137`；回退快照 `/opt/qingsu/backups/release-20261017-160940`。
+- `qingsu.apk`：5318625 字节，MD5 `31f13e58…`，公网回读与本地一致；
+  `/version.json` 现算（1.8.2 / 20），更新说明取 CHANGELOG 首条、不夹带下一节。
+- 归档两端 MD5 一致（`cdb64c75144b489d8f3b2c6f77cd4ee9`）；
+  `body3d.js`、`vendor/three.module.js`、`models/cesium_man.glb` 线上 SHA-256 逐个 MATCH。
+- `verify_live.py` 七项全过。本轮真机产生的 2 个 `usbqa*` 账号按 id 删除，
+  动手前断言"要删的正好 88/89、剩下正好 2 和 3"，删后 `users` 只剩两个真实账号、
+  `foreign_key_check` 0 条、真实账号各表行数删前后相同。VERDICT=OK。
+
+## 5. 仍未覆盖（不写成通过）
 
 - **观感仍然没有判据**。这一轮是我看了真机截图判断"像参考图了"，
   `fill/orphan/ndcMax` 只能证明画全、没飞件、没裁切。
