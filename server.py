@@ -2632,7 +2632,7 @@ def extension_asset(name):
             headers={"Cache-Control":"no-store","Service-Worker-Allowed":"/"}
         else:headers=_asset_headers(path, v)
         if not os.path.isfile(path):raise HTTPException(404,"资源未部署")
-        media={"js":"application/javascript","css":"text/css","svg":"image/svg+xml","webmanifest":"application/manifest+json","json":"application/json"}[name.rsplit(".",1)[-1]]
+        media=ASSET_MEDIA[name.rsplit(".",1)[-1]]
         return FileResponse(path,media_type=media,headers=headers)
     return serve
 
@@ -2667,5 +2667,14 @@ def get_vendor(name: str):
 def get_models(name: str):
     return static_subdir("models", name)
 
-for asset in ("features.js","features.css","sw.js","manifest.webmanifest","app-icon.png","guidance.json","body3d.js"):
-    app.get("/"+asset)(extension_asset(asset))
+ASSET_MEDIA = {"js": "application/javascript", "css": "text/css", "svg": "image/svg+xml",
+               "png": "image/png", "webmanifest": "application/manifest+json",
+               "json": "application/json"}
+PUBLIC_ASSETS = ("features.js", "features.css", "sw.js", "manifest.webmanifest",
+                 "app-icon.png", "guidance.json", "body3d.js")
+# 扩展名没登记类型就要在启动时炸，不能等到用户请求才发现是 500：
+# app-icon.png 换图标那次正是这么静默上线的，页面只是不显示图标，没人会去点它。
+for asset in PUBLIC_ASSETS:
+    if asset.rsplit(".", 1)[-1] not in ASSET_MEDIA:
+        raise RuntimeError("公网静态件 %s 的扩展名没有登记 MIME 类型" % asset)
+    app.get("/" + asset)(extension_asset(asset))

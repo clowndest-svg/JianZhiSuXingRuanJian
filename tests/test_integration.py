@@ -309,6 +309,30 @@ class Integration(unittest.TestCase):
         self.assertEqual(gap['record_status'], 'missing')
         self.assertFalse(gap['has_records'])
 
+    def test_public_static_assets_really_serve(self):
+        """公网静态件必须真取到 200 与正确类型。
+
+        只核"源码里有 @app.get(...)"会漏掉 extension_asset 的 media 表少一个扩展名
+        这种形状——路由在、文件在，请求进来是 500（本轮 app-icon.png 就是这样上线的）。
+        """
+        import shutil
+        web = Path(os.environ['QINGSU_WEB_DIR']); web.mkdir(parents=True, exist_ok=True)
+        names = ["app.js", "style.css", "features.js", "features.css", "sw.js",
+                 "manifest.webmanifest", "app-icon.png", "guidance.json", "body3d.js",
+                 "exercise_poses.json"]
+        expect = {"js": "application/javascript", "css": "text/css", "png": "image/png",
+                  "webmanifest": "application/manifest+json", "json": "application/json"}
+        for name in names:
+            source = ROOT / "app" / "src" / "main" / "assets" / name
+            assert source.is_file(), "仓库里缺这件资产：%s" % name
+            shutil.copyfile(source, web / name)
+        for name in names:
+            with self.subTest(asset=name):
+                got = self.c.get("/" + name)
+                self.assertEqual(got.status_code, 200, got.text[:90])
+                self.assertTrue(got.headers["content-type"].startswith(expect[name.rsplit(".", 1)[-1]]),
+                                "%s -> %s" % (name, got.headers["content-type"]))
+
     def test_forced_update_gate(self):
         """强更门：旧包不会发 X-App-Build，所以"缺头"是唯一打得着它们的判据。"""
         import json as _json
