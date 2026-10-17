@@ -1827,7 +1827,11 @@ def ai_status(user: dict = Depends(get_current_user)):
             "model_name": "qwen2.5-0.5b-instruct-q8_0",
             "redis": "up" if r_ok else "down",
             "redis_why": "" if r_ok else (_redis_last_err[0] or "冷却中或从未连上"),
-            "kb_backend": "private-sqlite"}
+            "kb_backend": "private-sqlite",
+            # 在线模型接没接、没接是因为什么，前端和排障都要看得见（绝不回密钥）
+            "online_model": online_status()["ok"] and "up" or "down",
+            "online_why": online_status()["why"],
+            "online_name": online_status()["model"]}
 
 
 @app.get("/api/ai/context")
@@ -1922,6 +1926,9 @@ _LLM_TIMEOUT = 25
 _LLM_RETRY_AFTER = 60
 _llm_block_until = [0.0]
 _llm_last_error = [""]      # 最近一次调用失败的原因，界面要能说得出
+
+
+from app_modules.online_ai import online_status, online_chat
 
 
 def llm_ready():
@@ -2065,6 +2072,13 @@ def chat_via_model(q, d):
         if value is not None:
             facts.add(str(value))
     brief = "、".join(sorted(facts)) or "（没读到本人数据）"
+    online, _why = online_chat("你在陪一个正在减脂的人聊天，对方说的是日常话。\n"
+                               "规则：中文，两三句，不超过 60 字；不许出现任何数字；"
+                               "不给医疗建议；不说「作为一个」「抱歉我无法」；不知道就说不知道。\n"
+                               "【他刚说的】" + (q or "")[:120] + "\n【你回】",
+                               max_tokens=120, temperature=0.7)
+    if online and _chat_safe(online, facts):
+        return online[:160].strip()
     prompt = ("你是减脂记录工具里的聊天助手，对方在跟你说话，不是查资料。\n"
               "规则：中文口语，两三句，不超过 60 字；不许出现任何数字（体重、热量、天数都不许编）；"
               "不给医疗建议；不说「作为一个」「抱歉我无法」这类话；不知道就说不知道。\n"
