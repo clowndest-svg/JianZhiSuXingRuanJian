@@ -90,6 +90,31 @@ public class DeviceSmokeTest {
                     +"return !!i&&i.complete&&i.naturalWidth>=64&&i.getBoundingClientRect().width>=28;})()"));
             screenshot("brand-header");
             js("closeDownloadModal()");
+            // 餐食核对弹窗：机主实拍说它"像在敷衍我"——裸标签、裸按钮、和软件不是一套
+            js("document.getElementById('input-meal-text').value='番茄鸡蛋肉汤面';logNaturalMeal();");
+            waitFor("document.getElementById('meal-confirm-cal')!==null");
+            assertEquals("餐食核对弹窗的输入框没挂在表单行上","true",js(
+                    "(()=>{const i=document.getElementById('meal-confirm-cal');"
+                    +"const row=i.closest('.td-field-row');if(!row)return false;"
+                    +"const r=i.getBoundingClientRect(),rr=row.getBoundingClientRect();"
+                    +"return r.width>=rr.width-32&&r.height>=40;})()"));
+            assertEquals("餐食核对弹窗的按钮没分主次","true",js(
+                    "(()=>{const b=[...document.querySelectorAll('#account-tools-dialog .td-actions button')];"
+                    +"return b.length===2&&new Set(b.map(x=>getComputedStyle(x).backgroundImage)).size===2;})()"));
+            assertEquals("餐食原文在弹窗里不是主角","true",js(
+                    "(()=>{const h=document.querySelector('#account-tools-dialog .td-meal-name');"
+                    +"return !!h&&parseFloat(getComputedStyle(h).fontWeight)>=700;})()"));
+            screenshot("dialog-meal-confirm");
+            js("document.getElementById('account-tools-dialog').close()");
+            // 闲聊：一句"你好"必须被接住，界面上还要标得出这条是闲聊
+            js("switchTab('gemini');document.getElementById('chat-input').value='你好';sendChatMessage();");
+            waitFor("document.body.innerText.indexOf('【闲聊】')>=0");
+            Thread.sleep(400);
+            assertEquals("闲聊回答里带了编造的数字","true",js(
+                    "(()=>{const t=document.body.innerText;const at=t.indexOf('【闲聊】');"
+                    +"return !/[0-9][0-9.]* *(斤|kcal|千卡|大卡|岁)/.test(t.slice(at,at+160));})()"));
+            screenshot("chat-hello");
+            js("switchTab('dashboard');");
             assertEquals("设置卡的行排版不对（行等宽、可点、有箭头、不越界、至少七行）","true",js(
                     "(()=>{const rows=[...document.querySelectorAll('#account-tool-card .td-row')];"
                     +"const w=rows.map(r=>Math.round(r.getBoundingClientRect().width));"

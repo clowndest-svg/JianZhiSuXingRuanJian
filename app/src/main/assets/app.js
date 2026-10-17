@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 24;
+const APP_BUILD = 25;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer"];
 
@@ -4102,7 +4102,7 @@ function buildLocalPrompt(question, ctx) {
     const kb = (ctx.kb || []).length
         ? "知识库近几条：" + ctx.kb.map(k => k.answer).join(" / ")
         : "知识库里还没有相关条目";
-    return "你是减脂记录工具里的助手。规则：涉及数字只能用【本人数据】里出现过的；"
+    return "你是减脂记录工具里的助手。对方可能只是打招呼或随口聊天，那就正常接话，不要让他去查资料。规则：涉及数字只能用【本人数据】里出现过的；"
         + "资料没写到的结论不要补；不知道就说不知道，不要编。用中文两三句说完，不要复述问题。\n"
         + "【本人数据】" + facts.join("；") + "\n"
         + "【记忆】" + mem + "\n"
@@ -4188,6 +4188,7 @@ async function askAnyEngine(question) {
 function engineTag(source) {
     return {
         data: "【你的真实记录】", web: "【联网资料】", web_model: "【服务器模型整理】",
+        chat: "【闲聊】",
         kb: "【本机知识库】", memory: "【你的备注】", none: "【没查到】",
         limited: "【查询过于频繁】", local_model: "【手机本地模型】"
     }[source] || "";

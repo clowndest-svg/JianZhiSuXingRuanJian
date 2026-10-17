@@ -113,3 +113,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
  .td-item-acts{flex-direction:column}
  .td-actions{flex-wrap:wrap}
 }
+/* 餐食核对弹窗的头部：原文是主角，匹配说明退成一行小字 */
+.td-meal-head{padding:12px 14px;margin:0 0 14px;border:1px solid #E2E8F0;border-radius:14px;background:#F8FAFC}
+.td-meal-name{font-size:16px;font-weight:700;line-height:1.45;color:#0F172A;overflow-wrap:anywhere}
+.td-meal-why{margin-top:5px;font-size:12.5px;line-height:1.6;color:#64748B;overflow-wrap:anywhere}
+.td-meal-why .td-chip{margin-right:6px}

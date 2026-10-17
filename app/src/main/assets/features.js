@@ -9,7 +9,21 @@ logNaturalMeal=async function(){
     const slot={breakfast:'早餐',lunch:'午餐',dinner:'晚餐',snack:'加餐'}[state.selectedMealSlot]||'餐食';
     try{
         const result=await postApi('/api/food/preview',{food_name:text});pendingMeal={food_name:text,slot,estimate:result.cal};
-        toolDialog('核对餐食与份量',`<p>${escapeHtml(text)}</p><p>${escapeHtml(result.reason||'按名称估算，非称重结果')}</p><label>本餐热量 kcal（可修正）<input id="meal-confirm-cal" type="number" min="0" max="10000" value="${Number(result.cal)}"></label><p>如按包装称重计算，可填写以下两项；手动热量不能推算出真实宏量。</p><label>实际重量 g<input id="meal-grams" type="number" min="0" step="0.1"></label><label>包装每100g热量 kcal<input id="meal-per100" type="number" min="0" step="0.1"></label><button onclick="confirmMealRecord()">确认并保存</button><p id="meal-confirm-result" role="status"></p>`);
+        toolDialog('核对餐食与份量',`<div class="td-meal-head">
+              <div class="td-meal-name">${escapeHtml(text)}</div>
+              <div class="td-meal-why"><span class="td-chip">${Number(result.cal)} kcal</span>${escapeHtml(result.reason||'按名称估算，非称重结果')}</div>
+            </div>
+            <div class="td-group">
+              <label class="td-field-row"><span class="td-field-label">本餐热量（kcal，可修正）</span><input id="meal-confirm-cal" type="number" min="0" max="10000" value="${Number(result.cal)}" inputmode="numeric"></label>
+            </div>
+            <div class="td-group-label">按包装称重换算（选填）</div>
+            <div class="td-group">
+              <label class="td-field-row"><span class="td-field-label">实际重量（g）</span><input id="meal-grams" type="number" min="0" step="0.1" inputmode="decimal" placeholder="例：260"></label>
+              <label class="td-field-row"><span class="td-field-label">包装每 100g 热量（kcal）</span><input id="meal-per100" type="number" min="0" step="0.1" inputmode="decimal" placeholder="照包装背面抄"></label>
+            </div>
+            <p class="td-note">填了这两项就按重量换算覆盖上面那个数；手动热量只能算热量，推不出真实宏量。</p>
+            <p id="meal-confirm-result" class="td-status" role="status"></p>
+            <div class="td-actions"><button type="button" class="td-btn-quiet" onclick="document.getElementById('account-tools-dialog').close()">先不记</button><button type="button" class="td-btn" onclick="confirmMealRecord()">确认并保存</button></div>`);
     }catch(e){
         // Preview is optional: preserve the user's original description as a draft.
         if(!e.status){const rows=readDrafts();const id=Date.now()+'-'+Math.random().toString(36).slice(2);rows.push({id,path:'/api/food/log',unsubmitted:true,body:{food_name:text,slot,request_id:id}});setDrafts(rows);callNativeToast('无法联网估算，原始餐食已存本机草稿，联网后可同步');}

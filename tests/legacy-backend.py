@@ -1353,6 +1353,47 @@ def main():
         check("通知小图标由脚本从同一张 artwork 生成（白色剪影+透明底）",
               "ic_stat_qingsu" in make_icons and "silhouette" in make_icons, "")
 
+        feat_js = read_asset("features.js")  # 下面几条弹窗判据要看它，这里先取一次
+        check("闲聊来源在界面上有中文标签，不显示 undefined", "chat:" in js_txt_for_build, "")
+        # 弹窗排版系统要能被"下一个新弹窗"自动守住：裸 p/label/button 就是没接上样式。
+        # 取模板正文用"反引号之间"这种朴素切法，别拿正则去啃引号，容易把自己绕死。
+        _bodies = []
+        _cursor = 0
+        while True:
+            _at = feat_js.find("toolDialog(", _cursor)
+            if _at < 0:
+                break
+            _head = feat_js[_at:_at + 200]
+            # 只数调用点：toolDialog 自己的函数体里也有反引号模板，混进来会把实现当弹窗
+            if ('",' not in _head and "'," not in _head):
+                _cursor = _at + 10
+                continue
+            _tick = feat_js.find(chr(96), _at)
+            _end = feat_js.find(chr(96), _tick + 1) if _tick > 0 else -1
+            if _tick > 0 and _end > _tick:
+                _bodies.append(feat_js[_tick + 1:_end])
+            _cursor = _at + 10
+        check("每个 toolDialog 模板都用到了排版系统的结构件",
+              len(_bodies) >= 6 and all(('class="td-' in b) for b in _bodies),
+              {"模板数": len(_bodies),
+               "没接上的": [b[:44] for b in _bodies if 'class="td-' not in b][:2]})
+        # "模板里出现过 td- 类"太松：只删掉开头那一处照样过。查正文开头才算接上了层级。
+        check("每个弹窗正文一开头就是排版结构件（不是裸段落）",
+              all(b.lstrip()[:60].find('class="td-') >= 0 for b in _bodies),
+              [b[:44] for b in _bodies if b.lstrip()[:60].find('class="td-') < 0][:2])
+        _btn_all = sum(b.count("<button") for b in _bodies)
+        _btn_classed = sum(b.count('<button type="button" class="td-') for b in _bodies)
+        check("弹窗模板里每个按钮都带样式类（裸按钮会退回浏览器默认外观）",
+              _btn_all > 0 and _btn_all == _btn_classed,
+              {"按钮数": _btn_all, "带类的": _btn_classed})
+        check("弹窗里的输入框都挂在表单行或记录行上",
+              all(("<input" not in b) or ("td-field-row" in b or "td-row" in b or "td-item" in b)
+                  for b in _bodies),
+              [b[:44] for b in _bodies if "<input" in b and "td-field-row" not in b
+               and "td-row" not in b and "td-item" not in b][:2])
+        check("餐食核对弹窗把原文当主角、按钮分主次",
+              "td-meal-head" in feat_js and "先不记" in feat_js, "")
+
         # ── 排版层：三块界面重做后，形状要钉住，不能靠"我看着顺眼了" ──
         feat_css = read_asset("features.css")
         feat_js = read_asset("features.js")
@@ -1417,6 +1458,42 @@ def main():
     a_cake = m.ask(m.AskReq(question="明天能不能吃一整个蛋糕"), user)
     check("预测型提问明确不作体重承诺", a_cake["source"] == "scene" and "不能预测" in a_cake["answer"],
           "%s %s" % (a_cake["source"], a_cake["answer"][:100]))
+    # ── 闲聊层：一句"你好"不许再被检索口径顶回来 ──
+    CHAT_PROBES = ["你好", "您好", "在吗", "谢谢", "你是谁", "你能做什么", "减肥好累", "无聊", "讲个笑话"]
+    for probe_q in CHAT_PROBES:
+        got_chat = m.ask(m.AskReq(question=probe_q), user)
+        check("闲聊「%s」被接住而不是被拒" % probe_q,
+              got_chat["source"] == "chat" and "减脂相关词" not in got_chat["answer"],
+              "%s %s" % (got_chat["source"], got_chat["answer"][:60]))
+        check("闲聊「%s」回答里不许带数字" % probe_q,
+              not any(c.isdigit() for c in got_chat["answer"]), got_chat["answer"][:60])
+    check("「我今天吃了多少」仍走本人流水不被闲聊抢走",
+          m.ask(m.AskReq(question="我今天吃了多少"), user)["source"] == "data", "")
+    _mid = m.ask(m.AskReq(question="你好，中午吃多了怎么办"), user)
+    check("打招呼+正事不被当成寒暄敷衍", _mid["source"] in ("data", "scene"),
+          "%s %s" % (_mid["source"], _mid["answer"][:80]))
+    check("「吃火锅怎么点」不被当成寒暄",
+          m.ask(m.AskReq(question="吃火锅怎么点"), user)["source"] != "chat", "")
+    check("实词提取能认出非减脂问题的主题",
+          m._content_terms("量子计算是什么") == ["量子计算"]
+          and "什么" not in m._content_terms("今天天气怎么样"),
+          str(m._content_terms("量子计算是什么")))
+    check("闲聊关键词不许用单字（长句会误命中）",
+          all(len(w) >= 2 for _k, ws, _a in m.CHAT_INTENTS for w in ws),
+          [w for _k, ws, _a in m.CHAT_INTENTS for w in ws if len(w) < 2])
+    check("每条闲聊意图都有确定文案",
+          all(len(txt) > 8 for _k, _w, txt in m.CHAT_INTENTS), "")
+    check("闲聊不许带承诺或诊断词",
+          not [w for _k, _w, txt in m.CHAT_INTENTS for w in ("一定能", "保证", "绝对", "治愈", "停药") if w in txt], "")
+    reset_ask_limiter(m)
+    for _i in range(10):
+        m.ask(m.AskReq(question="量子计算是什么"), user)
+    check("开放题的小配额用完后如实说限流而不是装成没查到",
+          m.ask(m.AskReq(question="量子计算是什么"), user)["source"] == "limited", "")
+    _after_broad = m.ask(m.AskReq(question="不吃晚饭真的能瘦得更快吗"), user)
+    check("开放题限流不影响减脂题", _after_broad["source"] in ("scene", "data", "kb", "web", "web_model"),
+          "%s %s" % (_after_broad["source"], _after_broad["answer"][:80]))
+    reset_ask_limiter(m)
     a_period = m.ask(m.AskReq(question="生理期要不要停训练"), user)
     check("生理期不被训练流水抢走", a_period["source"] == "scene" and "生理期" in a_period["answer"],
           "%s %s" % (a_period["source"], a_period["answer"][:90]))
@@ -1425,7 +1502,8 @@ def main():
     for _i in range(14):
         m.ask(m.AskReq(question="量子计算是什么"), user)
     a_after2 = m.ask(m.AskReq(question="吃苹果会不会影响减脂"), user)
-    check("拒答不耗尽联网配额", a_after2["source"] != "limited", a_after2["source"])
+    check("开放闲聊不吃减脂题的联网配额（两条配额分开）",
+          a_after2["source"] != "limited", a_after2["source"])
 
     reset_ask_limiter(m)
     q("DELETE FROM kb_entries")
@@ -1617,9 +1695,17 @@ def main():
 
     q("DELETE FROM kb_entries")
     del probe[:]
+    reset_ask_limiter(m)   # 前面几条开放题判据把小配额用掉了，这里要真的清空再量
     a_ni = m.ask(m.AskReq(question="嚼口香糖会不会影响减脂"), user)
-    check("认不出领域词就根本不联网", len(probe) == 0 and a_ni["source"] == "none", probe)
-    check("不联网时如实说为什么不答", "没有能确认的减脂相关词" in a_ni["answer"], a_ni["answer"][:120])
+    # 旧契约是"认不出减脂领域词就压根不联网"；机主要"能像豆包一样随便聊、能联网"，
+    # 契约改成：按问题实词试一次联网，但垃圾结果照样不许凑答案，且不许耗尽减脂题配额。
+    check("没有领域词也会按实词试联网一次", len(probe) >= 1, probe)
+    check("试联网仍不许拿不相干结果凑答案",
+          a_ni["source"] in ("none", "web", "web_model", "chat")
+          and ("没有一条真正讲到" in a_ni["answer"] or a_ni["source"] != "none"),
+          "%s %s" % (a_ni["source"], a_ni["answer"][:120]))
+    check("邮箱页与字典页没被塞进这类回答",
+          "邮箱" not in a_ni["answer"] and "汉语文字" not in a_ni["answer"], a_ni["answer"][:150])
 
     del probe[:]
     a_hot = m.ask(m.AskReq(question="在外聚餐吃火锅该怎么点"), user)

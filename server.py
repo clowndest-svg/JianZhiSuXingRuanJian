@@ -1775,11 +1775,12 @@ def rate_peek(key):
 
 def rate_reset_all_ask():
     """清掉所有问答限流窗口（回归台与运维临时放行用）。"""
-    ok, val = _redis_cmd(["KEYS", "qs:rl:ask:*"])
-    if ok and isinstance(val, list):
-        for k in val:
-            _redis_cmd(["DEL", k])
-    for k in [x for x in list(_mem_buckets) if x.startswith("ask:")]:
+    for pattern in ("qs:rl:ask:*", "qs:rl:askbroad:*"):
+        ok, val = _redis_cmd(["KEYS", pattern])
+        if ok and isinstance(val, list):
+            for k in val:
+                _redis_cmd(["DEL", k])
+    for k in [x for x in list(_mem_buckets) if x.startswith("ask:") or x.startswith("askbroad:")]:
         _mem_buckets.pop(k, None)
 
 
@@ -1971,6 +1972,112 @@ DOMAIN_TERMS = [
     "平台期", "体重", "腰围", "体脂", "基数", "反弹", "节食", "断食", "代谢", "便秘",
     "训练", "力量", "有氧", "拉伸", "睡眠", "生理期", "水肿",
 ]
+# ── 闲聊层 ────────────────────────────────────────────────────────────
+# 一句"你好"被"没有能确认的减脂相关词"顶回来，是把寒暄当成了检索查询。
+# 检索层该守的诚实要守住，但人的话先要接住：这几条是确定文案，不让模型发挥。
+CHAT_INTENTS = [
+    ("greeting", ("你好", "您好", "hi", "hello", "嗨嗨", "哈喽", "在吗", "在不在", "早上好", "中午好", "晚上好"),
+     "你好，我在。想问吃的、问练的，还是就说两句？"),
+    ("thanks", ("谢谢", "多谢", "辛苦了", "太有用了", "明白了"),
+     "不客气。要记的直接说，我在。"),
+    ("bye", ("再见", "拜拜", "不聊了", "先这样", "睡了"),
+     "行，随时回来。今天有没有漏记的，回来补一笔就行。"),
+    ("identity", ("你是谁", "你是什么", "你叫什么", "你叫啥", "你是谁", "你是ai", "你是人工智能"),
+     "我是这个减脂记录工具里的助手。我能查你自己的流水（体重、吃了什么、练了什么），"
+     "能按内置的减脂场景给办法，需要外部资料时我会去搜——但只把对题的当参考，不对题就直说。"),
+    ("capability", ("你能做什么", "你会什么", "你能干什么", "怎么用", "能帮我什么", "有什么功能", "你会什么"),
+     "三件事最实在：问「我今天吃了多少」「还剩多少额度」，我按你的真实流水答；"
+     "问「中午吃多了怎么办」这类场景，我给成体系的补救办法；问具体食物「奶茶怎么点」，我给选择办法。"
+     "说「记住某件事」我会存下来，下次带着用。"),
+    ("mood", ("不想减了", "坚持不下去", "想放弃", "好难", "难受", "沮丧", "没动力", "破罐", "摆烂", "减肥好累"),
+     "这段最难，先别做决定。今天只要不加分就算赢——记一笔体重或几杯水，把「今天没断」留住比什么都值钱。"
+     "要是某一顿崩了，告诉我是哪顿，我按你的流水算算到底差多少，通常比你以为的小。"),
+    ("bored", ("无聊", "陪我聊", "聊聊天", "讲个笑话", "说点什么", "聊两句"),
+     "行，聊两句。你这几笔里有没有哪顿其实可以不吃？我按你的流水给你算算省了多少。"),
+]
+
+_CHAT_FILLERS = ("什么", "怎么", "为什么", "请问", "能不能", "是不是", "哪些", "多少", "可以", "这个",
+                 "那个", "一个", "有没有", "告诉", "帮我", "介绍", "聊聊", "说说", "给我", "应该",
+                 "时候", "时间", "我们", "你们", "他们", "自己", "现在", "一下", "还有", "就是",
+                 "这样", "那样", "这么", "那么", "有点", "比较", "真的", "觉得", "希望", "谢谢",
+                 "你好", "请问", "如何", "哪里", "谁", "吗", "呢", "吧", "啊", "呀", "的", "了", "是")
+
+
+def _normalized(q):
+    return re.sub(r"[\s,.!?~、。，？！…；;：:'\"()（）【】]+", "", (q or "").lower())
+
+
+def _chat_intent(q):
+    """寒暄/身份/能力/情绪。只在短问句上命中，长句里出现"你好"多半还有正事。"""
+    text = _normalized(q)
+    if not text or len(text) > 24:
+        return None
+    for _key, words, answer in CHAT_INTENTS:
+        if any(w in text for w in words):
+            return answer
+    return None
+
+
+def _content_terms(q):
+    """问题里的实词：把疑问词和助词剔掉后剩下的两字以上片段。
+
+    原来只有 90 个减脂领域词能联网，问"量子计算是什么"直接被拒。
+    放开成按实词检索，但相关性闸门照旧——搜回来不含这个实词的，一样不用。"""
+    out = []
+    for run in re.findall(r"[\u4e00-\u9fa5A-Za-z]{2,}", q or ""):
+        cut = run
+        for word in _CHAT_FILLERS:
+            cut = cut.replace(word, " ")
+        out += [piece for piece in cut.split() if len(piece) >= 2]
+    seen, kept = set(), []
+    for term in out:
+        if term not in seen:
+            seen.add(term)
+            kept.append(term)
+    return kept[:4]
+
+
+_NUM_UNIT = re.compile(r"(\d+(?:\.\d+)?)\s*(斤|kcal|千卡|大卡|ml|毫升|cm|厘米|岁|公斤|kg)")
+
+
+def _chat_safe(text, facts):
+    """闲聊不许带数字：0.5B 会顺嘴编一个体重或热量出来，那比不答更坏。"""
+    if not text or len(text) > 160:
+        return False
+    if any(w in text for w in ("作为一个", "我无法", "抱歉", "对不起", "建议咨询")):
+        return False
+    if any(w in text for w in ("一定能", "保证", "绝对", "治愈", "减肥药", "停药", "确诊")):
+        return False
+    for value, unit in _NUM_UNIT.findall(text):
+        if value not in facts:
+            return False
+    return True
+
+
+def chat_via_model(q, d):
+    """开放闲聊交给本机模型，但只允许它"接话"，不允许它给事实。
+
+    模型没跑或输出越界时不装作成功：返回 None，让调用方走确定文案。"""
+    facts = set()
+    for key in ("current_weight_jin", "target_weight_jin", "budget_cal", "remaining_cal",
+                "today_consumed", "today_burned", "height", "age"):
+        value = (d.get("profile") or {}).get(key) if key in ("height", "age") else d.get(key)
+        if value is not None:
+            facts.add(str(value))
+    brief = "、".join(sorted(facts)) or "（没读到本人数据）"
+    prompt = ("你是减脂记录工具里的聊天助手，对方在跟你说话，不是查资料。\n"
+              "规则：中文口语，两三句，不超过 60 字；不许出现任何数字（体重、热量、天数都不许编）；"
+              "不给医疗建议；不说「作为一个」「抱歉我无法」这类话；不知道就说不知道。\n"
+              "【这个人现在的数字，仅供你接话用，不许写进回答】" + brief + "\n"
+              "【他刚说的】" + (q or "")[:120] + "\n【你回】")
+    txt = llm_chat(prompt, max_tokens=90, temperature=0.7)
+    if not txt:
+        return None
+    txt = _plain(txt)[:160].strip()
+    return txt if _chat_safe(txt, facts) else None
+
+
+_BROAD_LIMIT_PER_MIN = 6
 _DICT_PAT = re.compile(r"（汉语|汉语词典|汉语国学|怎么读|的意思|的解释|拼音|组词|部首|笔顺|字词|字典")
 
 
@@ -2216,21 +2323,38 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
     if scene:
         return {"code": 0, "source": "scene", "answer": scene, "items": []}
 
+    chat = _chat_intent(q)
+    if chat:
+        return {"code": 0, "source": "chat", "answer": html_escape(chat), "items": []}
+
     if req.route_only:
         return {"code":0,"source":"none","answer":"当前问题需要模型或外部参考","items":[]}
 
-    # 认不出领域词就直接拒，这条判断不碰网络，所以不能算进每分钟配额——
-    # 否则连问几个"量子计算是什么"会把真正需要联网的问题挤到限流后面
-    if not _question_terms(q):
-        return {"code": 0, "source": "none",
-                "answer": "这个问题里我没有能确认的减脂相关词，联网搜回来的东西判断不了对不对题，"
-                          "所以不拿它凑答案。换个带具体食物或场景的说法再问"
-                          "（例：吃火锅怎么点、中午吃多了怎么办），或先看【食谱/外卖】里的内置建议。",
-                "items": []}
+    # 认不出领域词也不当场拒绝：先按问题实词试联网；实在没有可核对的实词，
+    # 才让本机模型接一句人话。原来这里直接回"没有能确认的减脂相关词"，
+    # 一句"你好"就是这么被撞回来的。
+    terms = _question_terms(q)
+    broad_mode = not terms
+    if broad_mode:
+        broad = _content_terms(q)
+        if not broad:
+            small = chat_via_model(q, d)
+            if small:
+                return {"code": 0, "source": "chat", "answer": html_escape(small), "items": []}
+            return {"code": 0, "source": "chat",
+                    "answer": html_escape("这句我接不太上。你可以问我今天吃了多少、"
+                                          "中午吃多了怎么办，或者某个具体食物怎么点；"
+                                          "想聊两句也行。"),
+                    "items": []}
 
-    if not _ask_allowed(user["id"]):
+    # 两条配额分开：闲聊/开放题走小配额，不许把真正要查减脂的问题挤到限流后面
+    # （这正是当年"认不出领域词就不联网"想解决的问题，不能因为放开联网就丢掉）
+    limit = _BROAD_LIMIT_PER_MIN if broad_mode else _ASK_LIMIT_PER_MIN
+    ok, _wait, _n = (rate_hit("askbroad:" + str(user["id"]), limit, 60) if broad_mode
+                     else rate_hit("ask:" + str(user["id"]), limit, 60))
+    if not ok:
         return {"code": 0, "source": "limited",
-                "answer": f"联网查询太快了（每分钟最多 {_ASK_LIMIT_PER_MIN} 次），先等一会儿再问。",
+                "answer": f"联网查询太快了（每分钟最多 {limit} 次），先等一会儿再问。",
                 "items": []}
 
     mem = memory_list(user["id"])
@@ -2246,7 +2370,7 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
                 "items": [{"title": it.get("title", ""), "url": html_escape(it.get("url", ""), quote=True),
                            "host": html_escape(it.get("host", ""), quote=True)} for it in items]}
 
-    terms = _question_terms(q)
+    terms = terms or _content_terms(q)
     search_q = _rewrite_query(q)
     try:
         items = web_search(search_q)
@@ -2258,9 +2382,9 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
     kept = _keep_relevant(items, terms)
     if not kept:
         return {"code": 0, "source": "none",
-                "answer": "联网搜到的 %d 条结果里没有一条真正讲到「%s」，都是不相干的页面。"
-                          "我不拿无关内容凑答案——可以换个说法再问，"
-                          "或先看【食谱/外卖】里的内置建议。" % (len(items), "、".join(terms)),
+                "answer": "联网搜到的 %d 条结果里没有一条真正讲到「%s」，都是不相干的页面，"
+                          "我不拿无关内容凑答案。换个具体点的说法再问我试试，"
+                          "或者接着聊也行。" % (len(items), "、".join(terms)),
                 "items": []}
     items = kept
 
