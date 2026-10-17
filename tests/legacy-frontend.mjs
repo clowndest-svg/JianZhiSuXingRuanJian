@@ -976,8 +976,8 @@ if (!/loadApkMeta/.test(dlJs)) {
   check("下载弹窗无写死体积", !/\(\s*5\.5MB\s*\)/.test(dlHtml) && !/安装包 \(\d/.test(dlHtml),
         (dlHtml.match(/安装包 \([^)]*\)/) || [""])[0]);
   check("下载弹窗无写死版本号", !/v5\.0/.test(dlHtml), (dlHtml.match(/v5\.0[^<"]{0,14}/g) || []).slice(0,3));
-  check("版本与体积改为待填占位",
-        dlHtml.includes("apk-size-line") && dlHtml.includes("apk-ver-top"), "");
+  check("版本与体积改为待填占位", dlHtml.includes("版本待读取") && !dlHtml.includes("apk-size-line")
+    && dlHtml.includes("apk-ver-line"), "");
   check("清单读不到时显示未知而不是回落假数",
         dlJs.includes("版本未知") && dlJs.includes("体积未知"), "");
   check("下载文件名带真实版本",

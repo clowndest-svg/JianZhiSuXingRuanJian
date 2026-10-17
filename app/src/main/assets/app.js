@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 26;
+const APP_BUILD = 27;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer"];
 
@@ -890,7 +890,7 @@ function renderMealDiary() {
                 </div>
                 <div style="flex-shrink: 0; margin-left: 8px; text-align: right;">
                     <strong style="color: var(--primary-dark); font-size: 12px;">${item.cal} kcal</strong>
-                        ${!isPublicScreen() ? `<div><button type="button" onclick="editMealRecord(${Number(item.id)})">修正</button><button type="button" onclick="deleteMealRecord(${Number(item.id)})">删除</button></div>` : ''}
+                        ${!isPublicScreen() ? `<div><button type="button" class="btn-row" onclick="editMealRecord(${Number(item.id)})">修正</button><button type="button" class="btn-row-danger" onclick="deleteMealRecord(${Number(item.id)})">删除</button></div>` : ''}
                     <div style="font-size: 10px; color: var(--text-light);">${escapeHtml(item.time_str || '')}</div>
                 </div>
             </div>
@@ -1407,7 +1407,7 @@ function showInPageReminder(title, body) {
     }
     bar.innerHTML = "<strong>" + escapeHtml(String(title)) + "</strong>"
         + "<span>" + escapeHtml(String(body)) + "</span>"
-        + "<button type=\"button\" onclick=\"document.getElementById('inpage-remind').style.display='none'\">知道了</button>";
+        + "<button type=\"button\" class=\"btn-row\" onclick=\"document.getElementById('inpage-remind').style.display='none'\">知道了</button>";
     bar.style.display = "flex";
 }
 
@@ -1439,7 +1439,7 @@ function refreshNotifPermissionHint(showToast = false) {
         hint.id = "notif-hint-box";
         hint.className = "notif-hint";
         hint.innerHTML = "<span>通知权限尚未开启。启用每日提醒后，还需允许系统通知；厂商省电策略可能延迟送达。</span>"
-            + "<button type=\"button\" onclick=\"openSystemNotifSettings()\">去开启</button>";
+            + "<button type=\"button\" class=\"btn-row\" onclick=\"openSystemNotifSettings()\">去开启</button>";
         const host = document.querySelector("main") || document.body;
         host.insertBefore(hint, host.firstChild);
     }
@@ -4452,6 +4452,8 @@ async function loadApkMeta() {
         // href 必须带源：App 里根相对路径指向 assets 域，点下去什么都不会发生
         link.href = API_BASE + "/qingsu.apk?v=" + String(v.sha256 || "").slice(0, 12);
         link.setAttribute("download", "轻塑_" + v.version_name + "_b" + v.version_code + ".apk");
+        const box = document.getElementById("modal-download-url");
+        if (box) { box.textContent = link.href; box.setAttribute("href", link.href); }
     }
     state.apkMeta = v;
     return v;

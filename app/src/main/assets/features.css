@@ -4,6 +4,7 @@
    机主实拍直接说"丑得离谱"。 */
 
 /* ---------- 对话框外壳：标题与操作区固定，中间滚动 ---------- */
+.tool-dialog:not([open]){display:none}
 .tool-dialog{box-sizing:border-box;display:flex;flex-direction:column;width:min(94vw,560px);max-height:88dvh;border:0;border-radius:18px;padding:0;background:#fff;color:#0F172A;font-size:15px;overflow:hidden;box-shadow:0 18px 48px rgba(15,23,42,.22)}
 .tool-dialog::backdrop{background:rgba(15,23,42,.55)}
 .tool-dialog>header{display:flex;align-items:flex-start;gap:12px;padding:18px 18px 14px;border-bottom:1px solid #EEF2F6;flex:0 0 auto}
@@ -13,7 +14,7 @@
 .td-lead{margin:0 0 14px;color:#64748B;font-size:13.5px;line-height:1.65}
 .td-note{margin:10px 0 0;color:#64748B;font-size:12.5px;line-height:1.6}
 .td-empty{padding:26px 12px;text-align:center;color:#94A3B8;font-size:14px;border:1px dashed #E2E8F0;border-radius:14px}
-.td-status{margin:12px 0 0;font-size:13.5px;line-height:1.6;color:#047857;overflow-wrap:anywhere}
+.td-status{margin:12px 0 0;overflow-wrap:anywhere;font-size:13.5px;line-height:1.6;color:#047857;overflow-wrap:anywhere}
 .td-status[data-err="1"]{color:#B91C1C}
 
 /* ---------- 分组列表 ---------- */
@@ -120,3 +121,5 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .td-meal-why .td-chip{margin-right:6px}
 .td-ai-row{margin:0 0 6px}
 .td-ai-row .td-btn-quiet{flex:0 0 auto;font-size:14px;padding:9px 14px}
+/* 在线/本机模型估算的出处说明，退一行小字 */
+.td-meal-src{margin:6px 0 0;font-size:12px;line-height:1.6;color:#64748B;overflow-wrap:anywhere}

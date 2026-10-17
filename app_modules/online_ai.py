@@ -22,6 +22,12 @@ _MACRO_RANGE = (0.0, 400.0)
 _BANNED = ("作为一个", "我无法", "抱歉", "建议咨询", "一定能", "保证", "绝对", "治愈", "停药", "诊断")
 
 
+# 没有外部 key 时走服务器本机那台 llama-server（qwen2.5-0.5b）。
+# 上一版只认外部配置，界面上就写着"未接入"，而机器上明明有个能用的模型——
+# 那是接线错了，不是没能力。
+_LOCAL_LLM = os.environ.get("QINGSU_LOCAL_LLM_URL", "http://127.0.0.1:8081/v1/chat/completions")
+
+
 def _load():
     for path in _CONFIG_CANDIDATES:
         if not path or not os.path.isfile(path):
@@ -39,18 +45,21 @@ def _load():
         if not str(cfg.get("api_key") or "").strip():
             return None, "配置里没有 api_key"
         return cfg, ""
-    return None, "服务器上没有在线模型配置（放一个 /opt/qingsu/ai-online.json 就能开）"
+    return {"base_url": "", "model": "qwen2.5-0.5b-instruct-q8_0", "local": True}, ""
 
 
 def online_status(force=False):
-    """给状态接口和判据用：能不能用、为什么不能用。绝不返回密钥。"""
+    """给状态接口和判据用：用哪个模型、为什么不能用。绝不返回密钥。"""
     now = time.time()
     if not force and now - _state["checked_at"] < _RECHECK:
-        return {"ok": _state["cfg"] is not None, "why": _state["why"],
-                "model": (_state["cfg"] or {}).get("model", "")}
+        cfg = _state["cfg"]
+        return {"ok": cfg is not None, "why": _state["why"],
+                "model": (cfg or {}).get("model", ""),
+                "source": "本机模型" if (cfg or {}).get("local") else "外部接口"}
     cfg, why = _load()
     _state.update(checked_at=now, cfg=cfg, why=why)
-    return {"ok": cfg is not None, "why": why, "model": (cfg or {}).get("model", "")}
+    return {"ok": cfg is not None, "why": why, "model": (cfg or {}).get("model", ""),
+            "source": "本机模型" if (cfg or {}).get("local") else ("外部接口" if cfg else "无")}
 
 
 def online_chat(prompt, max_tokens=400, temperature=0.3):
@@ -59,14 +68,14 @@ def online_chat(prompt, max_tokens=400, temperature=0.3):
     if not status["ok"]:
         return None, status["why"]
     cfg = _state["cfg"]
-    url = cfg["base_url"].rstrip("/") + "/chat/completions"
+    url = _LOCAL_LLM if cfg.get("local") else cfg["base_url"].rstrip("/") + "/chat/completions"
     payload = {"model": cfg["model"],
                "messages": [{"role": "user", "content": prompt}],
                "max_tokens": int(max_tokens), "temperature": float(temperature)}
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(url, data=body, headers={
         "Content-Type": "application/json",
-        "Authorization": "Bearer " + str(cfg["api_key"])})
+        **({"Authorization": "Bearer " + str(cfg["api_key"])} if not cfg.get("local") else {})})
     try:
         with urllib.request.urlopen(request, timeout=_TIMEOUT) as response:
             got = json.loads(response.read().decode("utf-8", "replace"))
@@ -128,6 +137,10 @@ def online_estimate_food(name, grams=None):
             problems.append("宏量超出合理区间")
     if any(word in basis for word in _BANNED):
         problems.append("依据里带了不该出现的话")
+    # 三大宏量折算的热量必须和它自己报的 kcal 对得上，对不上就是模型在凑数
+    from_macros = 4 * pro + 4 * carb + 9 * fat
+    if kcal > 0 and abs(from_macros - kcal) / kcal > 0.45:
+        problems.append("宏量和热量对不上（模型自相矛盾）")
     if problems:
         return None, "在线估算被拦下：" + "、".join(problems)
     return {"cal": kcal, "grams": grams_out, "protein_g": pro, "carbs_g": carb,

@@ -16,7 +16,7 @@ logNaturalMeal=async function(){
             <div class="td-group">
               <label class="td-field-row"><span class="td-field-label">本餐热量（kcal，可修正）</span><input id="meal-confirm-cal" type="number" min="0" max="10000" value="${Number(result.cal)}" inputmode="numeric"></label>
             </div>
-            <div class="td-actions td-ai-row"><button type="button" class="td-btn-quiet" id="meal-ai-btn" onclick="estimateMealByAi()">让在线模型估一下</button></div>
+            <div class="td-actions td-ai-row"><button type="button" class="td-btn-quiet" id="meal-ai-btn" onclick="estimateMealByAi()">让服务器模型估一下</button></div>
             <p id="meal-ai-result" class="td-status" role="status"></p>
             <div class="td-group-label">按包装称重换算（选填）</div>
             <div class="td-group">
@@ -44,12 +44,14 @@ async function estimateMealByAi(){
     }catch(e){ if(out){out.dataset.err='1';out.textContent='估算请求没成功：'+((e&&e.message)||'未知原因');} return; }
     if(!r||!r.ok){
         if(out){out.dataset.err='1';out.textContent=(r&&r.why)||'在线模型没给结果';}
-        if(btn&&r&&r.status&&!r.status.ok)btn.textContent='在线模型未接入';
+        if(btn&&r&&r.status&&!r.status.ok)btn.textContent='模型通道不可用';
         return;
     }
     const cal=document.getElementById('meal-confirm-cal');
     if(cal)cal.value=String(r.cal);
-    if(out){out.textContent='在线估算：'+r.cal+' kcal（按 '+r.grams+' g，'+r.basis+'）——已填进上面那格，不对就改。';}
+    const src=(r.status&&r.status.source)||'模型';
+    if(out){out.textContent='按 '+r.grams+' g 估到 '+r.cal+' kcal（'+(r.basis||'依据未给')+'，来源：'
+        +src+'）——已填进上面那格，不对就直接改。';out.dataset.err='0';}
 }
 async function confirmMealRecord(){
     if(!pendingMeal)return;
@@ -91,7 +93,11 @@ function toolDialog(title,html){
     let d=document.getElementById('account-tools-dialog');if(d)d.remove();
     d=document.createElement('dialog');d.id='account-tools-dialog';d.className='tool-dialog';
     d.innerHTML=`<header><h2>${escapeHtml(title)}</h2><button type="button" class="td-close" aria-label="关闭" onclick="document.getElementById('account-tools-dialog').close()">✕</button></header><div class="td-body">${html}</div>`;
-    document.body.appendChild(d);d.showModal();return d;
+    document.body.appendChild(d);
+    // showModal 失败时（已有别的模态在场）必须退到 show()，绝不能留下一个
+    // "在文档流里但关不掉"的裸 dialog——那正是机主说的"固定在那上面动都动不了"
+    try{d.showModal();}catch(e){try{d.show();}catch(e2){d.remove();}}
+    return d;
 }
 const TD_SCOPES=[['weight','体重与目标','当前体重、目标体重与本周期进度'],
  ['profile','年龄、身高和预算','只给看基础数值，不含每日流水'],
@@ -119,7 +125,8 @@ async function openSharingSettings(){
 async function saveSharing(rotate){
     const scope={};for(const [k] of TD_SCOPES)scope[k]=document.getElementById('scope-'+k).checked;
     const result=document.getElementById('share-result');
-    try{const s=await postApi('/api/share/settings',{enabled:document.getElementById('share-enabled').checked,days:Number(document.getElementById('share-days').value),scope,rotate});state.publicUrl=s.public_url;updateUserUI(state.user.username);if(result){result.dataset.err='0';result.textContent=rotate?'已更新密钥，旧链接已失效；新链接请到「我的」里复制':'分享设置已保存';}}
+    try{const s=await postApi('/api/share/settings',{enabled:document.getElementById('share-enabled').checked,days:Number(document.getElementById('share-days').value),scope,rotate});state.publicUrl=s.public_url;updateUserUI(state.user.username);if(result){result.dataset.err='0';result.textContent=rotate?'已更新密钥，旧链接已失效；新链接请到「我的」里复制':'分享设置已保存';}
+        const dlg=document.getElementById('account-tools-dialog');if(dlg&&dlg.open)setTimeout(()=>dlg.close(),700);}
     catch(e){if(result){result.dataset.err='1';result.textContent=e.message;}}
 }
 let recordKind='food';let recordOffset=0;let recordRows=[];

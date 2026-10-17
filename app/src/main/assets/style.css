@@ -3189,3 +3189,27 @@ body.update-blocked { overflow: hidden; }
     color: var(--text-light);
     font-size: 13px;
 }
+
+/* 行内小按钮：和弹窗里那套 td-mini 同一个形状与配色，全站只有一种小按钮 */
+.btn-row, .btn-row-danger {
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid #CBD5E1;
+    border-radius: 10px;
+    background: #FFFFFF;
+    color: #065F46;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.btn-row:active, .btn-row-danger:active { transform: scale(.98); }
+
+.btn-row-danger {
+    border-color: #FECACA;
+    background: #FEF2F2;
+    color: #B91C1C;
+}
+
+.meal-row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }

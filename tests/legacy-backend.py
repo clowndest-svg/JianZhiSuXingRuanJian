@@ -1433,14 +1433,43 @@ def main():
             _oai.online_chat = _orig_chat
         # 上面全都打了桩，这条用真实现：没配置就不许当场给数，配了才必须有结果
         _real = _oai.online_estimate_food("番茄鸡蛋肉汤面")
-        check("未配置在线模型时估算不当场给数（真实现，不打桩）",
-              (_real[0] is None) == (not _oai.online_status()["ok"]), str(_real)[:110])
+        # 通道在≠模型一定答得出来。真实现下：给不出数字就必须带回看得懂的原因，
+        # 给了数字就必须带份量与依据——两头都不许含糊。
+        check("估算要么给出带份量依据的结果，要么带回看得懂的原因（真实现，不打桩）",
+              (_real[0] is None and len(_real[1] or "") > 4)
+              or (_real[0] and _real[0]["grams"] > 0 and _real[0]["basis"]), str(_real)[:110])
         check("弹窗给了「让在线模型估一下」的入口", "estimateMealByAi" in feat_js and "meal-ai-result" in feat_js, "")
-        check("未配置时按钮改口，不装作能用", "在线模型未接入" in feat_js, "")
-        check("估算结果要写明按多少克和依据", "按 " in feat_js and "g，" in feat_js, "")
+        check("模型通道不可用时按钮改口，不装作能用", "模型通道不可用" in feat_js, "")
+        check("估算结果要写明按多少克和依据", "'+r.grams+' g" in feat_js and "basis" in feat_js, "")
         _kb = __import__("app_modules.nutrition", fromlist=["x"]).parse_food_nutrition("番茄鸡蛋肉汤面")
         check("复合菜名不再只认出一个食材", _kb["cal"] >= 400 and _kb["source"] == "nutrition_kb",
               "%s %s" % (_kb["cal"], _kb["reason"][:60]))
+        _fc = read_asset("features.css")
+        # ── r144：弹窗关得掉、按钮只有一种样子、模型通道说清是哪台 ──
+        _bare = _rx.findall(r"<button\s+(?![^>]*class=)[^>]*>", js_txt_for_build)
+        check("界面模板里不许有裸按钮（会退回浏览器默认外观）", not _bare,
+              [b[:46] for b in _bare][:3])
+        check("行内小按钮与弹窗小按钮同一套形状",
+              ".btn-row, .btn-row-danger {" in css_txt and ".btn-row-danger {" in css_txt
+              and "border-radius: 10px" in css_txt and "min-height: 34px" in css_txt,
+              css_txt[css_txt.index(".btn-row, .btn-row-danger {"):][:60])
+        check("未打开的 dialog 必须隐藏（否则 close 后还留在页面上）",
+              ".tool-dialog:not([open]){display:none}" in _fc.replace(" ", "").replace(".tool-dialog:not([open]){display:none}",
+                  ".tool-dialog:not([open]){display:none}") or
+              ":not([open])" in _fc, _fc[_fc.index(".tool-dialog"):][:60])
+        check("弹窗 show 失败要退到非模态而不是留裸节点",
+              "catch(e){try{d.show();}" in feat_js.replace(" ", ""), "")
+        check("保存分享设置成功后会关掉弹窗", "dlg.close()" in feat_js.replace(" ", "")
+              or "dlg.close()" in feat_js, "")
+        check("模型来源在界面上说清是哪台", "status.source" in feat_js and "服务器模型" in feat_js, "")
+        check("宏量与热量必须自洽，模型凑数要拦下", "对不上" in io.open(
+              os.path.join(ROOT, "app_modules", "online_ai.py"), encoding="utf-8").read(), "")
+        check("没外部密钥时走服务器本机模型，不再谎报未接入",
+              "QINGSU_LOCAL_LLM_URL" in io.open(os.path.join(ROOT, "app_modules", "online_ai.py"),
+                                                 encoding="utf-8").read(), "")
+        check("机主不要的那块下载大按钮已移除，链接仍带包指纹",
+              "方式二" not in html_txt and "btn-direct-download" not in html_txt
+              and 'id="apk-direct-link"' in html_txt, "")
 
         # ── 排版层：三块界面重做后，形状要钉住，不能靠"我看着顺眼了" ──
         feat_css = read_asset("features.css")
