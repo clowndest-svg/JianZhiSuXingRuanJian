@@ -153,33 +153,37 @@ function poseTo3D(pose, plane) {
    沿骨长方向的半径曲线绕轴旋出来的旋转体，所以小腿有腓肠肌的鼓、大腿有
    股四头肌的鼓、腰有收口。a/b 是两个关节，p 是 [沿骨长位置, 半径米]。 */
 const PARTS = [
-    { k: 'torso', a: 'pelvis', b: 'sternum', m: ['core', 'pelvis', 'back'], w: 1.16, d: .80,
+    /* 'pelvis' 这个目标只点亮骨盆那颗，别把整根躯干涂红：臀桥/侧步走都带 pelvis，
+       涂上去看着像穿了条橙裙子，而不是"这块在发力"。 */
+    { k: 'torso', c: 'skin', a: 'pelvis', b: 'sternum', m: ['core', 'back'], w: 1.16, d: .80,
       p: [[0, .092], [.14, .104], [.34, .074], [.58, .082], [.82, .100], [1, .112]] },
-    { k: 'chest', a: 'sternum', b: 'neck', m: ['chest'], w: 1.22, d: .76,
+    { k: 'chest', c: 'top', a: 'sternum', b: 'neck', m: ['chest', 'shoulders'], w: 1.22, d: .76,
       p: [[0, .112], [.26, .118], [.58, .082], [.86, .056], [1, .048]] },
-    { k: 'neck', a: 'neck', b: 'head', m: [], w: 1.0, d: 1.0,
+    { k: 'neck', c: 'skin', a: 'neck', b: 'head', m: [], w: 1.0, d: 1.0,
       p: [[0, .048], [.5, .041], [1, .032]] },
-    { k: 'arm_r', a: 'r_shoulder', b: 'r_elbow', m: ['arm_r'], w: 1.0, d: .94,
+    { k: 'arm_r', c: 'skin', a: 'r_shoulder', b: 'r_elbow', m: ['arm_r'], w: 1.0, d: .94,
       p: [[0, .056], [.22, .050], [.6, .038], [1, .032]] },
-    { k: 'fore_r', a: 'r_elbow', b: 'r_wrist', m: ['arm_r'], w: 1.0, d: .94,
+    { k: 'fore_r', c: 'skin', a: 'r_elbow', b: 'r_wrist', m: ['arm_r'], w: 1.0, d: .94,
       p: [[0, .038], [.26, .033], [.72, .024], [1, .020]] },
-    { k: 'arm_l', a: 'l_shoulder', b: 'l_elbow', m: ['arm_l'], w: 1.0, d: .94,
+    { k: 'arm_l', c: 'skin', a: 'l_shoulder', b: 'l_elbow', m: ['arm_l'], w: 1.0, d: .94,
       p: [[0, .056], [.22, .050], [.6, .038], [1, .032]] },
-    { k: 'fore_l', a: 'l_elbow', b: 'l_wrist', m: ['arm_l'], w: 1.0, d: .94,
+    { k: 'fore_l', c: 'skin', a: 'l_elbow', b: 'l_wrist', m: ['arm_l'], w: 1.0, d: .94,
       p: [[0, .038], [.26, .033], [.72, .024], [1, .020]] },
-    { k: 'thigh_r', a: 'r_hip', b: 'r_knee', m: ['thigh_r', 'glutes', 'quads', 'hamstrings'], w: 1.04, d: .96,
+    { k: 'thigh_r', c: 'legging', a: 'r_hip', b: 'r_knee', m: ['thigh_r', 'glutes', 'quads', 'hamstrings'], w: 1.04, d: .96,
       p: [[0, .072], [.24, .064], [.6, .050], [1, .042]] },
-    { k: 'shin_r', a: 'r_knee', b: 'r_ankle', m: ['calf_r', 'hamstrings'], w: .96, d: 1.08,
+    { k: 'shin_r', c: 'legging', a: 'r_knee', b: 'r_ankle', m: ['calf_r', 'hamstrings'], w: .96, d: 1.08,
       p: [[0, .046], [.22, .054], [.46, .046], [.78, .030], [1, .025]] },
-    { k: 'thigh_l', a: 'l_hip', b: 'l_knee', m: ['thigh_l', 'glutes', 'quads', 'hamstrings'], w: 1.04, d: .96,
+    { k: 'thigh_l', c: 'legging', a: 'l_hip', b: 'l_knee', m: ['thigh_l', 'glutes', 'quads', 'hamstrings'], w: 1.04, d: .96,
       p: [[0, .072], [.24, .064], [.6, .050], [1, .042]] },
-    { k: 'shin_l', a: 'l_knee', b: 'l_ankle', m: ['calf_l', 'hamstrings'], w: .96, d: 1.08,
+    { k: 'shin_l', c: 'legging', a: 'l_knee', b: 'l_ankle', m: ['calf_l', 'hamstrings'], w: .96, d: 1.08,
       p: [[0, .046], [.22, .054], [.46, .046], [.78, .030], [1, .025]] },
     /* 脚：踝 -> 脚尖端点，方向由模型给，不再靠推。
-       端点离踝只有 8cm（真脚 16cm 以上），所以整段再沿同方向拉长 1.9 倍。 */
-    { k: 'foot_r', a: 'r_ankle', b: 'r_toe', m: ['calf_r'], w: .95, d: 1.25, stretch: 1.9,
+       端点离踝只有 8cm（真脚 16cm 以上），所以整段再沿同方向拉长 1.9 倍。
+       perpTo 把脚向对小腿做正交化：脚骨是整条跟着腿转的，实测站姿下它斜向下
+       49°，人看着像踮脚；去掉沿小腿的分量才踩得住地。 */
+    { k: 'foot_r', c: 'shoe', a: 'r_ankle', b: 'r_toe', perpTo: 'r_knee', m: ['calf_r'], w: .95, d: 1.25, stretch: 1.9,
       p: [[0, .036], [.26, .034], [.62, .030], [1, .016]] },
-    { k: 'foot_l', a: 'l_ankle', b: 'l_toe', m: ['calf_l'], w: .95, d: 1.25, stretch: 1.9,
+    { k: 'foot_l', c: 'shoe', a: 'l_ankle', b: 'l_toe', perpTo: 'l_knee', m: ['calf_l'], w: .95, d: 1.25, stretch: 1.9,
       p: [[0, .036], [.26, .034], [.62, .030], [1, .016]] }
 ];
 
@@ -188,13 +192,25 @@ const PARTS = [
 const BLOBS = [
     /* t 是"沿 along 方向再挪多少米"。这里写成 0.52 米时头颅直接飞到画面外，
        而 ndcMax 只统计关节点，判据照样绿——所以第 5 步把判据改成量外壳。 */
-    { k: 'skull', at: 'neck', along: 'head', t: .044, r: [.076, .098, .090], m: [] },
-    { k: 'delt_r', at: 'r_shoulder', along: 'r_elbow', t: .022, r: [.060, .062, .056], m: ['deltoid_r', 'shoulders'] },
-    { k: 'delt_l', at: 'l_shoulder', along: 'l_elbow', t: .022, r: [.060, .062, .056], m: ['deltoid_l', 'shoulders'] },
-    { k: 'pelvis', at: 'pelvis', along: 'sternum', t: -.055, r: [.104, .072, .086], m: ['glutes', 'pelvis'] },
-    { k: 'hand_r', at: 'r_wrist', along: 'r_elbow', out: 1, t: .055, r: [.030, .062, .026], m: ['arm_r'] },
-    { k: 'hand_l', at: 'l_wrist', along: 'l_elbow', out: 1, t: .055, r: [.030, .062, .026], m: ['arm_l'] }
+    { k: 'skull', c: 'skin', at: 'neck', along: 'head', t: .044, r: [.076, .098, .090], m: [] },
+    { k: 'delt_r', c: 'skin', at: 'r_shoulder', along: 'r_elbow', t: .022, r: [.060, .062, .056], m: ['deltoid_r', 'shoulders'] },
+    { k: 'delt_l', c: 'skin', at: 'l_shoulder', along: 'l_elbow', t: .022, r: [.060, .062, .056], m: ['deltoid_l', 'shoulders'] },
+    { k: 'pelvis', c: 'skin', at: 'pelvis', along: 'sternum', t: -.055, r: [.104, .072, .086], m: ['glutes', 'pelvis'] },
+    { k: 'hair', c: 'hair', at: 'neck', along: 'head', t: .072, r: [.086, .096, .101], m: [] },
+    { k: 'hand_r', c: 'skin', at: 'r_wrist', along: 'r_elbow', out: 1, t: .055, r: [.030, .062, .026], m: ['arm_r'] },
+    { k: 'hand_l', c: 'skin', at: 'l_wrist', along: 'l_elbow', out: 1, t: .055, r: [.030, .062, .026], m: ['arm_l'] }
 ];
+/* 配色：上身一件运动内衣、下身打底裤加运动鞋，其余是皮肤。
+   为什么靠衣服而不是靠更细的几何：市面那些健身 3D 演示（Keep / Nike 那类）
+   看着顺眼，主要因为人物穿着运动服——一大块布料把躯干体块读成了"人"，
+   纯皮肤的人台再准也像医用手办。 */
+const CLOTH = {
+    skin: { color: 0xE6C4A6, roughness: .66 },
+    top: { color: 0x1FA98C, roughness: .78 },
+    legging: { color: 0x2C3A52, roughness: .82 },
+    shoe: { color: 0xDCE3EC, roughness: .6 },
+    hair: { color: 0x33323C, roughness: .55 }
+};
 const SHELL_PAD = 0.168;              // 外壳最粗一档（胸宽 0.156、骨盆 0.104）再探出去的距离
 
 /* ---------- 骨骼求解 ---------- */
@@ -247,12 +263,16 @@ function lathe(profile) {
 }
 
 function buildRig() {
-    State.matSkin = new THREE.MeshStandardMaterial({
-        color: 0xE6C4A6, roughness: 0.66, metalness: 0.0
-    });
+    State.mats = {};
+    for (const key in CLOTH) {
+        State.mats[key] = new THREE.MeshStandardMaterial({
+            color: CLOTH[key].color, roughness: CLOTH[key].roughness, metalness: 0.0
+        });
+    }
+    State.matSkin = State.mats.skin;
     State.matHot = new THREE.MeshStandardMaterial({
-        color: 0xB9615A, roughness: 0.6, metalness: 0.0,
-        emissive: 0x2E0D09, emissiveIntensity: 0.16
+        color: 0xE06A45, roughness: 0.58, metalness: 0.0,
+        emissive: 0x4A1608, emissiveIntensity: 0.34
     });
     const ball = new THREE.SphereGeometry(1, 20, 16);
     State.parts = [];
@@ -261,13 +281,15 @@ function buildRig() {
         const mesh = new THREE.Mesh(lathe(part.p), State.matSkin);
         mesh.frustumCulled = false;
         State.scene.add(mesh);
-        State.parts.push({ part: part, mesh: mesh });
+        State.parts.push({ part: part, mesh: mesh, base: State.mats[part.c] || State.mats.skin });
+        mesh.material = State.parts[State.parts.length - 1].base;
     }
     for (const blob of BLOBS) {
         const mesh = new THREE.Mesh(ball, State.matSkin);
         mesh.frustumCulled = false;
         State.scene.add(mesh);
-        State.blobs.push({ blob: blob, mesh: mesh });
+        State.blobs.push({ blob: blob, mesh: mesh, base: State.mats[blob.c] || State.mats.skin });
+        mesh.material = State.blobs[State.blobs.length - 1].base;
     }
 }
 
@@ -282,6 +304,17 @@ function updateRig() {
         const len = _dir.length();
         if (!(len > 1e-4)) { item.mesh.visible = false; continue; }
         _dir.multiplyScalar(1 / len);
+        if (item.part.perpTo) {
+            const ref = State.jointWorld[item.part.perpTo];
+            if (ref) {
+                _bindDir.copy(a).sub(ref);
+                if (_bindDir.lengthSq() > 1e-8) {
+                    _bindDir.normalize();
+                    _v.copy(_dir).addScaledVector(_bindDir, -_dir.dot(_bindDir));
+                    if (_v.lengthSq() > 1e-6) _dir.copy(_v.normalize());
+                }
+            }
+        }
         item.mesh.visible = true;
         item.mesh.quaternion.setFromUnitVectors(_up, _dir);
         const st = item.part.stretch || 1;
@@ -315,8 +348,9 @@ function paintMuscles(active) {
     if (!State.parts) return;
     const lit = new Set((active || []).map(k => String(k).toLowerCase()));
     const hot = m => (m || []).some(k => lit.has(k));
-    for (const item of State.parts) item.mesh.material = hot(item.part.m) ? State.matHot : State.matSkin;
-    for (const item of State.blobs) item.mesh.material = hot(item.blob.m) ? State.matHot : State.matSkin;
+    // 发力部位穿着衣服也照涂：读起来是"这块在发热"，不是"这块肉露出来了"。
+    for (const item of State.parts) item.mesh.material = hot(item.part.m) ? State.matHot : item.base;
+    for (const item of State.blobs) item.mesh.material = hot(item.blob.m) ? State.matHot : item.base;
 }
 
 /* ---------- 场景 ---------- */
