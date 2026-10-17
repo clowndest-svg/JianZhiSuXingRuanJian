@@ -267,11 +267,19 @@ public class DeviceSmokeTest {
         js("refreshAccount()");
         waitFor("accountData() && accountData().avoid_tags.length===2");
         String tav = js("JSON.stringify((function(){renderTakeoutAdvisor();"
-                +"var box=document.getElementById('takeout-advisor');"
+                +"var box=document.getElementById('takeout-advisor');var r=rankTakeout();"
+                +"var nBad=r.filter(function(x){return x.bad.length;}).length;"
                 +"return {items:box.querySelectorAll('.tav-item').length,bad:box.querySelectorAll('.tav-bad').length,"
+                +"ranked:r.length,nBad:nBad,nClean:Math.min(3,r.length-nBad),"
                 +"meta:(box.querySelector('.tav-meta')||{}).textContent||''};})())");
         org.json.JSONObject tv = new org.json.JSONObject(new org.json.JSONArray("[" + tav + "]").getString(0));
-        assertEquals("忌口只该改顺序，不该把菜从列表里删掉", 12, tv.getInt("items"));
+        // 界面只列"前三样推荐 + 全部冲突项"，但冲突的一项都不能少——
+        // 藏起用户不能吃的菜，比排错顺序更坏：他还以为自己没勾忌口。
+        assertEquals("排序结果里少了菜: " + tav, 12, tv.getInt("ranked"));
+        assertEquals("冲突项被藏起来了，没全列出来: " + tav,
+                tv.getInt("nBad"), tv.getInt("bad"));
+        assertEquals("点单卡的条目数对不上（前三推荐 + 全部冲突）: " + tav,
+                tv.getInt("nBad") + tv.getInt("nClean"), tv.getInt("items"));
         assertTrue("勾了不吃辣/海鲜，却一项都没标成冲突: " + tav, tv.getInt("bad") > 0);
         assertTrue("点单顺序卡没显示当前城市: " + tav, tv.getString("meta").contains("成都"));
 
@@ -311,7 +319,8 @@ public class DeviceSmokeTest {
         js("fetch(API_BASE+'/api/account/recovery-status').then(r=>r.json())"
                 +".then(j=>{window.__rs=j.mail;});");
         waitFor("!!window.__rs");
-        String mailState = js("window.__rs");
+        // 同样要先剥 evaluateJavascript 的 JSON 引号，否则 "down" 永远不等于 down
+        String mailState = new org.json.JSONArray("[" + js("window.__rs") + "]").getString(0);
         String shown = js("document.getElementById('fg-status').textContent");
         if ("down".equals(mailState)) {
             assertTrue("邮件通道没配，界面却没说清楚: " + shown, shown.contains("未接入"));

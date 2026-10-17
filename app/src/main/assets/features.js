@@ -350,8 +350,9 @@ async function openAccountCenter(){
     if(!a){callNativeToast('个人中心没打开：请先登录');return;}
     const source=a.city_source==='gps'?'按定位就近认的':(a.city_source==='manual'?'你手填的':'来源未记');
     const cityLine=a.city?`${a.city}（${source}）`:'还没设置';
+    // 服务端那句 why 本身已经写了"邮件通道未接入：…"，这里再拼一次前缀就成了结巴
     const mailLine=a.mail==='up'?'邮件通道已接入，可以绑定邮箱找回密码'
-                                 :'邮件通道未接入：'+(a.mail_why||'服务器上没有配置发信账号');
+                                 :(a.mail_why||'邮件通道未接入');
     toolDialog('个人中心',`
       <p class="td-lead">头像、密码、邮箱找回、所在城市与忌口都在这。忌口会真的改变外卖与食谱的推荐顺序；城市是按坐标就近认的粗匹配，不对就手改。</p>
       <div class="td-group-label">头像</div>
