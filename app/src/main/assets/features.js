@@ -16,6 +16,8 @@ logNaturalMeal=async function(){
             <div class="td-group">
               <label class="td-field-row"><span class="td-field-label">本餐热量（kcal，可修正）</span><input id="meal-confirm-cal" type="number" min="0" max="10000" value="${Number(result.cal)}" inputmode="numeric"></label>
             </div>
+            <div class="td-actions td-ai-row"><button type="button" class="td-btn-quiet" id="meal-ai-btn" onclick="estimateMealByAi()">让在线模型估一下</button></div>
+            <p id="meal-ai-result" class="td-status" role="status"></p>
             <div class="td-group-label">按包装称重换算（选填）</div>
             <div class="td-group">
               <label class="td-field-row"><span class="td-field-label">实际重量（g）</span><input id="meal-grams" type="number" min="0" step="0.1" inputmode="decimal" placeholder="例：260"></label>
@@ -30,6 +32,25 @@ logNaturalMeal=async function(){
         else callNativeToast(e.message);
     }
 };
+/* 在线模型估热量。没配置时按钮上就写着没配置，不点出一个"看起来像答案"的数。 */
+async function estimateMealByAi(){
+    const out=document.getElementById('meal-ai-result');
+    const btn=document.getElementById('meal-ai-btn');
+    const grams=document.getElementById('meal-grams').value;
+    if(out){out.dataset.err='0';out.textContent='在算，稍一下…';}
+    let r=null;
+    try{
+        r=await postApi('/api/food/estimate',{food_name:(pendingMeal&&pendingMeal.food_name)||document.getElementById('input-meal-text').value.trim(),grams:grams?Number(grams):null});
+    }catch(e){ if(out){out.dataset.err='1';out.textContent='估算请求没成功：'+((e&&e.message)||'未知原因');} return; }
+    if(!r||!r.ok){
+        if(out){out.dataset.err='1';out.textContent=(r&&r.why)||'在线模型没给结果';}
+        if(btn&&r&&r.status&&!r.status.ok)btn.textContent='在线模型未接入';
+        return;
+    }
+    const cal=document.getElementById('meal-confirm-cal');
+    if(cal)cal.value=String(r.cal);
+    if(out){out.textContent='在线估算：'+r.cal+' kcal（按 '+r.grams+' g，'+r.basis+'）——已填进上面那格，不对就改。';}
+}
 async function confirmMealRecord(){
     if(!pendingMeal)return;
     const body={food_name:pendingMeal.food_name,slot:pendingMeal.slot};

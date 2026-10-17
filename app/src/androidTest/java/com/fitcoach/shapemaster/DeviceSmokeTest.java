@@ -98,9 +98,11 @@ public class DeviceSmokeTest {
                     +"const row=i.closest('.td-field-row');if(!row)return false;"
                     +"const r=i.getBoundingClientRect(),rr=row.getBoundingClientRect();"
                     +"return r.width>=rr.width-32&&r.height>=40;})()"));
-            assertEquals("餐食核对弹窗的按钮没分主次","true",js(
+            // 现在有三个按钮（AI 估算 / 先不记 / 确认并保存）：要钉的不变量是"恰好一个主按钮"
+            assertEquals("餐食核对弹窗按钮层级不对（应恰好一个实心主按钮）","true",js(
                     "(()=>{const b=[...document.querySelectorAll('#account-tools-dialog .td-actions button')];"
-                    +"return b.length===2&&new Set(b.map(x=>getComputedStyle(x).backgroundImage)).size===2;})()"));
+                    +"const solid=b.filter(x=>getComputedStyle(x).backgroundImage.indexOf('linear')>=0);"
+                    +"return b.length>=2&&solid.length===1&&b.indexOf(solid[0])===b.length-1;})()"));
             assertEquals("餐食原文在弹窗里不是主角","true",js(
                     "(()=>{const h=document.querySelector('#account-tools-dialog .td-meal-name');"
                     +"return !!h&&parseFloat(getComputedStyle(h).fontWeight)>=700;})()"));

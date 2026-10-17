@@ -1394,6 +1394,54 @@ def main():
         check("餐食核对弹窗把原文当主角、按钮分主次",
               "td-meal-head" in feat_js and "先不记" in feat_js, "")
 
+        # ── 在线模型：没配置就如实说，配了也要过硬校验 ──
+        import app_modules.online_ai as _oai
+        _git = io.open(os.path.join(ROOT, ".gitignore"), encoding="utf-8").read()
+        check("在线模型配置文件不进仓库", "ai-online.json" in _git, _git[:60])
+        _leaks = [n for n in ("sk-", "api_key\":\"") if n in srv_txt]
+        check("服务端源码里不写死密钥", not _leaks, _leaks)
+        _st = _oai.online_status(force=True)
+        check("没配置时状态说清为什么不能用",
+              (_st["ok"] and _st["model"]) or (not _st["ok"] and len(_st["why"]) > 4), str(_st))
+        check("状态结构里绝不带密钥字段", "api_key" not in json.dumps(_st), json.dumps(_st)[:80])
+        _orig_chat = _oai.online_chat
+        try:
+            _oai.online_chat = lambda *a, **k: (json.dumps({"grams": 300, "kcal": 520,
+                                                            "protein_g": 22, "carbs_g": 62,
+                                                            "fat_g": 16, "basis": "按一碗汤面估"}), "")
+            good = _oai.online_estimate_food("番茄鸡蛋肉汤面")
+            check("在线估算正常输出被采纳", good[0] and good[0]["cal"] == 520 and good[0]["grams"] == 300,
+                  str(good)[:120])
+            for label, payload in (("热量离谱", {"grams": 300, "kcal": 99999, "protein_g": 20,
+                                                 "carbs_g": 60, "fat_g": 15, "basis": "x"}),
+                                   ("没给份量", {"grams": 0, "kcal": 500, "protein_g": 20,
+                                                "carbs_g": 60, "fat_g": 15, "basis": "x"}),
+                                   ("宏量离谱", {"grams": 300, "kcal": 500, "protein_g": 900,
+                                                "carbs_g": 60, "fat_g": 15, "basis": "x"}),
+                                   ("带诊断话", {"grams": 300, "kcal": 500, "protein_g": 20,
+                                                "carbs_g": 60, "fat_g": 15, "basis": "建议咨询医生"})):
+                _oai.online_chat = (lambda body: (lambda *a, **k: (json.dumps(body), "")))(payload)
+                bad = _oai.online_estimate_food("测试菜")
+                check("在线估算硬校验拦下「%s」" % label, bad[0] is None and bool(bad[1]), str(bad)[:110])
+            _oai.online_chat = lambda *a, **k: ("今天天气不错", "")
+            check("不按 JSON 返回时不硬猜数字", _oai.online_estimate_food("测试菜")[0] is None, "")
+            _oai.online_chat = lambda *a, **k: (None, "连不上在线模型（URLError）")
+            _none = _oai.online_estimate_food("测试菜")
+            check("在线模型不通时把原因带回去而不是给个空数",
+                  _none[0] is None and "连不上" in _none[1], str(_none)[:110])
+        finally:
+            _oai.online_chat = _orig_chat
+        # 上面全都打了桩，这条用真实现：没配置就不许当场给数，配了才必须有结果
+        _real = _oai.online_estimate_food("番茄鸡蛋肉汤面")
+        check("未配置在线模型时估算不当场给数（真实现，不打桩）",
+              (_real[0] is None) == (not _oai.online_status()["ok"]), str(_real)[:110])
+        check("弹窗给了「让在线模型估一下」的入口", "estimateMealByAi" in feat_js and "meal-ai-result" in feat_js, "")
+        check("未配置时按钮改口，不装作能用", "在线模型未接入" in feat_js, "")
+        check("估算结果要写明按多少克和依据", "按 " in feat_js and "g，" in feat_js, "")
+        _kb = __import__("app_modules.nutrition", fromlist=["x"]).parse_food_nutrition("番茄鸡蛋肉汤面")
+        check("复合菜名不再只认出一个食材", _kb["cal"] >= 400 and _kb["source"] == "nutrition_kb",
+              "%s %s" % (_kb["cal"], _kb["reason"][:60]))
+
         # ── 排版层：三块界面重做后，形状要钉住，不能靠"我看着顺眼了" ──
         feat_css = read_asset("features.css")
         feat_js = read_asset("features.js")

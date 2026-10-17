@@ -2,6 +2,7 @@ import json
 import time
 import secrets
 from datetime import date, datetime
+from typing import Optional
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -92,6 +93,21 @@ def install(app, env):
     @app.post('/api/food/preview')
     def food_preview(req:PreviewReq,user:dict=Depends(current)):
         return env['parse_food_nutrition'](req.food_name)
+
+    class EstimateReq(BaseModel):
+        food_name:str=Field(min_length=1,max_length=500)
+        grams:Optional[float]=None
+
+    @app.post('/api/food/estimate')
+    def food_estimate(req:EstimateReq,user:dict=Depends(current)):
+        """让在线模型按菜名估热量。没配置就如实返回原因，绝不给一个来路不明的数。"""
+        from app_modules.online_ai import online_estimate_food, online_status
+        if req.grams is not None and not 1<=float(req.grams)<=3000:
+            raise HTTPException(400,'重量要在 1 到 3000 克之间')
+        ok,why=online_estimate_food(req.food_name,req.grams)
+        if not ok:
+            return {'code':1,'ok':False,'why':why or '在线模型没给结果','status':online_status()}
+        return {'code':0,'ok':True,'status':online_status(),**ok}
 
     @app.get('/api/records')
     def records(kind:str='food',offset:int=0,limit:int=50,user:dict=Depends(current)):

@@ -118,3 +118,5 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .td-meal-name{font-size:16px;font-weight:700;line-height:1.45;color:#0F172A;overflow-wrap:anywhere}
 .td-meal-why{margin-top:5px;font-size:12.5px;line-height:1.6;color:#64748B;overflow-wrap:anywhere}
 .td-meal-why .td-chip{margin-right:6px}
+.td-ai-row{margin:0 0 6px}
+.td-ai-row .td-btn-quiet{flex:0 0 auto;font-size:14px;padding:9px 14px}
