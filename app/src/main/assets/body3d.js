@@ -200,16 +200,16 @@ const BLOBS = [
     { k: 'hand_r', c: 'skin', at: 'r_wrist', along: 'r_elbow', out: 1, t: .055, r: [.030, .062, .026], m: ['arm_r'] },
     { k: 'hand_l', c: 'skin', at: 'l_wrist', along: 'l_elbow', out: 1, t: .055, r: [.030, .062, .026], m: ['arm_l'] }
 ];
-/* 配色：上身一件运动内衣、下身打底裤加运动鞋，其余是皮肤。
-   为什么靠衣服而不是靠更细的几何：市面那些健身 3D 演示（Keep / Nike 那类）
-   看着顺眼，主要因为人物穿着运动服——一大块布料把躯干体块读成了"人"，
-   纯皮肤的人台再准也像医用手办。 */
-const CLOTH = {
-    skin: { color: 0xE6C4A6, roughness: .66 },
-    top: { color: 0x1FA98C, roughness: .78 },
-    legging: { color: 0x2C3A52, roughness: .82 },
-    shoe: { color: 0xDCE3EC, roughness: .6 },
-    hair: { color: 0x33323C, roughness: .55 }
+/* 线框全息风（机主给的参考图就是这种蓝色线框人）。每个体块两层：
+   里面一层半透明暗芯负责挡住"后面的线穿过来"，外面一层亮线框负责好看。
+   为什么线框反而比上一版那层皮肤耐看——旋转体的三角网格天生就是这种网格，
+   皮肤则要比例、着色、光照全部对上才不像手办，差一点就假。
+   parts 上的 c: 字段仍然保留：它决定"这块算衣服还是算皮肤"，
+   以后想切回实体渲染只改 buildRig 一处。 */
+const HOLO = {
+    line: { color: 0x5BD8FF, opacity: .92 },
+    hot: { color: 0xFFB454, opacity: 1.0 },
+    core: { color: 0x0D2B47, opacity: .72 }
 };
 const SHELL_PAD = 0.168;              // 外壳最粗一档（胸宽 0.156、骨盆 0.104）再探出去的距离
 
@@ -257,40 +257,57 @@ function solve(target) {
 
 const _up = new THREE.Vector3(0, 1, 0);
 
+/* 参考图那种"均匀密网格"靠的是纵向圈数，不是新形状：
+   体块表里每条轮廓只有 4~6 个控制点，直接旋出来躯干就是几张大格子，看着空。
+   这里把轮廓按弧长重采样到 16 圈，形状不变、网格变匀。 */
+const RINGS = 16;
+function resample(profile) {
+    const out = [];
+    for (let i = 0; i < profile.length - 1; i++) {
+        const a0 = profile[i], a1 = profile[i + 1];
+        for (let k = 0; k < Math.ceil((a1[0] - a0[0]) * RINGS); k++) {
+            const t = a0[0] + k / RINGS;
+            const u = (t - a0[0]) / (a1[0] - a0[0] || 1);
+            out.push([t, a0[1] + (a1[1] - a0[1]) * u]);
+        }
+    }
+    out.push(profile[profile.length - 1]);
+    return out;
+}
 function lathe(profile) {
-    const pts2 = profile.map(pr => new THREE.Vector2(Math.max(pr[1], 0.004), pr[0]));
+    const pts2 = resample(profile).map(pr => new THREE.Vector2(Math.max(pr[1], 0.004), pr[0]));
     return new THREE.LatheGeometry(pts2, 22);
 }
 
 function buildRig() {
-    State.mats = {};
-    for (const key in CLOTH) {
-        State.mats[key] = new THREE.MeshStandardMaterial({
-            color: CLOTH[key].color, roughness: CLOTH[key].roughness, metalness: 0.0
-        });
-    }
-    State.matSkin = State.mats.skin;
-    State.matHot = new THREE.MeshStandardMaterial({
-        color: 0xE06A45, roughness: 0.58, metalness: 0.0,
-        emissive: 0x4A1608, emissiveIntensity: 0.34
+    State.matCore = new THREE.MeshBasicMaterial({
+        color: HOLO.core.color, transparent: true, opacity: HOLO.core.opacity,
+        // 暗芯往后压一点，否则和它自己的线框在同一深度上抢，线会断
+        polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
     });
+    State.matLine = new THREE.MeshBasicMaterial({
+        color: HOLO.line.color, wireframe: true, transparent: true,
+        opacity: HOLO.line.opacity, depthWrite: false
+    });
+    State.matHot = new THREE.MeshBasicMaterial({
+        color: HOLO.hot.color, wireframe: true, transparent: true,
+        opacity: HOLO.hot.opacity, depthWrite: false
+    });
+    State.matSkin = State.matLine;
     const ball = new THREE.SphereGeometry(1, 20, 16);
     State.parts = [];
     State.blobs = [];
-    for (const part of PARTS) {
-        const mesh = new THREE.Mesh(lathe(part.p), State.matSkin);
-        mesh.frustumCulled = false;
-        State.scene.add(mesh);
-        State.parts.push({ part: part, mesh: mesh, base: State.mats[part.c] || State.mats.skin });
-        mesh.material = State.parts[State.parts.length - 1].base;
-    }
-    for (const blob of BLOBS) {
-        const mesh = new THREE.Mesh(ball, State.matSkin);
-        mesh.frustumCulled = false;
-        State.scene.add(mesh);
-        State.blobs.push({ blob: blob, mesh: mesh, base: State.mats[blob.c] || State.mats.skin });
-        mesh.material = State.blobs[State.blobs.length - 1].base;
-    }
+    const add = (geom, meta, kind) => {
+        const mesh = new THREE.Mesh(geom, State.matCore);
+        const line = new THREE.Mesh(geom, State.matLine);
+        mesh.frustumCulled = false; line.frustumCulled = false;
+        State.scene.add(mesh); State.scene.add(line);
+        const item = { mesh: mesh, line: line, base: State.matLine };
+        item[kind] = meta;
+        (kind === 'part' ? State.parts : State.blobs).push(item);
+    };
+    for (const part of PARTS) add(lathe(part.p), part, 'part');
+    for (const blob of BLOBS) add(ball, blob, 'blob');
 }
 
 /** 逐帧把每块肉摆到"这一帧两个关节的真实位置"之间。
@@ -299,10 +316,10 @@ function updateRig() {
     if (!State.parts) return;
     for (const item of State.parts) {
         const a = State.jointWorld[item.part.a], b = State.jointWorld[item.part.b];
-        if (!a || !b) { item.mesh.visible = false; continue; }
+        if (!a || !b) { item.mesh.visible = item.line.visible = false; continue; }
         _dir.copy(b).sub(a);
         const len = _dir.length();
-        if (!(len > 1e-4)) { item.mesh.visible = false; continue; }
+        if (!(len > 1e-4)) { item.mesh.visible = item.line.visible = false; continue; }
         _dir.multiplyScalar(1 / len);
         if (item.part.perpTo) {
             const ref = State.jointWorld[item.part.perpTo];
@@ -320,10 +337,13 @@ function updateRig() {
         const st = item.part.stretch || 1;
         item.mesh.position.copy(a).addScaledVector(_dir, -len * 0.06 * st);
         item.mesh.scale.set(item.part.w || 1, len * 1.12 * st, item.part.d || 1);
+        item.line.position.copy(item.mesh.position);
+        item.line.quaternion.copy(item.mesh.quaternion);
+        item.line.scale.copy(item.mesh.scale);
     }
     for (const item of State.blobs) {
         const p = State.jointWorld[item.blob.at];
-        if (!p) { item.mesh.visible = false; continue; }
+        if (!p) { item.mesh.visible = item.line.visible = false; continue; }
         const ref = item.blob.along ? State.jointWorld[item.blob.along] : null;
         _v.copy(p);
         if (ref) {
@@ -340,6 +360,9 @@ function updateRig() {
         item.mesh.visible = true;
         item.mesh.position.copy(_v);
         item.mesh.scale.set(item.blob.r[0], item.blob.r[1], item.blob.r[2]);
+        item.line.position.copy(item.mesh.position);
+        item.line.quaternion.copy(item.mesh.quaternion);
+        item.line.scale.copy(item.mesh.scale);
     }
 }
 
@@ -348,9 +371,9 @@ function paintMuscles(active) {
     if (!State.parts) return;
     const lit = new Set((active || []).map(k => String(k).toLowerCase()));
     const hot = m => (m || []).some(k => lit.has(k));
-    // 发力部位穿着衣服也照涂：读起来是"这块在发热"，不是"这块肉露出来了"。
-    for (const item of State.parts) item.mesh.material = hot(item.part.m) ? State.matHot : item.base;
-    for (const item of State.blobs) item.mesh.material = hot(item.blob.m) ? State.matHot : item.base;
+    // 发力的那块体块把线框换成琥珀色：在线框风格里"换色"比"涂实心"读得清楚。
+    for (const item of State.parts) item.line.material = hot(item.part.m) ? State.matHot : item.base;
+    for (const item of State.blobs) item.line.material = hot(item.blob.m) ? State.matHot : item.base;
 }
 
 /* ---------- 场景 ---------- */
@@ -365,13 +388,8 @@ function buildScene(canvas) {
     State.scene = new THREE.Scene();
     State.camera = new THREE.PerspectiveCamera(34, 1, 0.05, 30);
 
-    const key = new THREE.DirectionalLight(0xFFF3E4, 2.35);      // 暖主光
-    key.position.set(1.8, 2.6, 2.2);
-    const fill = new THREE.DirectionalLight(0xC8D8F0, 0.95);     // 冷补光，压住死黑
-    fill.position.set(-2.4, 1.2, 1.4);
-    const rim = new THREE.DirectionalLight(0xDCE9FF, 1.15);      // 轮廓光：以前是绿的，人像发了霉
-    rim.position.set(-0.6, 1.6, -2.8);
-    State.scene.add(key, fill, rim, new THREE.HemisphereLight(0xEAF2FF, 0x24303F, 0.85));
+    /* 线框与暗芯都是 Basic 材质，不吃光照，所以这里不再架灯。
+       （上一版皮肤要三盏光才不塌，换成线框后那套配色整套作废。） */
 
     /* 地面：一张软边的椭圆垫子。没有地面参照时，躺姿看着像"斜着飘在太空里"
        （机主原话：大部分被遮住/看不懂），有了它，臀桥就是臀桥。 */
@@ -379,8 +397,8 @@ function buildScene(canvas) {
     cv.width = cv.height = 128;
     const g2 = cv.getContext('2d');
     const grad = g2.createRadialGradient(64, 64, 6, 64, 64, 62);
-    grad.addColorStop(0, 'rgba(120,150,190,0.42)');
-    grad.addColorStop(0.55, 'rgba(70,96,140,0.24)');
+    grad.addColorStop(0, 'rgba(91,216,255,0.34)');
+    grad.addColorStop(0.55, 'rgba(50,120,180,0.18)');
     grad.addColorStop(1, 'rgba(0,0,0,0)');
     g2.fillStyle = grad;
     g2.fillRect(0, 0, 128, 128);
