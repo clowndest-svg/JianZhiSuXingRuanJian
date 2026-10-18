@@ -530,6 +530,18 @@ public class DeviceSmokeTest {
                 js("switchTab('"+tab+"')");Thread.sleep(50);
                 assertEquals(width+"/"+tab+" document overflow","true",js("document.documentElement.scrollWidth<=window.innerWidth+1"));
             }
+            // 顶栏那行在 App 里少一颗「下载App」按钮（app.js 把它藏了），网页版窄屏是更挤的一档。
+            // 这一档只有 Blink 量能算，而且必须把按钮真的放回去再量——窄屏不换行是我这轮改的。
+            js("var b=document.getElementById('btn-header-download');if(b)b.style.display='';");
+            Thread.sleep(150);
+            assertEquals(width+" 档顶栏带下载按钮仍不横向溢出","true",
+                    js("document.documentElement.scrollWidth<=window.innerWidth+1"));
+            assertEquals(width+" 档顶栏账号入口和品牌图标还在同一行","true",
+                    js("(function(){var c=document.querySelector('.account-chip'),i=document.querySelector('.brand-icon');"
+                    +"if(!c||!i)return false;var a=c.getBoundingClientRect(),b=i.getBoundingClientRect();"
+                    +"return Math.abs((a.top+a.height/2)-(b.top+b.height/2))<=4;})()"));
+            js("var b=document.getElementById('btn-header-download');if(b)b.style.display='none';");
+            Thread.sleep(100);
             if (requested == 320 || requested == 360) {
                 // 遮挡与裁切在窄屏才暴露：浮层按百分比排布、弹窗卡片被挤到 288 宽时，
                 // 宽屏那档看着一切都好。这里真开弹窗、真从画布回读像素。
