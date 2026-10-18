@@ -346,13 +346,17 @@ async function refreshAccount(){
     用 Array.from 而不是 [0]：昵称可能以 emoji 开头，直接按下标取会切出半个码元变成乱码。 */
 function paintAccountBadge(){
     const host=document.getElementById('header-avatar-slot');
-    if(!host)return;
-    const url=accountCache&&accountCache.avatar_url;
-    if(url){host.innerHTML=`<img src="${escapeHtml(API_BASE+url)}" alt="我的头像">`;return;}
     const u=(accountCache&&accountCache.user)||state.user||{};
-    const nm=String(u.nickname||u.username||'').trim();
-    const first=nm?Array.from(nm)[0]:'';
-    host.textContent=first?first.toUpperCase():'轻';
+    const who={name:String(u.nickname||u.username||'').trim(),avatar:accountCache&&accountCache.avatar_url};
+    if(host)host.innerHTML=cmAvatarInner(who);
+    // 底部导航与桌面顶栏里那颗"我的"用的是同一张脸，三处必须同时换，
+    // 不然改了头像之后只有顶栏变了、下面还是旧字母。
+    ["nav-me-avatar","dnav-me-avatar"].forEach(id=>{
+        const el=document.getElementById(id);
+        if(el)el.innerHTML=cmAvatarInner(who);
+    });
+    const slot=document.getElementById('cm-compose-avatar');
+    if(slot)slot.innerHTML=cmAvatarInner(who);
 }
 
 async function openAccountCenter(){
@@ -570,4 +574,803 @@ async function submitForgotReset(){
         const dlg=document.getElementById('account-tools-dialog');
         if(dlg&&dlg.open)setTimeout(()=>dlg.close(),1200);
     }catch(e){tdStatus('fg-status',e.message||'重置没成功',true);}
+}
+
+/* ============================================================
+   r149 社区 / 私信 / 我的主页
+   这一整块都遵循同三件事：
+   1. 屏上出现的每个数字都从接口来，没有读数就写"没有"，不拿 0 或占位字顶；
+   2. 发帖、评论、私信全部带 request_id 幂等，重试不该产生第二条；
+   3. WebSocket 只是加速器，发不出去会自动退回 HTTP——断了也不许"看起来发了"。
+   ============================================================ */
+const CM_LIMITS = { post: 1000, comment: 500, dm: 1000, bio: 60, feedback: 800 };
+const CM_TOOLS = ["recipes", "workout", "body", "takeout", "charts", "gemini"];
+const cm = {
+    feed: "latest", items: [], cursor: 0, more: false, loading: false, loaded: false,
+    msgTab: "chats", convs: [], notices: [], loadingMsg: false,
+    thread: null, bubbles: [], pending: {},
+    ws: null, wsState: "idle", wsRetry: 0, wsTimer: null,
+    stats: null, feedbackKind: "bug", images: []
+};
+
+/* 换账号必须把社区与私信的内存状态一起清掉：
+   上一版的教训是 sessionGeneration 只管住了请求，界面还留着上一个人的列表。 */
+function resetCommunity() {
+    if (cm.ws) { try { cm.ws.onclose = null; cm.ws.close(); } catch (e) {} cm.ws = null; }
+    cm.wsRetry = 0;
+    cm.wsState = "idle";
+    cm.feed = "latest"; cm.items = []; cm.cursor = 0; cm.more = false;
+    cm.loading = false; cm.loaded = false; cm.loadingMsg = false;
+    cm.convs = []; cm.notices = []; cm.thread = null; cm.bubbles = [];
+    cm.pending = {}; cm.stats = null; cm.images = [];
+    paintNavBadge();
+}
+
+function cmEl(id) { return document.getElementById(id); }
+function cmText(id, text) { const el = cmEl(id); if (el) el.textContent = text || ""; }
+
+function cmTime(stamp) {
+    const s = String(stamp || "");
+    return s.length >= 16 ? s.slice(5, 16).replace("T", " ") : s;
+}
+
+function cmAgo(stamp) {
+    const s = String(stamp || "").replace(" ", "T");
+    const t = Date.parse(s);
+    if (!isFinite(t)) return cmText0(stamp);
+    const mins = Math.floor((Date.now() - t) / 60000);
+    if (mins < 1) return "刚刚";
+    if (mins < 60) return mins + " 分钟前";
+    if (mins < 60 * 24) return Math.floor(mins / 60) + " 小时前";
+    if (mins < 60 * 24 * 7) return Math.floor(mins / 1440) + " 天前";
+    return cmText0(stamp);
+}
+function cmText0(stamp) { return String(stamp || "").slice(0, 10); }
+
+/* 头像点：有图用图，没图用昵称首字（Array.from 防 emoji 被按下标切半个码元） */
+function cmAvatarInner(user, fallback) {
+    const url = user && user.avatar;
+    if (url) return '<img src="' + escapeHtml(API_BASE + url) + '" alt="">';
+    const nm = String((user && user.name) || fallback || "").trim();
+    const first = nm ? Array.from(nm)[0] : "轻";
+    return escapeHtml(first.toUpperCase());
+}
+
+function cmName(user) { return (user && user.name) ? user.name : "已注销用户"; }
+function cmRegionTag(region) { return region ? "属地 " + escapeHtml(region) : "属地未知"; }
+
+function cmState(id, text) { cmText(id, text || ""); }
+
+function cmRoute(tab) {
+    if (tab === "community" && !cm.loaded) { cm.loaded = true; loadCommunity(false); }
+    if (tab === "messages") { loadMessages(); connectChat(); }
+    if (tab === "me") loadMe();
+    if (tab === "tools") syncFeedbackHints();
+}
+
+/* ── 社区列表 ───────────────────────────────────────────────── */
+function setCommunityTab(which) {
+    if (!["latest", "follow", "mine"].includes(which)) return;
+    cm.feed = which;
+    document.querySelectorAll("#panel-community .td-seg-btn").forEach(b =>
+        b.setAttribute("aria-selected", b.getAttribute("data-feed") === which ? "true" : "false"));
+    cm.items = []; cm.cursor = 0; cm.more = false;
+    loadCommunity(false);
+}
+
+function cmCardHTML(p) {
+    const imgs = (p.images || []).length
+        ? '<div class="cm-grid">' + p.images.map(u =>
+            '<img src="' + escapeHtml(API_BASE + u) + '" alt="帖子配图" loading="lazy" onclick="viewPostImage(\'' +
+            escapeHtml(API_BASE + u).replace(/'/g, "%27") + '\')">').join("") + "</div>"
+        : "";
+    const mine = p.author && p.author.id === (state.user && state.user.id);
+    return '<article class="cm-card" data-post="' + p.id + '">'
+        + '<button type="button" class="cm-who-btn" onclick="openMemberHome(' + (p.author ? p.author.id : 0) + ')">'
+        + '<span class="cm-avatar">' + cmAvatarInner(p.author) + "</span>"
+        + '<span class="cm-who"><span class="cm-name">' + escapeHtml(cmName(p.author)) + "</span>"
+        + '<span class="cm-sub">' + cmRegionTag(p.region) + " · " + escapeHtml(cmAgo(p.created_at)) + "</span></span></button>"
+        + (mine ? "" : '<button type="button" class="cm-follow" aria-pressed="false" onclick="toggleFollow(' +
+            (p.author ? p.author.id : 0) + ',this)">关注</button>')
+        + '<div class="cm-body">' + escapeHtml(p.body) + "</div>" + imgs
+        + '<div class="cm-acts">'
+        + '<button type="button" class="cm-act" aria-pressed="' + (p.liked_by_me ? "true" : "false") + '" '
+        + 'onclick="toggleLike(' + p.id + ',this)">❤ <b data-like>' + Number(p.like_count) + "</b></button>"
+        + '<button type="button" class="cm-act" onclick="openPostDetail(' + p.id + ')">💬 <b>' + Number(p.comment_count) + "</b></button>"
+        + (mine ? '<button type="button" class="cm-act" style="margin-left:auto" onclick="deletePost(' + p.id + ')">删除</button>' : "")
+        + "</div></article>";
+}
+
+function renderFeed() {
+    const host = cmEl("cm-feed");
+    if (!host) return;
+    host.innerHTML = cm.items.map(cmCardHTML).join("");
+    const more = cmEl("cm-more");
+    if (more) more.hidden = !cm.more;
+    if (cmState("cm-feed-state", ""), !cm.items.length) {
+        cmState("cm-feed-state", cm.feed === "mine" ? "你还没有发过帖子，上面那条就是入口。"
+            : cm.feed === "follow" ? "关注的人发的帖子会出现在这里。现在还没有。"
+            : "广场还空着，第一条可以你来发。");
+    }
+}
+
+async function loadCommunity(append) {
+    if (!state.token) { cm.items = []; renderFeed(); cmState("cm-feed-state", "登录后才能看社区。"); return; }
+    if (cm.loading) return;
+    cm.loading = true;
+    if (!append) cmState("cm-feed-state", "在读…");
+    try {
+        const q = "?tab=" + cm.feed + "&limit=12" + (append && cm.cursor ? "&cursor=" + cm.cursor : "");
+        const r = await getJson("/api/community/feed" + q);
+        cm.items = append ? cm.items.concat(r.items || []) : (r.items || []);
+        cm.cursor = r.next_cursor || 0;
+        cm.more = !!r.more;
+        renderFeed();
+    } catch (e) {
+        cmState("cm-feed-state", "列表没读到：" + (e.message || "网络不通") + "，点上面任意一处重试。");
+    } finally {
+        cm.loading = false;
+    }
+}
+
+function expandComposer() {
+    if (!state.token) { openAuthModal(); return; }
+    const c = cmEl("cm-compose-collapsed"), o = cmEl("cm-compose-open");
+    if (c) c.hidden = true;
+    if (o) o.hidden = false;
+    syncComposerCount();
+    const t = cmEl("cm-post-text");
+    if (t) t.focus();
+}
+
+function syncComposerCount() {
+    const t = cmEl("cm-post-text");
+    cmText("cm-post-count", ((t && t.value ? t.value.length : 0)) + " / " + CM_LIMITS.post);
+}
+
+function syncFeedbackCounters() {
+    const t = cmEl("fb-text");
+    cmText("fb-count", ((t && t.value ? t.value.length : 0)) + " / " + CM_LIMITS.feedback);
+}
+
+async function attachPostImage(input) {
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    if (!state.token) { openAuthModal(); return; }
+    cmState("cm-post-err", "图片在上传…");
+    try {
+        const form = new FormData();
+        form.append("file", file);
+        const r = await rawPostApi("/api/community/media", form);
+        if (cm.images.length >= 6) cmState("cm-post-err", "一条帖子最多 6 张图，多余的没加进来");
+        else cm.images.push({ name: r.name, url: r.url });
+        renderThumbs();
+        cmState("cm-post-err", "");
+    } catch (e) {
+        cmState("cm-post-err", "图片没传上去：" + (e.message || "格式或大小不合适"));
+    } finally {
+        input.value = "";
+    }
+}
+
+function renderThumbs() {
+    const host = cmEl("cm-thumbs");
+    if (!host) return;
+    host.innerHTML = cm.images.map((im, i) =>
+        '<span class="cm-thumb"><img src="' + escapeHtml(im.url.startsWith("http") ? im.url : API_BASE + im.url) +
+        '" alt="待发布配图"><button type="button" aria-label="移除这张图" onclick="dropPostImage(' + i + ')">✕</button></span>'
+    ).join("");
+}
+
+function dropPostImage(i) { cm.images.splice(i, 1); renderThumbs(); }
+
+async function submitPost() {
+    const t = cmEl("cm-post-text");
+    const text = (t && t.value || "").trim();
+    if (!text && !cm.images.length) { cmState("cm-post-err", "正文和图片至少给一个"); return; }
+    cmState("cm-post-err", "");
+    try {
+        const r = await postApi("/api/community/posts", { text, images: cm.images.map(x => x.name) });
+        cm.images = []; renderThumbs();
+        if (t) t.value = "";
+        syncComposerCount();
+        const open = cmEl("cm-compose-open"), collapsed = cmEl("cm-compose-collapsed");
+        if (open) open.hidden = true;
+        if (collapsed) collapsed.hidden = false;
+        callNativeToast("发出去了");
+        if (cm.feed === "mine" || cm.feed === "latest") {
+            cm.items = [r.post].concat(cm.items);
+            renderFeed();
+        } else {
+            loadCommunity(false);
+        }
+    } catch (e) {
+        cmState("cm-post-err", e.message || "发帖没成功，内容还留着，可以再试");
+    }
+}
+
+function viewPostImage(url) {
+    toolDialog("帖子配图", '<div class="td-body"><img src="' + escapeHtml(url) +
+        '" alt="帖子配图" style="width:100%;border-radius:12px;object-fit:contain"></div>');
+}
+
+async function toggleLike(id, btn) {
+    const card = btn.closest(".cm-card");
+    const cur = btn.getAttribute("aria-pressed") === "true";
+    btn.setAttribute("aria-pressed", cur ? "false" : "true");
+    try {
+        const r = await postApi("/api/community/posts/" + id + "/like", { on: !cur });
+        const b = card && card.querySelector("[data-like]");
+        if (b) b.textContent = Number(r.like_count);
+        const item = cm.items.find(x => x.id === id);
+        if (item) { item.like_count = r.like_count; item.liked_by_me = r.liked; }
+    } catch (e) {
+        btn.setAttribute("aria-pressed", cur ? "true" : "false");
+        callNativeToast("点赞没生效：" + (e.message || "网络不通"));
+    }
+}
+
+/* postApi 只会 POST，删除要单独走一条，失败原因照样要说出来 */
+async function deleteJson(path) {
+    const r = await fetch(API_BASE + path, {
+        method: "DELETE", headers: { "Authorization": "Bearer " + state.token }
+    });
+    if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        const err = new Error(j && j.detail ? j.detail : ("HTTP " + r.status));
+        err.status = r.status;
+        throw err;
+    }
+    return r.json().catch(() => ({}));
+}
+
+async function deletePost(id) {
+    if (!confirm("删掉这条帖子？删了就找不回来了。")) return;
+    try {
+        await deleteJson("/api/community/posts/" + id);
+        cm.items = cm.items.filter(x => x.id !== id);
+        renderFeed();
+        callNativeToast("已删除");
+    } catch (e) {
+        callNativeToast("没删掉：" + (e.message || "网络不通"));
+    }
+}
+
+async function openPostDetail(id) {
+    try {
+        const r = await getJson("/api/community/posts/" + id);
+        const p = r.post;
+        const comments = (r.comments || []).map(c =>
+            '<li class="td-item"><span class="td-glyph">' + escapeHtml(cmAvatarInner(c.author)) + "</span>"
+            + '<span class="td-item-main"><span class="td-item-title">' + escapeHtml(cmName(c.author)) +
+            '</span><span class="td-item-meta">' + escapeHtml(c.body) + "</span>"
+            + '<span class="td-item-meta">' + cmRegionTag(c.region) + " · " + escapeHtml(cmAgo(c.created_at)) + "</span></span>"
+            + '<span class="td-item-acts"><button type="button" class="td-btn td-btn-quiet" onclick="setReplyTarget(' +
+            c.id + ",'" + escapeHtml(cmName(c.author)).replace(/'/g, "%27") + "')\">回复</button></span></li>").join("");
+        toolDialog("帖子详情", '<div class="td-body">'
+            + '<div class="td-item"><span class="td-glyph">' + escapeHtml(cmAvatarInner(p.author)) + "</span>"
+            + '<span class="td-item-main"><span class="td-item-title">' + escapeHtml(cmName(p.author)) + "</span>"
+            + '<span class="td-item-meta">' + cmRegionTag(p.region) + " · " + escapeHtml(cmAgo(p.created_at)) + "</span></span></div>"
+            + '<p class="td-lead" style="white-space:pre-wrap">' + escapeHtml(p.body) + "</p>"
+            + ((p.images || []).length ? '<div class="cm-grid">' + p.images.map(u =>
+                '<img src="' + escapeHtml(API_BASE + u) + '" alt="帖子配图">').join("") + "</div>" : "")
+            + '<div class="td-group"><div class="td-group-label">评论 ' + Number(p.comment_count) + " 条</div>"
+            + '<ul class="td-items">' + (comments || '<li class="td-empty">还没有人评论。</li>') + "</ul></div>"
+            + '<label class="td-field-row"><span class="td-field-label" id="cm-reply-label">说两句</span>'
+            + '<input id="cm-comment-text" type="text" maxlength="' + CM_LIMITS.comment + '" placeholder="友善一点，别报体重之外的数字">'
+            + '<span class="td-field-hint" id="cm-comment-err" role="status"></span></label>'
+            + '<div class="td-actions"><button type="button" class="td-btn" onclick="submitComment(' + id +
+            ')">发送评论</button><button type="button" class="td-btn" onclick="openDM(' + (p.author ? p.author.id : 0) +
+            ')">私信 TA</button></div></div>');
+    } catch (e) {
+        callNativeToast("打不开这条帖子：" + (e.message || "网络不通"));
+    }
+}
+
+let cmReplyTo = null;
+function setReplyTo(id) { cmReplyTo = id; }
+function setReplyTarget(id, name) {
+    cmReplyTo = id;
+    const label = cmEl("cm-reply-label");
+    if (label) label.textContent = "回复 " + name;
+    const input = cmEl("cm-comment-text");
+    if (input) input.focus();
+}
+
+async function submitComment(postId) {
+    const input = cmEl("cm-comment-text");
+    const text = (input && input.value || "").trim();
+    if (!text) { cmText("cm-comment-err", "评论不能为空"); return; }
+    cmText("cm-comment-err", "");
+    try {
+        await postApi("/api/community/posts/" + postId + "/comments", { text, reply_to: cmReplyTo });
+        cmReplyTo = null;
+        callNativeToast("评论发出去了");
+        openPostDetail(postId);
+        const item = cm.items.find(x => x.id === postId);
+        if (item) item.comment_count = Number(item.comment_count || 0) + 1;
+    } catch (e) {
+        cmText("cm-comment-err", e.message || "评论没成功");
+    }
+}
+
+async function toggleFollow(uid, btn) {
+    const on = btn.getAttribute("aria-pressed") === "true";
+    try {
+        const r = await postApi("/api/community/users/" + uid + "/follow", { on: !on });
+        btn.setAttribute("aria-pressed", r.following ? "true" : "false");
+        btn.textContent = r.following ? "已关注" : "关注";
+    } catch (e) {
+        callNativeToast("关注没生效：" + (e.message || "网络不通"));
+    }
+}
+
+async function searchMembers() {
+    const input = cmEl("cm-search-input");
+    const q = (input && input.value || "").trim();
+    const host = cmEl("cm-search-results");
+    if (!host) return;
+    if (!q) { host.hidden = true; host.innerHTML = ""; return; }
+    host.hidden = false;
+    host.innerHTML = '<p class="td-empty">在找…</p>';
+    try {
+        const r = await getJson("/api/community/search?q=" + encodeURIComponent(q));
+        const items = r.items || [];
+        host.innerHTML = items.length ? items.map(u =>
+            '<button type="button" class="cm-row" onclick="openMemberHome(' + u.id + ')">'
+            + '<span class="cm-avatar">' + cmAvatarInner(u) + "</span>"
+            + '<span class="cm-row-main"><span class="cm-row-title">' + escapeHtml(cmName(u)) + "</span>"
+            + '<span class="cm-row-meta">轻塑号 ' + escapeHtml(u.public_id || "—") +
+            (u.region ? " · 属地 " + escapeHtml(u.region) : "") + "</span></span></button>").join("")
+            : '<p class="td-empty">没找到这个人。轻塑号要输全 8 位，昵称可以只输几个字。</p>';
+    } catch (e) {
+        host.innerHTML = '<p class="td-empty">搜索没成功：' + escapeHtml(e.message || "网络不通") + "</p>";
+    }
+}
+
+async function openMemberHome(ident) {
+    if (!ident) return;
+    try {
+        const r = await getJson("/api/community/users/" + ident);
+        const u = r.user;
+        const stats = [["帖子", u.posts], ["粉丝", u.followers], ["关注", u.following], ["获赞", u.likes_received]];
+        toolDialog(cmName(u) + " 的主页", '<div class="td-body">'
+            + '<div class="me-hero"><span class="me-avatar">' + cmAvatarInner(u) + "</span>"
+            + '<div class="me-hero-main"><div class="me-name">' + escapeHtml(cmName(u)) + "</div>"
+            + '<div class="me-line">轻塑号 <b>' + escapeHtml(u.public_id || "—") + "</b></div>"
+            + '<div class="me-line">' + cmRegionTag(u.region) + (u.is_me ? " · 这是你自己" : "") + "</div>"
+            + '<div class="me-bio">' + escapeHtml(u.bio || "还没有签名") + "</div></div></div>"
+            + '<div class="me-stats">' + stats.map(s =>
+                '<div class="me-stat"><b>' + Number(s[1]) + "</b><span>" + s[0] + "</span></div>").join("") + "</div>"
+            + (u.is_me ? "" : '<div class="td-actions">'
+                + '<button type="button" class="td-btn" aria-pressed="' + (u.followed ? "true" : "false") + '" onclick="toggleFollow(' + u.id + ',this)">' +
+                (u.followed ? "已关注" : "关注") + '</button><button type="button" class="td-btn td-btn-quiet" onclick="openDM(' + u.id + ')">私信</button></div>')
+            + '<div class="td-group"><div class="td-group-label">TA 的帖子</div><div class="cm-feed">'
+            + ((r.items || []).length ? r.items.map(cmCardHTML).join("") : '<p class="td-empty">还没有公开的帖子。</p>')
+            + "</div></div></div>");
+    } catch (e) {
+        callNativeToast("主页打不开：" + (e.message || "网络不通"));
+    }
+}
+
+/* ── 消息：私信 + 互动通知 ─────────────────────────────────── */
+function setMessageTab(which) {
+    cm.msgTab = which;
+    document.querySelectorAll("#panel-messages .td-seg-btn").forEach(b =>
+        b.setAttribute("aria-selected", b.getAttribute("data-msg") === which ? "true" : "false"));
+    renderMessages();
+}
+
+function paintNavBadge() {
+    const badge = cmEl("nav-msg-badge");
+    if (!badge) return;
+    const dm = (cm.stats && cm.stats.dm_unread) || 0;
+    const nt = (cm.stats && cm.stats.notices_unread) || 0;
+    const total = dm + nt;
+    badge.hidden = total <= 0;
+    badge.textContent = total > 99 ? "99+" : String(total);
+}
+
+async function loadMessages() {
+    if (!state.token) { cmState("msg-state", "登录后才能看消息。"); return; }
+    if (cm.loadingMsg) return;
+    cm.loadingMsg = true;
+    try {
+        if (cm.msgTab === "chats") {
+            const r = await getJson("/api/chat/conversations");
+            cm.convs = r.items || [];
+        } else {
+            const n = await getJson("/api/notifications?limit=30");
+            cm.notices = n.items || [];
+            cm.unreadTotal = n.unread || 0;
+        }
+        const s = await getJson("/api/community/stats");
+        cm.stats = s;
+        paintNavBadge();
+        renderMessages();
+    } catch (e) {
+        cmState("msg-state", "消息没读到：" + (e.message || "网络不通"));
+    } finally {
+        cm.loadingMsg = false;
+    }
+}
+
+function renderMessages() {
+    const host = cmEl("msg-list");
+    if (!host) return;
+    if (cm.thread) { cmState("msg-state", ""); host.innerHTML = ""; return; }
+    if (cm.msgTab === "chats") {
+        host.innerHTML = cm.convs.map(c =>
+            '<button type="button" class="cm-row" onclick="openThread(' + c.with.id + ')">'
+            + '<span class="cm-avatar">' + cmAvatarInner(c.with) + "</span>"
+            + '<span class="cm-row-main"><span class="cm-row-title">' + escapeHtml(cmName(c.with)) +
+            (c.online ? " · 在线" : "") + (c.blocked ? " · 已拉黑" : "") + "</span>"
+            + '<span class="cm-row-meta">' + escapeHtml(c.last_body || "还没有消息") + "</span></span>"
+            + '<span class="cm-row-side">' + escapeHtml(cmAgo(c.last_at))
+            + (c.unread ? '<br><span class="td-badge">' + Number(c.unread) + "</span>" : "") + "</span></button>"
+        ).join("");
+        if (!cm.convs.length) cmState("msg-state", "还没有人跟你说过话。在帖子或主页上点「私信」就能开口。");
+        else cmState("msg-state", "");
+    } else {
+        const rows = cm.notices.map(n =>
+            '<div class="cm-row" style="cursor:default"><span class="cm-avatar">' + cmAvatarInner(n.actor) + "</span>"
+            + '<span class="cm-row-main"><span class="cm-row-title">' + escapeHtml(n.text || cmName(n.actor)) + "</span>"
+            + '<span class="cm-row-meta">' + escapeHtml(cmAgo(n.created_at)) + (n.read_at ? "" : " · 未读") + "</span></span>"
+            + (n.post_id ? '<span class="cm-row-side"><button type="button" class="td-btn td-btn-quiet" onclick="openPostDetail(' +
+                n.post_id + ')">看帖子</button></span>' : "") + "</div>"
+        ).join("");
+        const markAll = (cm.unreadTotal || 0) > 0
+            ? '<button type="button" class="td-btn td-btn-quiet cm-more" onclick="markNoticesRead()">全部标为已读（'
+              + Number(cm.unreadTotal) + " 条未读）</button>"
+            : "";
+        host.innerHTML = rows + markAll;
+        if (!cm.notices.length) cmState("msg-state", "还没有人给你点赞或评论。");
+        else cmState("msg-state", (cm.unreadTotal || 0) > 0 ? "" : "都读过了。");
+    }
+}
+
+/* ── 聊天窗 ─────────────────────────────────────────────────── */
+async function openDM(uid) {
+    if (!state.token) { openAuthModal(); return; }
+    const dlg = cmEl("account-tools-dialog");
+    if (dlg && dlg.open) dlg.close();
+    switchTab("messages");
+    setMessageTab("chats");
+    await openThread(uid);
+}
+
+async function openThread(uid) {
+    if (!uid) return;
+    cm.thread = { partner: { id: uid }, page: 0, more: false, cursor: 0 };
+    cm.bubbles = [];
+    const thread = cmEl("msg-thread");
+    if (thread) thread.hidden = false;
+    cmText("thread-name", "对方");
+    cmText("thread-sub", "在读…");
+    await refreshThread();
+}
+
+function closeThread() {
+    cm.thread = null;
+    const thread = cmEl("msg-thread");
+    if (thread) thread.hidden = true;
+    renderMessages();
+}
+
+async function refreshThread() {
+    if (!cm.thread) return;
+    const uid = cm.thread.partner.id;
+    try {
+        const r = await getJson("/api/chat/messages?with_user=" + uid + "&limit=30");
+        cm.thread.partner = r.partner || cm.thread.partner;
+        cm.bubbles = r.items || [];
+        cm.thread.more = !!r.more;
+        cm.thread.cursor = r.next_cursor || 0;
+        paintThread();
+        await postApi("/api/chat/read", { with_user: uid });
+    } catch (e) {
+        cmText("thread-sub", "记录没读到：" + (e.message || "网络不通"));
+    }
+}
+
+function paintThread() {
+    if (!cm.thread) return;
+    const me = state.user && state.user.id;
+    cmText("thread-name", cmName(cm.thread.partner));
+    const sub = cmEl("thread-sub");
+    if (sub) sub.textContent = "轻塑号 " + (cm.thread.partner.public_id || "—") +
+        (cm.thread.partner.region ? " · 属地 " + cm.thread.partner.region : "");
+    const host = cmEl("thread-bubbles");
+    if (!host) return;
+    const rows = [];
+    if (cm.thread.more) rows.push('<button type="button" class="td-btn td-btn-quiet" style="align-self:center" onclick="loadOlderMessages()">看更早的消息</button>');
+    rows.push(...cm.bubbles.map(m => cmBubbleHTML(m, me)));
+    Object.keys(cm.pending).forEach(rid => rows.push(cmBubbleHTML(cm.pending[rid].msg, me, true)));
+    host.innerHTML = rows.join("");
+    host.scrollTop = host.scrollHeight;
+}
+
+function cmBubbleHTML(m, me, pending) {
+    return '<div class="cm-bubble ' + (m.from_id === me ? "me" : "them") + (pending ? " pending" : "") + '">'
+        + escapeHtml(m.body) + "<time>" + escapeHtml(pending ? "发送中" : cmAgo(m.created_at)) + "</time></div>";
+}
+
+async function loadOlderMessages() {
+    if (!cm.thread || !cm.thread.cursor) return;
+    const uid = cm.thread.partner.id;
+    try {
+        const r = await getJson("/api/chat/messages?with_user=" + uid + "&limit=30&cursor=" + cm.thread.cursor);
+        cm.bubbles = (r.items || []).concat(cm.bubbles);
+        cm.thread.more = !!r.more;
+        cm.thread.cursor = r.next_cursor || 0;
+        paintThread();
+    } catch (e) { callNativeToast("更早的消息没读到"); }
+}
+
+async function sendDM() {
+    const input = cmEl("dm-input");
+    const text = (input && input.value || "").trim();
+    if (!text || !cm.thread) return;
+    if (!state.token) { openAuthModal(); return; }
+    const uid = cm.thread.partner.id;
+    const rid = "dm-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+    cm.pending[rid] = { rid, msg: { from_id: state.user && state.user.id, to_id: uid, body: text, created_at: "" } };
+    input.value = "";
+    paintThread();
+    wsSend({ t: "send", to: uid, text, request_id: rid });
+    // 6 秒没等到回执就退回 HTTP 重发：request_id 一样，服务端只会把原来那条还回来，
+    // 不会出现"看着丢了、其实发了两条"。
+    setTimeout(() => {
+        if (!cm.pending[rid]) return;
+        delete cm.pending[rid];
+        postApi("/api/chat/send", { to: uid, text, request_id: rid })
+            .then(r => dmAck(rid, r.message))
+            .catch(e => {
+                cmText("cm-ws-state", "这条没发出去：" + (e.message || "网络不通"));
+                paintThread();
+            });
+    }, 6000);
+}
+
+function dmAck(rid, message) {
+    delete cm.pending[rid];
+    if (message) {
+        if (cm.thread && (message.from_id === cm.thread.partner.id || message.to_id === cm.thread.partner.id)) {
+            if (!cm.bubbles.some(b => b.id === message.id)) cm.bubbles.push(message);
+        }
+    }
+    paintThread();
+}
+
+/* ── WebSocket ──────────────────────────────────────────────── */
+function wsOpen() { return !!(cm.ws && cm.ws.readyState === 1); }
+
+function setWsState(state, why) {
+    cm.wsState = state;
+    const map = { connected: "实时连接：已连上", idle: "", connecting: "实时连接：在连…",
+                  closed: "实时连接：断了，正在重试", unavailable: "实时连接：用不了，发消息走普通请求",
+                  error: "实时连接：出错，发消息走普通请求" };
+    const text = map[state] || "";
+    cmText("cm-ws-state", text && why ? text + "（" + why + "）" : text);
+}
+
+async function connectChat() {
+    if (!state.token) { setWsState("idle"); return; }
+    if (wsOpen() || cm.wsState === "connecting") return;
+    if (cm.wsRetry > 5) { setWsState("unavailable"); return; }
+    cm.wsState = "connecting";
+    try {
+        const t = await postApi("/api/chat/ticket", {});
+        const base = String(API_BASE || "").replace(/^http/, "ws");
+        const sock = new WebSocket(base + t.ws_path + "?ticket=" + encodeURIComponent(t.ticket));
+        cm.ws = sock;
+        sock.onopen = () => { cm.wsRetry = 0; setWsState("connected"); };
+        sock.onmessage = ev => handleWsEvent(ev);
+        sock.onerror = () => setWsState("error");
+        sock.onclose = () => {
+            cm.ws = null;
+            cm.wsRetry++;
+            setWsState("closed");
+            clearTimeout(cm.wsTimer);
+            cm.wsTimer = setTimeout(connectChat, Math.min(30000, 2000 * cm.wsRetry));
+        };
+    } catch (e) {
+        cm.wsRetry++;
+        setWsState("unavailable", (e && e.message) || "握手失败");
+    }
+}
+
+function wsSend(obj) {
+    if (!wsOpen()) return false;
+    try { cm.ws.send(JSON.stringify(obj)); return true; } catch (e) { return false; }
+}
+
+function handleWsEvent(ev) {
+    let data = null;
+    try { data = JSON.parse(ev.data); } catch (e) { return; }
+    if (!data) return;
+    const me = state.user && state.user.id;
+    if (data.t === "msg" && data.message) {
+        const m = data.message;
+        if (cm.thread && (m.from_id === cm.thread.partner.id || m.to_id === cm.thread.partner.id)) {
+            cm.bubbles.push(m);
+            paintThread();
+            if (m.from_id === cm.thread.partner.id) wsSend({ t: "read", with: cm.thread.partner.id });
+        } else if (m.from_id !== me) {
+            callNativeToast("有人私信你：" + String(m.body || "").slice(0, 20));
+        }
+        loadMessages();
+    } else if (data.t === "ack") {
+        dmAck(data.request_id || (data.message && data.message.request_id), data.message);
+    } else if (data.t === "error") {
+        if (data.client_key || data.request_id) dmAck(data.request_id || data.client_key, null);
+        cmText("cm-ws-state", "这条没发出去：" + (data.detail || "服务端拒了"));
+    } else if (data.t === "read") {
+        if (cm.thread && data.by === cm.thread.partner.id) {
+            cm.bubbles = cm.bubbles.map(b => Object.assign({}, b, { read_at: b.read_at || new Date().toISOString() }));
+        }
+    }
+}
+
+async function toggleBlock() {
+    if (!cm.thread) return;
+    const uid = cm.thread.partner.id;
+    const btn = cmEl("thread-block-btn");
+    const on = btn && btn.textContent === "取消拉黑";
+    try {
+        await postApi("/api/chat/block", { with_user: uid, on: !on });
+        if (btn) btn.textContent = on ? "拉黑" : "取消拉黑";
+        callNativeToast(on ? "已经取消拉黑" : "已拉黑，对方不能再私信你");
+    } catch (e) { callNativeToast("操作没生效：" + (e.message || "网络不通")); }
+}
+
+/* ── 我的主页与反馈 ─────────────────────────────────────────── */
+async function loadMe() {
+    if (!state.token) { cmText("me-name", "未登录"); return; }
+    try {
+        const [s, acc] = await Promise.all([getJson("/api/community/stats"),
+                                            getJson("/api/account").catch(() => null)]);
+        cm.stats = s;
+        const u = (acc && acc.user) || state.user || {};
+        cmText("me-name", u.nickname || u.username || "未登录");
+        cmText("me-public-id", s.public_id || u.public_id || "—");
+        const bio = acc && acc.profile && acc.profile.bio;
+        cmText("me-bio", (acc && acc.bio) || bio || "还没有签名，点下面的「编辑签名」写一句");
+        const region = (acc && acc.region) || "";
+        cmText("me-region", region ? "属地 " + region : "属地未知（发一次帖子或评论就会带上）");
+        const disc = acc && typeof acc.discoverable !== "undefined" ? acc.discoverable : 1;
+        const badge = cmEl("me-discoverable-badge");
+        if (badge) badge.textContent = disc ? "已开启" : "已关闭";
+        cmText("me-discoverable-hint", disc ? "别人可以用轻塑号或昵称搜到你" : "别人搜不到你，但你仍能看和发");
+        const slot = cmEl("me-avatar");
+        if (slot) {
+            const url = acc && acc.avatar_url;
+            slot.innerHTML = url ? '<img src="' + escapeHtml(API_BASE + url) + '" alt="我的头像">'
+                : cmAvatarInner({ name: u.nickname || u.username });
+        }
+        paintMeAvatars();
+        const stats = [["帖子", s.posts], ["粉丝", s.followers], ["关注", s.following], ["获赞", s.likes_received]];
+        const host = cmEl("me-stats");
+        if (host) host.innerHTML = stats.map(x =>
+            '<div class="me-stat"><b>' + Number(x[1]) + "</b><span>" + x[0] + "</span></div>").join("");
+        paintNavBadge();
+        syncFeedbackHints();
+        const feed = await getJson("/api/community/feed?tab=mine&limit=6");
+        const posts = cmEl("me-posts");
+        if (posts) posts.innerHTML = (feed.items || []).map(cmCardHTML).join("");
+        cmText("me-posts-state", (feed.items || []).length ? "" : "还没有发过帖子。");
+    } catch (e) {
+        cmText("me-name", "读不到：" + (e.message || "网络不通"));
+    }
+}
+
+function paintMeAvatars() {
+    const u = state.user || {};
+    const inner = cmAvatarInner({ name: u.nickname || u.username });
+    ["nav-me-avatar", "dnav-me-avatar"].forEach(id => {
+        const el = cmEl(id);
+        if (el) el.innerHTML = inner;
+    });
+    const slot = cmEl("cm-compose-avatar");
+    if (slot) slot.innerHTML = inner;
+}
+
+/* 复制轻塑号：剪贴板在 WebView 里不一定给，失败就说失败并给出手抄的余地，
+   不许不管结果一律弹"已复制"。 */
+async function copyPublicId() {
+    const el = cmEl("me-public-id");
+    const id = ((el && el.textContent) || "").trim();
+    if (!/^\d{8}$/.test(id)) { callNativeToast("轻塑号还没读到，稍等一下再复制"); return; }
+    let done = false;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(id);
+            done = true;
+        }
+    } catch (e) { done = false; }
+    if (!done) {
+        try {
+            const ta = document.createElement("textarea");
+            ta.value = id;
+            ta.setAttribute("readonly", "");
+            ta.style.position = "fixed";
+            ta.style.top = "-1000px";
+            document.body.appendChild(ta);
+            ta.select();
+            done = document.execCommand("copy");
+            document.body.removeChild(ta);
+        } catch (e) { done = false; }
+    }
+    callNativeToast(done ? ("轻塑号 " + id + " 已复制") : ("复制没成功，可以照着抄：" + id));
+}
+
+async function editBio() {
+    const cur = (cmEl("me-bio") || {}).textContent || "";
+    const text = prompt("签名（最多 " + CM_LIMITS.bio + " 字）", cur === "还没有签名，点下面的「编辑签名」写一句" ? "" : cur);
+    if (text === null) return;
+    try {
+        await postApi("/api/community/profile", { bio: text.trim() });
+        callNativeToast("签名改好了");
+        loadMe();
+    } catch (e) { callNativeToast("没改掉：" + (e.message || "网络不通")); }
+}
+
+async function toggleDiscoverable() {
+    const badge = cmEl("me-discoverable-badge");
+    const on = badge && badge.textContent === "已开启";
+    if (!confirm(on ? "关掉之后别人搜不到你，确定吗？" : "打开后别人可以用轻塑号或昵称找到你，确定吗？")) return;
+    try {
+        await postApi("/api/community/profile", { discoverable: on ? 0 : 1 });
+        loadMe();
+    } catch (e) { callNativeToast("没改掉：" + (e.message || "网络不通")); }
+}
+
+function setFeedbackKind(kind) {
+    if (!["bug", "idea", "data", "other"].includes(kind)) return;
+    cm.feedbackKind = kind;
+    document.querySelectorAll("#fb-kinds .td-seg-btn").forEach(b =>
+        b.setAttribute("aria-selected", b.getAttribute("data-kind") === kind ? "true" : "false"));
+}
+
+function syncFeedbackHints() {
+    syncFeedbackCounters();
+    const active = document.querySelector(".view-panel.active");
+    cmText("fb-page", active ? active.id.replace("panel-", "") : "—");
+    const build = cmEl("fb-build");
+    if (build) build.textContent = typeof APP_BUILD !== "undefined" ? String(APP_BUILD) : "未知";
+}
+
+async function submitFeedback() {
+    const t = cmEl("fb-text");
+    const text = (t && t.value || "").trim();
+    if (!text) { cmText("fb-result", "写一句再投，空的一条我这边没法看"); return; }
+    const active = document.querySelector(".view-panel.active");
+    try {
+        const r = await postApi("/api/feedback", {
+            kind: cm.feedbackKind, text,
+            page: active ? active.id.replace("panel-", "") : "",
+            contact: (cmEl("fb-contact").value || "").trim()
+        });
+        if (t) t.value = "";
+        syncFeedbackCounters();
+        cmText("fb-result", "收到了，编号 #" + r.id + "。处理进度在「我的 → 我的反馈」里能看。");
+    } catch (e) {
+        cmText("fb-result", "没投出去：" + (e.message || "网络不通") + "，内容还留着");
+    }
+}
+
+async function openMyFeedback() {
+    try {
+        const r = await getJson("/api/feedback/mine");
+        const names = r.status_names || {};
+        const rows = (r.items || []).map(f =>
+            '<li class="td-item"><span class="td-glyph">' + ({ bug: "🐞", idea: "💡", data: "🔢", other: "📝" }[f.kind] || "📝") + "</span>"
+            + '<span class="td-item-main"><span class="td-item-title">' + escapeHtml(f.body) + "</span>"
+            + '<span class="td-item-meta">' + escapeHtml(cmTime(f.created_at)) + " · " + escapeHtml(names[f.status] || f.status) + "</span>"
+            + (f.reply ? '<span class="td-item-meta">回复：' + escapeHtml(f.reply) + "</span>" : "") + "</span></li>").join("");
+        toolDialog("我的反馈", '<div class="td-body"><ul class="td-items">'
+            + (rows || '<li class="td-empty">还没投过意见。在「我的」页最下面那一块就能投。</li>') + "</ul></div>");
+    } catch (e) {
+        callNativeToast("反馈列表没读到：" + (e.message || "网络不通"));
+    }
 }

@@ -147,3 +147,112 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
    @media 断点：多一个断点就多一条没人测过的宽度区间，
    真机那条「断点全覆盖」判据正是为此而红过一次。 */
 .tav-item{flex-wrap:wrap}
+
+/* ============================================================
+   r149 社区 / 私信 / 我的主页
+   颜色、圆角、字号一律沿用上面那套令牌：#0F172A 主文、#64748B 次文、
+   #065F46 主色、#E2E8F0 描边、#F1F5F9 底，触控目标最小 44px。
+   ============================================================ */
+.tool-strip{display:flex;gap:6px;overflow-x:auto;margin:-2px 0 10px;padding:2px 0 4px;scrollbar-width:none}
+.tool-strip::-webkit-scrollbar{display:none}
+.tool-strip[hidden]{display:none}
+.ts-chip{flex:0 0 auto;min-height:36px;padding:0 12px;border:1px solid #E2E8F0;border-radius:999px;background:#fff;color:#475569;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.ts-chip[aria-selected="true"]{border-color:#A7F3D0;background:#ECFDF5;color:#047857}
+.ts-chip.ts-back{border-style:dashed;color:#64748B}
+.nav-item{position:relative;border:0;background:none;font:inherit;cursor:pointer;padding:6px 2px 4px}
+.nav-badge{position:absolute;top:4px;right:calc(50% - 22px);min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:#DC2626;color:#fff;font-size:10.5px;font-weight:800;line-height:17px}
+.nav-badge[hidden]{display:none}
+
+.cm-head{padding:12px 14px}
+.cm-search{display:flex;gap:8px}
+.cm-search input{flex:1 1 auto;min-width:0;min-height:44px;padding:0 12px;border:1px solid #CBD5E1;border-radius:11px;background:#fff;font:inherit;font-size:15px}
+.cm-search .td-btn-quiet{flex:0 0 auto}
+.cm-results{margin-top:10px;border-top:1px solid #EEF2F6;padding-top:4px}
+.cm-results[hidden]{display:none}
+
+.cm-compose{padding:12px 14px}
+.cm-compose-collapsed{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:0;border:0;background:none;font:inherit;color:#64748B;font-size:15px;text-align:left;cursor:pointer}
+.cm-compose-hint{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.cm-compose-open textarea{display:block;box-sizing:border-box;width:100%;min-height:96px;padding:10px 12px;border:1px solid #CBD5E1;border-radius:11px;background:#fff;font:inherit;font-size:15px;resize:vertical}
+.cm-compose-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+.cm-count{font-size:12px;color:#64748B;font-variant-numeric:tabular-nums}
+.cm-err{flex:1 1 auto;min-width:0;font-size:12.5px;color:#B91C1C}
+.cm-compose-acts{display:flex;gap:8px;margin-left:auto}
+.cm-thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.cm-thumb{position:relative;width:64px;height:64px;border-radius:10px;overflow:hidden;background:#F1F5F9}
+.cm-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.cm-thumb button{position:absolute;top:2px;right:2px;width:20px;height:20px;padding:0;border:0;border-radius:50%;background:rgba(15,23,42,.62);color:#fff;font-size:12px;line-height:18px;cursor:pointer}
+
+.cm-feed{display:grid;gap:10px}
+.cm-card{background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:13px 14px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.cm-card-head{display:flex;align-items:center;gap:9px}
+.cm-avatar{flex:0 0 34px;width:34px;height:34px;border-radius:50%;object-fit:cover;background:#ECFDF5;color:#047857;font-size:14px;font-weight:800;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.cm-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.cm-who-btn{display:flex;align-items:center;gap:9px;flex:1 1 auto;min-width:0;border:0;background:none;font:inherit;padding:0;cursor:pointer;text-align:left}
+.cm-who{flex:1 1 auto;min-width:0}
+.cm-name{font-size:14px;font-weight:700;color:#0F172A;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.cm-sub{font-size:11.5px;color:#94A3B8;margin-top:1px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.cm-who-btn{border:0;background:none;font:inherit;padding:0;cursor:pointer;color:inherit;text-align:left}
+.cm-follow{flex:0 0 auto;min-height:30px;padding:0 12px;border:1px solid #A7F3D0;border-radius:999px;background:#ECFDF5;color:#047857;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
+.cm-follow[aria-pressed="true"]{border-color:#E2E8F0;background:#F1F5F9;color:#64748B}
+.cm-body{margin:10px 0 0;font-size:15px;line-height:1.62;color:#0F172A;white-space:pre-wrap;overflow-wrap:anywhere}
+.cm-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px}
+.cm-grid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:#F1F5F9;display:block}
+.cm-acts{display:flex;align-items:center;gap:14px;margin-top:11px;padding-top:10px;border-top:1px solid #EEF2F6}
+.cm-act{display:inline-flex;align-items:center;gap:5px;border:0;background:none;font:inherit;font-size:13px;color:#64748B;cursor:pointer;padding:2px 0;min-height:30px}
+.cm-act[aria-pressed="true"]{color:#DC2626;font-weight:700}
+.cm-act b{font-variant-numeric:tabular-nums;font-weight:700}
+.cm-state{margin:14px 0 2px;text-align:center;font-size:13px;color:#64748B;overflow-wrap:anywhere}
+.cm-state:empty{display:none}
+.cm-more{display:block;width:100%;margin-top:4px}
+.cm-more[hidden]{display:none}
+
+.cm-list{display:grid;gap:8px}
+.cm-row{display:flex;align-items:flex-start;gap:10px;width:100%;text-align:left;background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:12px 14px;font:inherit;cursor:pointer;min-height:60px}
+.cm-row-main{flex:1 1 auto;min-width:0}
+.cm-row-title{font-size:14.5px;font-weight:700;color:#0F172A;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.cm-row-meta{margin-top:3px;font-size:12.5px;line-height:1.5;color:#64748B;overflow-wrap:anywhere}
+.cm-row-side{flex:0 0 auto;text-align:right;font-size:11.5px;color:#94A3B8}
+
+.cm-ws-state{margin:8px 0 0;font-size:12px;color:#64748B;text-align:right}
+.cm-ws-state:empty{display:none}
+.cm-thread{margin-top:10px;border:1px solid #E2E8F0;border-radius:14px;background:#fff;overflow:hidden}
+.cm-thread[hidden]{display:none}
+.cm-thread-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #EEF2F6;background:#F8FAFC}
+.cm-back{flex:0 0 auto;border:0;background:none;font:inherit;font-size:14px;font-weight:700;color:#047857;cursor:pointer;padding:6px 8px 6px 0;min-height:36px}
+.cm-thread-name{flex:1 1 auto;min-width:0;font-size:14.5px;font-weight:700;color:#0F172A;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.cm-thread-sub{flex:0 0 auto;font-size:11.5px;color:#94A3B8}
+.cm-bubbles{max-height:52vh;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;background:#FCFDFE}
+.cm-bubble{max-width:78%;padding:9px 12px;border-radius:14px;font-size:14.5px;line-height:1.55;overflow-wrap:anywhere;white-space:pre-wrap}
+.cm-bubble.them{align-self:flex-start;background:#F1F5F9;color:#0F172A;border-bottom-left-radius:5px}
+.cm-bubble.me{align-self:flex-end;background:#065F46;color:#fff;border-bottom-right-radius:5px}
+.cm-bubble time{display:block;margin-top:4px;font-size:10.5px;opacity:.72;font-variant-numeric:tabular-nums}
+.cm-composer{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #EEF2F6}
+.cm-composer input{flex:1 1 auto;min-width:0;min-height:44px;padding:0 12px;border:1px solid #CBD5E1;border-radius:11px;font:inherit;font-size:15px}
+.cm-composer .td-btn{flex:0 0 auto}
+
+.me-hero{display:flex;gap:12px;align-items:flex-start}
+.me-avatar{flex:0 0 56px;width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#10B981 0%,#059669 100%);color:#fff;font-size:22px;font-weight:800;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.me-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.me-hero-main{flex:1 1 auto;min-width:0}
+.me-name{font-size:18px;font-weight:800;color:#0F172A;overflow-wrap:anywhere}
+.me-line{margin-top:3px;font-size:12.5px;color:#64748B;overflow-wrap:anywhere}
+.me-line b{font-variant-numeric:tabular-nums;color:#0F172A;letter-spacing:.4px}
+.me-copy{margin-left:6px;border:1px solid #E2E8F0;background:#F8FAFC;border-radius:7px;font:inherit;font-size:11.5px;color:#475569;padding:1px 7px;cursor:pointer;min-height:24px}
+.me-bio{margin-top:6px;font-size:13.5px;line-height:1.55;color:#334155;overflow-wrap:anywhere}
+.me-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:12px 8px}
+.me-stat{text-align:center;min-width:0}
+.me-stat b{display:block;font-size:18px;font-weight:800;color:#0F172A;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
+.me-stat span{display:block;margin-top:2px;font-size:11.5px;color:#64748B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+@media(min-width:760px){
+ .cm-feed{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+ .cm-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
+/* 底部导航与桌面顶栏里的"我的"用头像点，不用通用小人图标——
+   机主嫌的就是那个蓝色剪影，同一个软件里不该两种人格符号并存。 */
+.nav-avatar,.dnav-avatar{border-radius:50%;background:linear-gradient(135deg,#10B981 0%,#059669 100%);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;overflow:hidden;flex:0 0 auto}
+.nav-avatar{width:22px;height:22px;font-size:11px;line-height:1}
+.dnav-avatar{width:18px;height:18px;font-size:10px;display:inline-flex;vertical-align:-3px}
+.nav-avatar img,.dnav-avatar img{width:100%;height:100%;object-fit:cover;display:block}

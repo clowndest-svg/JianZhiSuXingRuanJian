@@ -60,17 +60,33 @@
         <!-- 桌面版顶部导航栏 (只在桌面模式显示，解决电脑端点击不便与无法切换问题) -->
         <nav class="desktop-top-nav" id="desktop-top-nav">
             <button type="button" class="d-nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 监控大屏</button>
+            <button type="button" class="d-nav-item" data-tab="community" onclick="switchTab('community')">👥 社区广场</button>
+            <button type="button" class="d-nav-item" data-tab="messages" onclick="switchTab('messages')">💬 消息</button>
+            <button type="button" class="d-nav-item" data-tab="me" onclick="switchTab('me')"><span class="dnav-avatar" id="dnav-me-avatar">轻</span> 我的主页</button>
             <button type="button" class="d-nav-item" data-tab="recipes" onclick="switchTab('recipes')">🥗 食谱与外卖</button>
             <button type="button" class="d-nav-item" data-tab="workout" onclick="switchTab('workout')">🏋️ 训练计划</button>
             <button type="button" class="d-nav-item" data-tab="body" onclick="switchTab('body')">📷 形体档案</button>
             <button type="button" class="d-nav-item" data-tab="takeout" onclick="switchTab('takeout')">🚨 外卖拦截</button>
             <button type="button" class="d-nav-item" data-tab="charts" onclick="switchTab('charts')">📈 统计大图</button>
             <button type="button" class="d-nav-item" data-tab="gemini" onclick="switchTab('gemini')">🤖 AI顾问</button>
+            <button type="button" class="d-nav-item" data-tab="tools" onclick="switchTab('tools')">🧭 更多功能</button>
         </nav>
     </header>
 
     <!-- 主体视窗区域 -->
     <main id="app-main">
+
+        <!-- 工具类面板之间的吸顶切换条：底部导航收成 5 格之后，
+             这 6 个功能互相切换不能再靠"回到更多页再点一次"，那会让人以为功能变少了 -->
+        <div class="tool-strip" id="tool-strip" role="tablist" aria-label="工具之间切换">
+            <button type="button" class="ts-chip" data-tab="recipes" onclick="switchTab('recipes')">🥗 食谱</button>
+            <button type="button" class="ts-chip" data-tab="workout" onclick="switchTab('workout')">🏋️ 训练</button>
+            <button type="button" class="ts-chip" data-tab="body" onclick="switchTab('body')">📷 形体照</button>
+            <button type="button" class="ts-chip" data-tab="takeout" onclick="switchTab('takeout')">🚨 外卖</button>
+            <button type="button" class="ts-chip" data-tab="charts" onclick="switchTab('charts')">📈 统计</button>
+            <button type="button" class="ts-chip" data-tab="gemini" onclick="switchTab('gemini')">🤖 顾问</button>
+            <button type="button" class="ts-chip ts-back" onclick="switchTab('tools')">‹ 更多</button>
+        </div>
 
         <!-- ================= TAB 1: 监控大屏 ================= -->
         <section id="panel-dashboard" class="view-panel active">
@@ -972,6 +988,179 @@
             </div>
         </section>
 
+        <!-- ================= TAB 8: 社区 ================= -->
+        <section id="panel-community" class="view-panel">
+            <div class="card cm-head">
+                <div class="td-seg" role="tablist" aria-label="社区列表">
+                    <button type="button" class="td-seg-btn" aria-selected="true" data-feed="latest" onclick="setCommunityTab('latest')">广场</button>
+                    <button type="button" class="td-seg-btn" aria-selected="false" data-feed="follow" onclick="setCommunityTab('follow')">关注</button>
+                    <button type="button" class="td-seg-btn" aria-selected="false" data-feed="mine" onclick="setCommunityTab('mine')">我的</button>
+                </div>
+                <div class="cm-search">
+                    <input id="cm-search-input" type="search" placeholder="输入轻塑号或昵称找人" aria-label="搜索用户"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();searchMembers();}">
+                    <button type="button" class="td-btn td-btn-quiet" onclick="searchMembers()">搜索</button>
+                </div>
+                <div id="cm-search-results" class="cm-results" hidden></div>
+            </div>
+
+            <div class="card cm-compose">
+                <button type="button" class="cm-compose-collapsed" id="cm-compose-collapsed" onclick="expandComposer()">
+                    <span class="avatar-dot" id="cm-compose-avatar">轻</span>
+                    <span class="cm-compose-hint">分享你的减脂日常…</span>
+                </button>
+                <div class="cm-compose-open" id="cm-compose-open" hidden>
+                    <textarea id="cm-post-text" rows="4" maxlength="1000"
+                              placeholder="今天吃了什么、练了什么、卡在哪儿…"
+                              oninput="syncComposerCount()" aria-label="发帖正文"></textarea>
+                    <div class="cm-thumbs" id="cm-thumbs"></div>
+                    <div class="cm-compose-foot">
+                        <span class="cm-count" id="cm-post-count"></span>
+                        <span class="cm-err" id="cm-post-err" role="status"></span>
+                        <span class="cm-compose-acts">
+                            <label class="td-btn td-btn-quiet">🖼️ 配图
+                                <input type="file" id="cm-post-image" accept="image/*" hidden onchange="attachPostImage(this)">
+                            </label>
+                            <button type="button" class="td-btn" onclick="submitPost()">发布</button>
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="cm-feed" class="cm-feed"></div>
+            <p class="td-empty cm-state" id="cm-feed-state" role="status"></p>
+            <button type="button" class="td-btn td-btn-quiet cm-more" id="cm-more" onclick="loadCommunity(true)" hidden>看更早的</button>
+        </section>
+
+        <!-- ================= TAB 9: 消息（私信 + 互动通知） ================= -->
+        <section id="panel-messages" class="view-panel">
+            <div class="td-seg" role="tablist" aria-label="消息分类">
+                <button type="button" class="td-seg-btn" aria-selected="true" data-msg="chats" onclick="setMessageTab('chats')">私信</button>
+                <button type="button" class="td-seg-btn" aria-selected="false" data-msg="notices" onclick="setMessageTab('notices')">互动通知</button>
+            </div>
+            <p class="cm-ws-state" id="cm-ws-state" role="status"></p>
+            <div id="msg-list" class="cm-list"></div>
+            <p class="td-empty cm-state" id="msg-state" role="status"></p>
+
+            <div class="cm-thread" id="msg-thread" hidden>
+                <div class="cm-thread-head">
+                    <button type="button" class="cm-back" onclick="closeThread()">‹ 返回</button>
+                    <span class="cm-thread-name" id="thread-name"></span>
+                    <span class="cm-thread-sub" id="thread-sub"></span>
+                    <button type="button" class="td-btn td-btn-quiet" id="thread-block-btn" onclick="toggleBlock()">拉黑</button>
+                </div>
+                <div class="cm-bubbles" id="thread-bubbles" role="log" aria-live="polite"></div>
+                <div class="cm-composer">
+                    <input id="dm-input" type="text" maxlength="1000" placeholder="说点什么…" aria-label="私信内容"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();sendDM();}">
+                    <button type="button" class="td-btn" onclick="sendDM()">发送</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= TAB 10: 我的主页 ================= -->
+        <section id="panel-me" class="view-panel">
+            <div class="card me-hero">
+                <span class="me-avatar" id="me-avatar">轻</span>
+                <div class="me-hero-main">
+                    <div class="me-name" id="me-name">未登录</div>
+                    <div class="me-line">轻塑号 <b id="me-public-id">—</b>
+                        <button type="button" class="me-copy" onclick="copyPublicId()">复制</button></div>
+                    <div class="me-line" id="me-region">属地未知</div>
+                    <div class="me-bio" id="me-bio">还没有签名</div>
+                </div>
+            </div>
+            <div class="card me-stats" id="me-stats"></div>
+
+            <div class="card account-tools">
+                <h3>社区</h3>
+                <nav>
+                    <button type="button" class="td-row" onclick="editBio()"><span class="td-glyph">✎</span>
+                        <span class="td-row-main"><span class="td-row-title">编辑签名</span>
+                        <span class="td-row-hint">最多 60 字，展示在你的主页与帖子旁</span></span><span class="td-chevron"></span></button>
+                    <button type="button" class="td-row" onclick="toggleDiscoverable()"><span class="td-glyph">🔍</span>
+                        <span class="td-row-main"><span class="td-row-title">允许别人搜到我</span>
+                        <span class="td-row-hint" id="me-discoverable-hint">当前状态读取中</span></span><span class="td-badge" id="me-discoverable-badge">—</span></span></button>
+                    <button type="button" class="td-row" onclick="openMyFeedback()"><span class="td-glyph">📮</span>
+                        <span class="td-row-main"><span class="td-row-title">我的反馈</span>
+                        <span class="td-row-hint">看处理进度与官方回复</span></span><span class="td-badge" id="me-feedback-badge" data-empty="1">0</span><span class="td-chevron"></span></button>
+                </nav>
+            </div>
+
+            <div class="card account-tools">
+                <h3>投个意见</h3>
+                <div class="td-body">
+                    <p class="td-lead">软件哪里不好用、想要什么功能，直接扔过来。带截图说明的地方会写清楚。</p>
+                    <div class="td-seg" role="tablist" aria-label="反馈类型" id="fb-kinds">
+                        <button type="button" class="td-seg-btn" aria-selected="true" data-kind="bug" onclick="setFeedbackKind('bug')">问题</button>
+                        <button type="button" class="td-seg-btn" aria-selected="false" data-kind="idea" onclick="setFeedbackKind('idea')">建议</button>
+                        <button type="button" class="td-seg-btn" aria-selected="false" data-kind="data" onclick="setFeedbackKind('data')">数据不对</button>
+                        <button type="button" class="td-seg-btn" aria-selected="false" data-kind="other" onclick="setFeedbackKind('other')">其他</button>
+                    </div>
+                    <div class="td-field-row"><label class="td-field-label" for="fb-text">内容</label>
+                        <textarea id="fb-text" rows="4" maxlength="800" placeholder="写清楚在哪个页面、做了什么、看到了什么" aria-label="反馈内容"></textarea>
+                        <span class="td-field-hint"><span id="fb-count"></span> · 当前页 <b id="fb-page">—</b> · 版本 <b id="fb-build">—</b></span></div>
+                    <div class="td-field-row"><label class="td-field-label" for="fb-contact">联系方式（选填）</label>
+                        <input id="fb-contact" type="text" maxlength="80" placeholder="留了才回得到你，不留也能投">
+                        <span class="td-field-hint">只用于回复这条反馈，不会出现在任何公开页面。</span></div>
+                    <div class="td-actions"><button type="button" class="td-btn" onclick="submitFeedback()">投出去</button>
+                        <span class="td-note" id="fb-result" role="status"></span></div>
+                </div>
+            </div>
+
+            <div class="card account-tools">
+                <h3>我的帖子</h3>
+                <div id="me-posts" class="cm-feed"></div>
+                <p class="td-empty" id="me-posts-state" role="status"></p>
+            </div>
+        </section>
+
+        <!-- ================= TAB 11: 更多功能 ================= -->
+        <section id="panel-tools" class="view-panel">
+            <div class="card account-tools">
+                <h3>记录与工具</h3>
+                <nav>
+                    <button type="button" class="td-row" data-tab="recipes" onclick="switchTab('recipes')"><span class="td-glyph">🥗</span>
+                        <span class="td-row-main"><span class="td-row-title">食谱与外卖</span>
+                        <span class="td-row-hint">按忌口与城市排序，含热量核对</span></span><span class="td-chevron"></span></button>
+                    <button type="button" class="td-row" data-tab="workout" onclick="switchTab('workout')"><span class="td-glyph">🏋️</span>
+                        <span class="td-row-main"><span class="td-row-title">训练计划</span>
+                        <span class="td-row-hint">32 个动作的分解要点与示意</span></span><span class="td-chevron"></span></button>
+                    <button type="button" class="td-row" data-tab="body" onclick="switchTab('body')"><span class="td-glyph">📷</span>
+                        <span class="td-row-main"><span class="td-row-title">形体档案</span>
+                        <span class="td-row-hint">身材记录与本周期变化</span></span><span class="td-chevron"></span></button>
+                    <button type="button" class="td-row" data-tab="takeout" onclick="switchTab('takeout')"><span class="td-glyph">🚨</span>
+                        <span class="td-row-main"><span class="td-row-title">外卖拦截</span>
+                        <span class="td-row-hint">点单前的额度门禁与单品秒审</span></span><span class="td-chevron"></span></button>
+                    <button type="button" class="td-row" data-tab="charts" onclick="switchTab('charts')"><span class="td-glyph">📈</span>
+                        <span class="td-row-main"><span class="td-row-title">统计大图</span>
+                        <span class="td-row-hint">体重、热量缺口与自律热力</span></span><span class="td-chevron"></span></button>
+                    <button type="button" class="td-row" data-tab="gemini" onclick="switchTab('gemini')"><span class="td-glyph">🤖</span>
+                        <span class="td-row-main"><span class="td-row-title">AI 顾问</span>
+                        <span class="td-row-hint">按你自己的记录回答，不编数字</span></span><span class="td-chevron"></span></button>
+                </nav>
+            </div>
+            <div class="card account-tools">
+                <h3>账号与数据</h3>
+                <nav>
+                    <button type="button" class="td-row" onclick="openAccountCenter()"><span class="td-glyph">👤</span>
+                        <span class="td-row-main"><span class="td-row-title">个人中心</span>
+                        <span class="td-row-hint">头像、改密码、邮箱找回、城市与忌口</span></span><span class="td-chevron"></span></button>
+                    <button type="button" class="td-row" onclick="openProfileModal()"><span class="td-glyph">📋</span>
+                        <span class="td-row-main"><span class="td-row-title">我的档案</span>
+                        <span class="td-row-hint">身高体重与目标，额度按它算</span></span><span class="td-chevron"></span></button>
+                    <button type="button" class="td-row" onclick="openRecordManager('weight')"><span class="td-glyph">🗂️</span>
+                        <span class="td-row-main"><span class="td-row-title">历史与补录</span>
+                        <span class="td-row-hint">查看和修正每一条记录</span></span><span class="td-chevron"></span></button>
+                    <button type="button" class="td-row" onclick="openSharingSettings()"><span class="td-glyph">🔐</span>
+                        <span class="td-row-main"><span class="td-row-title">分享与隐私</span>
+                        <span class="td-row-hint">控制监督大屏显示什么、多久过期</span></span><span class="td-chevron"></span></button>
+                    <button type="button" class="td-row" onclick="openReminderSettings()"><span class="td-glyph">⏰</span>
+                        <span class="td-row-main"><span class="td-row-title">每日提醒</span>
+                        <span class="td-row-hint">打开时提醒，同日只提一次</span></span><span class="td-chevron"></span></button>
+                </nav>
+            </div>
+        </section>
     </main>
 
 
@@ -1253,34 +1442,22 @@
 
     <!-- ================= 底部固定导航栏 ================= -->
     <nav class="bottom-nav">
-        <div class="nav-item active" id="nav-dashboard" onclick="switchTab('dashboard')" role="button" tabindex="0">
-            <span class="nav-icon">📊</span>
-            <span>监控</span>
-        </div>
-        <div class="nav-item" id="nav-recipes" onclick="switchTab('recipes')" role="button" tabindex="0">
-            <span class="nav-icon">🥗</span>
-            <span>食谱/外卖</span>
-        </div>
-        <div class="nav-item" id="nav-workout" onclick="switchTab('workout')" role="button" tabindex="0">
-            <span class="nav-icon">🏋️</span>
-            <span>训练计划</span>
-        </div>
-        <div class="nav-item" id="nav-body" onclick="switchTab('body')" role="button" tabindex="0">
-            <span class="nav-icon">📷</span>
-            <span>形体照</span>
-        </div>
-        <div class="nav-item highlight" id="nav-takeout" onclick="switchTab('takeout')" role="button" tabindex="0">
-            <span class="nav-icon">🚨</span>
-            <span>外卖拦截</span>
-        </div>
-        <div class="nav-item" id="nav-charts" onclick="switchTab('charts')" role="button" tabindex="0">
-            <span class="nav-icon">📈</span>
-            <span>统计图</span>
-        </div>
-        <div class="nav-item" id="nav-gemini" onclick="switchTab('gemini')" role="button" tabindex="0">
-            <span class="nav-icon">🤖</span>
-            <span>AI顾问</span>
-        </div>
+        <button type="button" class="nav-item active" id="nav-dashboard" onclick="switchTab('dashboard')">
+            <span class="nav-icon">📊</span><span>监控</span>
+        </button>
+        <button type="button" class="nav-item" id="nav-community" onclick="switchTab('community')">
+            <span class="nav-icon">👥</span><span>社区</span>
+        </button>
+        <button type="button" class="nav-item" id="nav-messages" onclick="switchTab('messages')">
+            <span class="nav-icon">💬</span><span>消息</span>
+            <span class="nav-badge" id="nav-msg-badge" hidden>0</span>
+        </button>
+        <button type="button" class="nav-item" id="nav-me" onclick="switchTab('me')">
+            <span class="nav-icon nav-avatar" id="nav-me-avatar">轻</span><span>我的</span>
+        </button>
+        <button type="button" class="nav-item" id="nav-tools" onclick="switchTab('tools')">
+            <span class="nav-icon">🧭</span><span>更多</span>
+        </button>
     </nav>
 
     <!-- 悬浮下载客户端胶囊按钮 (醒目快捷) -->

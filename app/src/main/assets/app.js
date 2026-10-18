@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 31;
+const APP_BUILD = 32;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -526,7 +526,11 @@ const pendingWrites = new Map();
 const uncertainWrites = new Map();
 function postApi(path, body, opts) {
     if (!state.token) return Promise.reject(new Error("请先登录"));
-    const isRecord = path === "/api/food/log" || path === "/api/workout/complete";
+    // 打卡类写操作要带 request_id 做幂等；社区发帖/评论和私信同理——断网重试
+    // 不该发出第二条。评论的路径是 /api/community/posts/<id>/comments，所以按前缀认。
+    const RECORD_PATHS = ["/api/food/log", "/api/workout/complete",
+                          "/api/community/posts", "/api/chat/send"];
+    const isRecord = RECORD_PATHS.some(p => path === p || path.startsWith(p + "/"));
     const signature = JSON.stringify(body instanceof FormData ? {} : Object.fromEntries(Object.entries(body || {}).filter(([key])=>key!=="request_id")));
     const key = sessionGeneration + ":" + path + ":" + signature;
     if (pendingWrites.has(key)) return pendingWrites.get(key);
@@ -563,6 +567,8 @@ function saveAuthSession(token, user) {
     resetPrivateUI();
     // 忌口与城市决定外卖/食谱的推荐顺序，头像在顶栏；换账号时必须重拉一次
     if (typeof refreshAccount === 'function') refreshAccount();
+    // 换账号要先清掉上一个人的社区/私信内存态，否则列表会串号
+    if (typeof resetCommunity === 'function') resetCommunity();
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
     updateUserUI(displayName(user));
@@ -3669,6 +3675,18 @@ function switchTab(tabName) {
     const nav = document.getElementById("nav-" + tabName);
     if (panel) panel.classList.add("active");
     if (nav) nav.classList.add("active");
+
+    // 底部导航收成 5 格之后，6 个工具之间靠这条吸顶 chip 互相切换；
+    // 不显示的时候必须真的 hidden，不然它会占住一块地方还点不动。
+    const strip = document.getElementById("tool-strip");
+    if (strip) {
+        const isTool = ["recipes", "workout", "body", "takeout", "charts", "gemini"].indexOf(tabName) >= 0;
+        strip.hidden = !isTool;
+        strip.querySelectorAll(".ts-chip[data-tab]").forEach(chip => {
+            chip.setAttribute("aria-selected", chip.getAttribute("data-tab") === tabName ? "true" : "false");
+        });
+    }
+    if (typeof cmRoute === "function") cmRoute(tabName);
 
     if (tabName === "charts") {
         setTimeout(renderCharts, 50);

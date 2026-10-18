@@ -1332,9 +1332,18 @@ check("打印样式只留复盘页",
         "跑到面板外的: " + JSON.stringify(stray) + " zone=" + zone.length);
   const mainInner = rHtml.slice(rHtml.indexOf("<main"), rHtml.indexOf("</main>"));
   const mainKids = [...mainInner.matchAll(/<section[^>]*id="(panel-[a-z-]+)"/g)].map(x => x[1]);
-  check("main 之下只有七个面板",
-        mainKids.length === 7 && (mainInner.match(/<div/g) || []).length === (mainInner.match(/<div/g) || []).length,
-        mainKids);
+  const CM_PANELS = ["dashboard", "recipes", "workout", "body", "takeout", "charts", "gemini",
+                     "community", "messages", "me", "tools"];
+  const panelSet = new Set(mainKids.map(k => k.replace("panel-", "")));
+  check("面板清单与导航设计一致",
+        mainKids.length === CM_PANELS.length && CM_PANELS.every(t => panelSet.has(t)), mainKids);
+  // 光数个数证明不了"每块都到得了"：底部 5 槽 + 桌面顶栏 + 工具 chip 条三个入口合起来
+  // 必须覆盖所有面板，且不许有不存在的目标（点了没反应的面板比少一块更糟）。
+  const navTargets = new Set([...rHtml.matchAll(/switchTab\('([a-z-]+)'\)/g)].map(m => m[1]));
+  const orphan = CM_PANELS.filter(x => !navTargets.has(x));
+  const dead = [...navTargets].filter(x => !panelSet.has(x));
+  check("每个面板都有入口、每个入口都有面板", orphan.length === 0 && dead.length === 0,
+        "没入口: " + JSON.stringify(orphan) + " 没面板: " + JSON.stringify(dead));
   // 跨栏/半栏规则里写的类名必须真的在页面里，否则那条规则永远不命中（.chat-box 就是这一类）
   const clsRefs = [...new Set([...rCss.matchAll(/body\.desktop-view[^{]*>\.([a-z][a-z0-9-]*)/g)].map(m => m[1]))];
   const clsDead = clsRefs.filter(cn => !new RegExp("\b" + cn + "\b").test(rHtml));
@@ -1613,6 +1622,49 @@ check("打印样式只留复盘页",
   check("遮罩压得住整屏且在最上层",
         at >= 0 && /position:\s*fixed/.test(css.slice(at, at + 260))
         && /z-index:\s*9{3,}/.test(css.slice(at, at + 260)), at < 0 ? "找不到 .update-wall" : css.slice(at, at + 120));
+
+// ===== r149 社区：只测真能测的（桩 DOM 不承载页面结构，DOM 类判据留给真机） =====
+try {
+  const FEAT_REL = "app/src/main/assets/features.js";
+  const featSrc = MUTANT ? execFileSync("git", ["show", MUT_REF + ":" + FEAT_REL],
+      { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 }) : fs.readFileSync(path.join(ROOT, FEAT_REL), "utf8");
+  // features.js 依赖 app.js 的全局（escapeHtml/postApi…），但两份都声明了
+  // localGuidanceRows，同一个上下文跑两遍会撞车。这里先装 app.js，再把那一句声明去掉。
+  const hCm = makeCtx();
+  loadJs(hCm.context);
+  const featRun = featSrc.replace(/^\s*let localGuidanceRows\s*=\s*\[\s*\]\s*;\s*$/m, "/* 由 app.js 声明 */");
+  const cmErrs = [];
+  check("features.js 里那句重复声明确实被去掉了（改了写法要跟着改这里）",
+        featRun.length < featSrc.length, featSrc.length - featRun.length);
+  try { run(hCm.context, featRun); } catch (e) { cmErrs.push(String(e && e.message)); }
+  check("features.js 在 app.js 之后加载不抛异常", cmErrs.length === 0, cmErrs.join(" / "));
+  const cmRun = code => run(hCm.context, code);
+
+  // 昵称首字：emoji 开头时按下标取会切出半个码元，界面上是一个乱码方块
+  const emo = String(cmRun('cmAvatarInner({name:"\\u{1F383}小田"})'));
+  check("昵称首字按码元取，不切坏 emoji", emo === "\u{1F383}" && !/[\uD800-\uDBFF]$/.test(emo), JSON.stringify(emo));
+  check("没名字时落回品牌首字，不显示空白", cmRun('cmAvatarInner({name:"   "})') === "轻", "");
+  check("有头像就出 img，不拼没转义的 URL",
+        /^<img src="[^"]*" alt="">$/.test(String(cmRun('cmAvatarInner({name:"甲",avatar:"/uploads/a.jpg?x=1"})'))),
+        cmRun('cmAvatarInner({name:"甲",avatar:"/uploads/a.jpg?x=1"})'));
+  check("注销账号不显示成空白名字", cmRun('cmName(null)') === "已注销用户", "");
+  check("时间戳为空时不显示 NaN",
+        cmRun('cmAgo("")') !== "NaN" && !/NaN/.test(cmRun('cmAgo("乱码")'))
+        && !/NaN/.test(cmRun('cmTime("")')), [cmRun('cmAgo("")'), cmRun('cmTime("2026-10-18 04:05:06")')]);
+  check("相对时间只说分钟/小时/天，超过一周退回日期",
+        /刚刚|分钟前|小时前|天前|^\\d{4}-\\d{2}-\\d{2}$/.test(String(cmRun(
+          'cmAgo(new Date(Date.now()-3*60000).toISOString().replace("T"," ").slice(0,19))'))), "");
+  check("列表类型不认识时不改动当前状态（防脏参数把面板清空）",
+        cmRun('(function(){setCommunityTab("magic");return cm.feed;})()') === "latest", "");
+  check("反馈类型同样不认脏值",
+        cmRun('(function(){setFeedbackKind("magic");return cm.feedbackKind;})()') === "bug", "");
+  check("属地缺失时界面说未知，不留空",
+        cmRun('cmRegionTag("")') === "属地未知" && cmRun('cmRegionTag("湖南")').indexOf("湖南") >= 0, "");
+  check("私信回执认 request_id，不认自己造的第二套键",
+        /t === "ack"/.test(featSrc) && /data\.request_id/.test(featSrc), "");
+} catch (e) {
+  check("r149 社区判据块本身跑通了", false, String(e && e.message));
+}
 }
 
 const bad = R.filter(x => !x[1]);

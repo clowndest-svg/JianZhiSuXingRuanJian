@@ -4,13 +4,14 @@ import math
 import uuid
 import logging
 from app_modules.features import share_settings, public_projection, DEFAULT_SCOPE
-from app_modules import mailer, geo
+from app_modules import mailer, geo, geoip, community, chat
 import io
 import os
 import sqlite3
 import hashlib
 import json
 from html import escape as html_escape, unescape as html_unescape
+import asyncio
 import secrets
 import time
 import re
@@ -19,7 +20,7 @@ import urllib.request
 from collections import defaultdict
 from datetime import datetime, date, timedelta
 from typing import Optional, List
-from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Form, Request
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Form, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
@@ -379,8 +380,119 @@ def migrate_db():
     c.execute("CREATE TABLE IF NOT EXISTS daily_metrics (user_id INTEGER NOT NULL, log_date TEXT NOT NULL, metrics_json TEXT NOT NULL, origin TEXT NOT NULL, PRIMARY KEY(user_id,log_date))")
     c.execute("CREATE TABLE IF NOT EXISTS record_changes (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT NOT NULL, record_id INTEGER NOT NULL, previous_json TEXT NOT NULL, operation TEXT NOT NULL, created_at TEXT NOT NULL)")
     _ensure_columns(c,"food_logs",[("source","TEXT DEFAULT 'legacy_estimate'"),("estimate_reason","TEXT")])
+    _community_schema(c)
     conn.commit()
     conn.close()
+
+
+def _community_schema(c):
+    """社区 / 私聊 / 反馈的表。和账号主数据分开写在一个函数里，
+    不然 migrate_db 长了两百行之后没人看得出哪一段是谁的。"""
+    # 轻塑号：主页要展示、要能被搜到，所以不能直接抛 users.id（那是内部自增，
+    # 从 2 开始、位数不一，还能让人据此数出注册量）。
+    _ensure_columns(c, "users", [("public_id", "TEXT DEFAULT ''")])
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS community_profile (
+        user_id INTEGER NOT NULL PRIMARY KEY,
+        bio TEXT NOT NULL DEFAULT '',
+        region TEXT NOT NULL DEFAULT '',
+        region_seen_at TEXT DEFAULT '',
+        discoverable INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )""")
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        images TEXT NOT NULL DEFAULT '[]',
+        like_count INTEGER NOT NULL DEFAULT 0,
+        comment_count INTEGER NOT NULL DEFAULT 0,
+        region TEXT NOT NULL DEFAULT '',
+        request_id TEXT,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at TEXT NOT NULL,
+        edited_at TEXT,
+        UNIQUE(user_id, request_id),
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_posts_open ON posts(status, id DESC)")
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS post_likes (
+        post_id INTEGER NOT NULL, user_id INTEGER NOT NULL, created_at TEXT NOT NULL,
+        PRIMARY KEY(post_id, user_id), FOREIGN KEY(post_id) REFERENCES posts(id))""")
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS comments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL, user_id INTEGER NOT NULL, reply_to INTEGER,
+        body TEXT NOT NULL, region TEXT NOT NULL DEFAULT '', request_id TEXT,
+        status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL,
+        UNIQUE(user_id, request_id), FOREIGN KEY(post_id) REFERENCES posts(id))""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id, id)")
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS follows (
+        follower_id INTEGER NOT NULL, followee_id INTEGER NOT NULL, created_at TEXT NOT NULL,
+        PRIMARY KEY(follower_id, followee_id))""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_follows_followee ON follows(followee_id)")
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL, kind TEXT NOT NULL, actor_id INTEGER,
+        post_id INTEGER, comment_id INTEGER, body_text TEXT NOT NULL DEFAULT '',
+        dedup TEXT NOT NULL, created_at TEXT NOT NULL, read_at TEXT,
+        UNIQUE(user_id, dedup))""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_notice_user ON notifications(user_id, id DESC)")
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS conversations (
+        conv_key TEXT NOT NULL PRIMARY KEY, a_id INTEGER NOT NULL, b_id INTEGER NOT NULL,
+        last_body TEXT NOT NULL DEFAULT '', last_at TEXT NOT NULL DEFAULT '',
+        last_from INTEGER NOT NULL DEFAULT 0, created_at TEXT)""")
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conv_key TEXT NOT NULL, from_id INTEGER NOT NULL, to_id INTEGER NOT NULL,
+        body TEXT NOT NULL, request_id TEXT, created_at TEXT NOT NULL, read_at TEXT,
+        UNIQUE(from_id, request_id))""")
+    # 未读一律现算 messages.read_at IS NULL，不另存计数：
+    # 存了就得在四条路径（发、读、撤、重连）上各维护一次，早晚和明细对不上。
+    c.execute("CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_key, id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_messages_unread ON messages(to_id, read_at)")
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS user_blocks (
+        blocker INTEGER NOT NULL, blocked INTEGER NOT NULL, created_at TEXT NOT NULL,
+        PRIMARY KEY(blocker, blocked))""")
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS content_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        target_kind TEXT NOT NULL, target_id INTEGER NOT NULL, reporter INTEGER NOT NULL,
+        reason TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(target_kind, target_id, reporter))""")
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS feedback (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER, kind TEXT NOT NULL, body TEXT NOT NULL,
+        page TEXT NOT NULL DEFAULT '', app_build INTEGER NOT NULL DEFAULT 0,
+        contact TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'new',
+        reply TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, replied_at TEXT)""")
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS media_uploads (
+        name TEXT NOT NULL PRIMARY KEY, user_id INTEGER NOT NULL, created_at TEXT NOT NULL)""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_media_owner ON media_uploads(user_id, name)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status, id DESC)")
+    taken = {r[0] for r in c.execute("SELECT public_id FROM users WHERE public_id != ''")}
+    for row in c.execute("SELECT id FROM users ORDER BY id").fetchall():
+        pid = community.new_public_id(taken)
+        if not pid:
+            break
+        taken.add(pid)
+        c.execute("UPDATE users SET public_id = ? WHERE id = ?", (pid, row["id"]))
+    for row in c.execute("SELECT id FROM users").fetchall():
+        c.execute("INSERT OR IGNORE INTO community_profile(user_id, updated_at) VALUES (?, ?)",
+                  (row["id"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    # 唯一性交给数据库，不靠"生成时没撞上"——回填与注册两条路并发生成时才会真撞上
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id "
+              "ON users(public_id) WHERE public_id IS NOT NULL AND public_id <> ''")
+
 
 
 migrate_db()
@@ -740,7 +852,9 @@ class ValidatedModel(BaseModel):
         if isinstance(value,str):
             if name in ('username','password','food_name','plan_name','question') and not value.strip():
                 raise ValueError("内容不能为空")
-            if len(value)> (2000 if name=='answer' else 500):
+            # 全局串长上限：answer 最长，社区正文（字段名一律叫 text）次长，其余 500。
+            # 各内容自己的更严上限在 app_modules/community.py 里，两层都要过。
+            if len(value)> (2000 if name=='answer' else 1200 if name=='text' else 500):
                 raise ValueError("内容过长")
         limits={'weight_jin':(40,600),'target_weight_jin':(40,600),'waist_cm':(0,300),'age':(18,100),'height':(80,250),'cal':(0,10000),'duration_minutes':(1,1440),'cal_burned':(0,10000),'cups_count':(0,80),'cal_avoided':(0,10000)}
         if value is not None and name in limits and not limits[name][0]<=value<=limits[name][1]:
@@ -878,6 +992,14 @@ def register(req: RegisterReq):
             (req.username.strip(), pw_hash, salt, None, share, nickname, now)
         )
         user_id = c.lastrowid
+        # 轻塑号：主页要展示、搜索要精确命中，所以注册时就分配，并且和回填同一套生成规则
+        taken = {r[0] for r in c.execute("SELECT public_id FROM users WHERE public_id != ''")}
+        public_id = community.new_public_id(taken)
+        if not public_id:
+            conn.close()
+            raise HTTPException(status_code=500, detail="轻塑号分配失败，请稍后再试")
+        c.execute("UPDATE users SET public_id=? WHERE id=?", (public_id, user_id))
+        c.execute("INSERT OR IGNORE INTO community_profile(user_id, updated_at) VALUES (?,?)", (user_id, now))
         c.execute('INSERT INTO share_settings VALUES (?,?,?,?)',(user_id,1,int(time.time())+7*86400,json.dumps(DEFAULT_SCOPE)))
         c.execute("INSERT INTO sessions VALUES (?,?,?)", (hash_token(token),user_id,int(time.time())+2592000))
 
@@ -915,6 +1037,7 @@ def register(req: RegisterReq):
         "token": token,
         "username": req.username,
         "nickname": nickname,
+        "id": int(user_id), "public_id": public_id,
         "public_url": "%s/u/%s?k=%s" % (SITE_BASE, urllib.parse.quote(req.username.strip()), share)
     }
 
@@ -953,6 +1076,7 @@ def login(req: LoginReq, request: Request):
         "token": token,
         "username": user["username"],
         "nickname": user["nickname"],
+        "id": int(user["id"]), "public_id": user["public_id"] or "",
         "public_url": public_url_for(user)
     }
 
@@ -1101,9 +1225,12 @@ def _account_payload(conn, user):
     seen = [dict(r) for r in conn.execute(
         "SELECT city,first_seen,last_seen,hits FROM user_cities WHERE user_id=?"
         " ORDER BY last_seen DESC LIMIT 8", (user["id"],)).fetchall()]
+    cp = conn.execute("SELECT bio, region, discoverable FROM community_profile WHERE user_id=?",
+                      (user["id"],)).fetchone()
     return {
         "code": 0,
-        "user": {"id": user["id"], "username": user["username"], "nickname": user.get("nickname")},
+        "user": {"id": user["id"], "username": user["username"], "nickname": user.get("nickname"),
+                 "public_id": user.get("public_id") or ""},
         "email_masked": mask_email(p.get("email")),
         "email_bound": bool(p.get("email")),
         "email_verified": bool(p.get("email_verified_at")),
@@ -1118,6 +1245,10 @@ def _account_payload(conn, user):
         "mail_why": mail.get("why", ""),
         "cities_seen": seen,
         "loc_updated_at": p.get("loc_updated_at") or "",
+        # 社区那一层：签名与属地要在"我的"页一眼看到，不必再发一次请求
+        "bio": (cp["bio"] if cp else "") or "",
+        "region": (cp["region"] if cp else "") or "",
+        "discoverable": int(cp["discoverable"]) if cp else 1,
     }
 
 
@@ -3196,6 +3327,11 @@ def health():
     # 门是不是被人工刹住，必须一眼看得见：抬门抬不动时最怕的就是"以为生效了"
     info["build_override"] = os.path.exists(min_build_file())
     info["gate"] = {"blocked": gate_stats["blocked"], "builds": dict(gate_stats["builds"])}
+    # 社区这几条外部依赖必须"通没通"一眼看得见：属地库没装、Redis 掉了、
+    # WS 握手一直被拒，都属于"功能看着在、其实早就没人用得了"的那一类。
+    info["geoip"] = geoip.status()
+    info["chat"] = {"online": len(_WS_HUB), "sockets": int(sum(len(v) for v in _WS_HUB.values())),
+                    "rejected": int(_ws_stats["rejected"]), "redis": bool(redis_up())}
     return info
 
 
@@ -3272,3 +3408,942 @@ for asset in PUBLIC_ASSETS:
     if asset.rsplit(".", 1)[-1] not in ASSET_MEDIA:
         raise RuntimeError("公网静态件 %s 的扩展名没有登记 MIME 类型" % asset)
     app.get("/" + asset)(extension_asset(asset))
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 社区（发帖/点赞/评论/关注/主页/搜索）、私聊（WebSocket）、意见反馈
+#
+# 三条贯穿这一段的原则：
+# 1. 计数一律与明细同事务维护，且集成测试会拿 COUNT(*) 复核，父不许不等于子之和；
+# 2. 属地只存"省"，原始 IP 不落库、不出现在任何响应里；库没装时存空串，界面显示"未知"；
+# 3. 写接口全部带 request_id 幂等——断网重试不该发出第二条帖子或第二条私信。
+# ══════════════════════════════════════════════════════════════════════
+
+POST_RATE_LIMIT = 6          # 每人每分钟
+COMMENT_RATE_LIMIT = 12
+DM_RATE_LIMIT = 30
+FOLLOW_RATE_LIMIT = 20
+FEEDBACK_RATE_LIMIT = 5
+
+
+def ws_secret():
+    path = os.path.join(DB_DIR, "ws-secret.key")
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(secrets.token_bytes(32))
+    except FileExistsError:
+        pass
+    with open(path, "rb") as f:
+        return f.read()
+
+
+_presence_mem = {}
+_ticket_used_mem = {}
+
+
+def _presence_touch(uid):
+    """在线状态放 Redis（45 秒 TTL，进程重启也不谎报）；Redis 没了退回进程内表。"""
+    now = time.time()
+    ok, _ = _redis_cmd(["SETEX", chat.presence_key(uid), "45", "1"])
+    if not ok:
+        _presence_mem[int(uid)] = now
+
+
+def _presence_online(uid):
+    ok, v = _redis_cmd(["EXISTS", chat.presence_key(int(uid))])
+    if ok:
+        return bool(v)
+    return now_ish() - _presence_mem.get(int(uid), 0) < 45
+
+
+def now_ish():
+    return time.time()
+
+
+def _ticket_redeem(nonce):
+    """一次性：Redis 在就全局只认一次；不在时只能保证本进程只认一次（如实记在手册里）。"""
+    ok, v = _redis_cmd(["SET", chat.ticket_seen_key(nonce), "1", "EX", str(chat.TICKET_TTL * 2), "NX"])
+    if ok:
+        return bool(v)
+    now = time.time()
+    stale = [k for k, t in _ticket_used_mem.items() if now - t > chat.TICKET_TTL * 2]
+    for k in stale:
+        _ticket_used_mem.pop(k, None)
+    if nonce in _ticket_used_mem:
+        return False
+    _ticket_used_mem[nonce] = now
+    return True
+
+
+def region_for(ip):
+    try:
+        return geoip.region_of(ip or "")
+    except Exception:
+        return ""
+
+
+def _user_brief(conn, uid, with_region=False):
+    u = conn.execute("SELECT id, public_id, username, nickname FROM users WHERE id = ?", (uid,)).fetchone()
+    if not u:
+        return None
+    p = conn.execute("SELECT avatar_url FROM profiles WHERE user_id = ?", (uid,)).fetchone()
+    out = {"id": int(u["id"]),
+           "public_id": u["public_id"] or "",
+           "name": (u["nickname"] or u["username"] or "").strip(),
+           "avatar": signed_photo(p["avatar_url"]) if (p and p["avatar_url"]) else ""}
+    if with_region:
+        cp = conn.execute("SELECT region FROM community_profile WHERE user_id = ?", (uid,)).fetchone()
+        out["region"] = (cp["region"] if cp else "") or ""
+    return out
+
+
+def _optional_user(authorization: Optional[str] = Header(None)):
+    """反馈允许没登录的人投：正卡在登录问题上的人，最需要那条出口。
+    认不出来就当匿名，不抛 401。"""
+    try:
+        return get_current_user(authorization)
+    except HTTPException:
+        return None
+
+
+def _notify(conn, user_id, kind, actor_id, post_id, comment_id, snippet, dedup):
+    """通知句子在服务端拼好再下发：前端各写一套措辞，早晚和这里的种类表对不上。"""
+    if not user_id or int(user_id) == int(actor_id or 0):
+        return
+    actor = conn.execute("SELECT nickname, username FROM users WHERE id=?", (actor_id,)).fetchone()
+    name = ((actor["nickname"] or actor["username"]) if actor else "") or "有人"
+    conn.execute("INSERT OR IGNORE INTO notifications(user_id,kind,actor_id,post_id,comment_id,"
+                 "body_text,dedup,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                 (int(user_id), kind, actor_id, post_id, comment_id,
+                  community.notice_text(kind, name, str(snippet or "")[:80]), dedup, _now()))
+
+
+def _author_of_post(conn, post_id):
+    row = conn.execute("SELECT user_id FROM posts WHERE id = ?", (post_id,)).fetchone()
+    return row["user_id"] if row else None
+
+
+def _post_card(conn, row, me):
+    pid = int(row["id"])
+    liked = bool(conn.execute("SELECT 1 FROM post_likes WHERE post_id = ? AND user_id = ?",
+                              (pid, me["id"])).fetchone()) if me else False
+    return {"id": pid,
+            "body": row["body"],
+            "images": [signed_photo("/uploads/" + n) for n in community.read_images(row["images"])],
+            "author": _user_brief(conn, row["user_id"]),
+            "region": row["region"] or "",
+            "created_at": row["created_at"],
+            "like_count": int(row["like_count"]),
+            "comment_count": int(row["comment_count"]),
+            "liked_by_me": liked,
+            "mine": bool(me and int(row["user_id"]) == int(me["id"]))}
+
+
+def _require_member(conn):
+    """社区是会员区：所有读写都要求登录，不做匿名浏览，省掉一整类爬取与枚举。"""
+    return True
+
+
+class PostReq(ValidatedModel):
+    text: str
+    images: Optional[List[str]] = None
+    request_id: Optional[str] = None
+
+
+class CommentReq(ValidatedModel):
+    text: str
+    reply_to: Optional[int] = None
+    request_id: Optional[str] = None
+
+
+class LikeReq(ValidatedModel):
+    on: bool = True
+
+
+class FollowReq(ValidatedModel):
+    on: bool = True
+
+
+class ProfileCommunityReq(ValidatedModel):
+    bio: Optional[str] = None
+    discoverable: Optional[int] = None
+
+
+class DmSendReq(ValidatedModel):
+    to: int
+    text: str
+    request_id: Optional[str] = None
+
+
+class DmReadReq(ValidatedModel):
+    with_user: int
+
+
+class BlockReq(ValidatedModel):
+    with_user: int
+    on: bool = True
+
+
+class ReportReq(ValidatedModel):
+    kind: str
+    target_id: int
+    reason: str
+
+
+class FeedbackReq(ValidatedModel):
+    kind: str
+    text: str
+    page: Optional[str] = None
+    contact: Optional[str] = None
+
+
+class NoticeReadReq(ValidatedModel):
+    ids: Optional[List[int]] = None
+    all: Optional[bool] = None
+
+
+@app.post("/api/community/media")
+async def community_media(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    """发帖配图：沿用打卡照那套真校验（格式、像素上限、去 EXIF、重编码），
+    但落一个独立文件名并登记归属——不登记就没法挡住有人把别人的身材照文件名拼进帖子。"""
+    raw = await file.read()
+    if len(raw) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="图片不能超过 8MB")
+    name = uuid.uuid4().hex + ".jpg"
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(io.BytesIO(raw)) as image:
+            if image.format not in ("JPEG", "PNG", "WEBP") or image.width * image.height > 20000000:
+                raise ValueError("格式或尺寸不支持")
+            image = ImageOps.exif_transpose(image).convert("RGB")
+            image.thumbnail((1600, 1600))
+            out = io.BytesIO()
+            image.save(out, format="JPEG", quality=85)
+            blob = out.getvalue()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="请选择有效的 JPEG、PNG 或 WebP 图片")
+    with open(os.path.join(UPLOAD_DIR, name), "wb") as f:
+        f.write(blob)
+    conn = get_db()
+    try:
+        conn.execute("INSERT OR REPLACE INTO media_uploads(name, user_id, created_at) VALUES (?,?,?)",
+                     (name, user["id"], _now()))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"code": 0, "name": name, "url": signed_photo("/uploads/" + name)}
+
+
+@app.post("/api/community/posts")
+def create_post(req: PostReq, request: Request, user: dict = Depends(get_current_user)):
+    ok, _where, _n = rate_hit("post:%d" % user["id"], POST_RATE_LIMIT, 60)
+    if not ok:
+        raise HTTPException(status_code=429, detail="发帖太快了，歇一分钟再发")
+    try:
+        body = community.clean_body(req.text, community.POST_MAX, "正文")
+        images = community.clean_images(req.images)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    if not images and not body.strip():
+        raise HTTPException(status_code=400, detail="正文和图片至少给一个")
+    key = (req.request_id or "")[:64] or None
+    conn = get_db()
+    try:
+        if images:
+            owned = {r[0] for r in conn.execute(
+                "SELECT name FROM media_uploads WHERE user_id=? AND name IN (%s)"
+                % ",".join("?" * len(images)), [user["id"]] + images)}
+            if len(owned) != len(images):
+                raise HTTPException(status_code=400, detail="有图片不属于你，请重新选择")
+        if key:
+            hit = conn.execute("SELECT id FROM posts WHERE user_id=? AND request_id=?",
+                               (user["id"], key)).fetchone()
+            if hit:
+                row = conn.execute("SELECT * FROM posts WHERE id=?", (hit["id"],)).fetchone()
+                return {"code": 0, "duplicate": True, "post": _post_card(conn, row, user)}
+        stamp = _now()
+        region = region_for(_ip(request))
+        cur = conn.execute("INSERT INTO posts(user_id,body,images,region,request_id,created_at)"
+                           " VALUES (?,?,?,?,?,?)",
+                           (user["id"], body, community.images_json(images), region, key, stamp))
+        conn.execute("UPDATE community_profile SET region=?, region_seen_at=?, updated_at=?"
+                     " WHERE user_id=?", (region or "", stamp, stamp, user["id"]))
+        conn.commit()
+        row = conn.execute("SELECT * FROM posts WHERE id=?", (cur.lastrowid,)).fetchone()
+        return {"code": 0, "duplicate": False, "post": _post_card(conn, row, user)}
+    finally:
+        conn.close()
+
+
+@app.delete("/api/community/posts/{post_id}")
+def delete_post(post_id: int, user: dict = Depends(get_current_user)):
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT user_id FROM posts WHERE id=?", (post_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="帖子不存在")
+        if int(row["user_id"]) != int(user["id"]):
+            raise HTTPException(status_code=403, detail="只能删自己的帖子")
+        conn.execute("UPDATE posts SET status='deleted' WHERE id=?", (post_id,))
+        conn.commit()
+        return {"code": 0}
+    finally:
+        conn.close()
+
+
+@app.get("/api/community/feed")
+def community_feed(tab: str = "latest", cursor: int = 0, limit: int = community.DEFAULT_PAGE,
+                   user: dict = Depends(get_current_user)):
+    if tab not in ("latest", "follow", "mine"):
+        raise HTTPException(status_code=400, detail="未知的列表类型")
+    size = community.page_size(limit)
+    after = community.cursor_id(cursor)
+    conn = get_db()
+    try:
+        sql = "SELECT * FROM posts WHERE status='open'"
+        args = []
+        if tab == "follow":
+            sql += " AND user_id IN (SELECT followee_id FROM follows WHERE follower_id=?)"
+            args.append(user["id"])
+        elif tab == "mine":
+            sql += " AND user_id=?"
+            args.append(user["id"])
+        if after:
+            sql += " AND id < ?"
+            args.append(after)
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(size + 1)
+        rows = conn.execute(sql, args).fetchall()
+        cards = [_post_card(conn, r, user) for r in rows[:size]]
+        return {"code": 0, "items": cards,
+                "next_cursor": cards[-1]["id"] if len(rows) > size else 0,
+                "more": len(rows) > size}
+    finally:
+        conn.close()
+
+
+@app.get("/api/community/posts/{post_id}")
+def community_post_detail(post_id: int, user: dict = Depends(get_current_user)):
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM posts WHERE id=? AND status='open'", (post_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="帖子不存在或已删除")
+        comments = conn.execute(
+            "SELECT c.*, u.username, u.nickname FROM comments c JOIN users u ON u.id=c.user_id "
+            "WHERE c.post_id=? AND c.status='open' ORDER BY c.id ASC LIMIT 200", (post_id,)).fetchall()
+        return {"code": 0, "post": _post_card(conn, row, user),
+                "comments": [{"id": int(c["id"]), "body": c["body"], "region": c["region"] or "",
+                              "created_at": c["created_at"], "reply_to": c["reply_to"],
+                              "author": _user_brief(conn, c["user_id"])} for c in comments]}
+    finally:
+        conn.close()
+
+
+@app.post("/api/community/posts/{post_id}/like")
+def toggle_like(post_id: int, req: LikeReq, user: dict = Depends(get_current_user)):
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT id, user_id FROM posts WHERE id=? AND status='open'", (post_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="帖子不存在或已删除")
+        if req.on:
+            cur = conn.execute("INSERT OR IGNORE INTO post_likes(post_id,user_id,created_at) VALUES (?,?,?)",
+                               (post_id, user["id"], _now()))
+            if cur.rowcount:
+                conn.execute("UPDATE posts SET like_count = like_count + 1 WHERE id=?", (post_id,))
+                _notify(conn, row["user_id"], "like", user["id"], post_id, None, "",
+                        "like:%d:%d" % (post_id, user["id"]))
+        else:
+            cur = conn.execute("DELETE FROM post_likes WHERE post_id=? AND user_id=?", (post_id, user["id"]))
+            if cur.rowcount:
+                conn.execute("UPDATE posts SET like_count = MAX(0, like_count - 1) WHERE id=?", (post_id,))
+                conn.execute("DELETE FROM notifications WHERE kind='like' AND dedup=?",
+                             ("like:%d:%d" % (post_id, user["id"]),))
+        conn.commit()
+        total = conn.execute("SELECT like_count FROM posts WHERE id=?", (post_id,)).fetchone()[0]
+        return {"code": 0, "like_count": int(total), "liked": bool(req.on)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/community/posts/{post_id}/comments")
+def create_comment(post_id: int, req: CommentReq, request: Request,
+                   user: dict = Depends(get_current_user)):
+    ok, _where, _n = rate_hit("cmt:%d" % user["id"], COMMENT_RATE_LIMIT, 60)
+    if not ok:
+        raise HTTPException(status_code=429, detail="评论太快了，歇一分钟再发")
+    try:
+        body = community.clean_body(req.text, community.COMMENT_MAX, "评论")
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    key = (req.request_id or "")[:64] or None
+    conn = get_db()
+    try:
+        post = conn.execute("SELECT id, user_id FROM posts WHERE id=? AND status='open'", (post_id,)).fetchone()
+        if not post:
+            raise HTTPException(status_code=404, detail="帖子不存在或已删除")
+        if key:
+            hit = conn.execute("SELECT * FROM comments WHERE user_id=? AND request_id=?",
+                               (user["id"], key)).fetchone()
+            if hit:
+                return {"code": 0, "duplicate": True, "comment": {"id": int(hit["id"])}}
+        stamp = _now()
+        region = region_for(_ip(request))
+        parent = None
+        if req.reply_to:
+            parent = conn.execute("SELECT id, user_id FROM comments WHERE id=? AND post_id=?",
+                                  (req.reply_to, post_id)).fetchone()
+            if not parent:
+                raise HTTPException(status_code=400, detail="要回复的那条评论不在了")
+        cur = conn.execute("INSERT INTO comments(post_id,user_id,reply_to,body,region,request_id,created_at)"
+                           " VALUES (?,?,?,?,?,?,?)",
+                           (post_id, user["id"], req.reply_to, body, region, key, stamp))
+        conn.execute("UPDATE posts SET comment_count = comment_count + 1 WHERE id=?", (post_id,))
+        if parent:
+            _notify(conn, parent["user_id"], "reply", user["id"], post_id, cur.lastrowid, body,
+                    "reply:%d" % cur.lastrowid)
+        else:
+            _notify(conn, post["user_id"], "comment", user["id"], post_id, cur.lastrowid, body,
+                    "comment:%d" % cur.lastrowid)
+        conn.commit()
+        return {"code": 0, "duplicate": False,
+                "comment": {"id": int(cur.lastrowid), "body": body, "region": region,
+                            "created_at": stamp, "author": _user_brief(conn, user["id"])}}
+    finally:
+        conn.close()
+
+
+@app.delete("/api/community/comments/{comment_id}")
+def delete_comment(comment_id: int, user: dict = Depends(get_current_user)):
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT id, post_id, user_id, status FROM comments WHERE id=?", (comment_id,)).fetchone()
+        if not row or row["status"] != "open":
+            raise HTTPException(status_code=404, detail="评论不存在")
+        # 楼主可以清理自己帖子下的评论，作者本人当然也可以——两种都算"有权"
+        post = conn.execute("SELECT user_id FROM posts WHERE id=?", (row["post_id"],)).fetchone()
+        if int(row["user_id"]) != int(user["id"]) and (not post or int(post["user_id"]) != int(user["id"])):
+            raise HTTPException(status_code=403, detail="只能删自己的评论")
+        conn.execute("UPDATE comments SET status='deleted' WHERE id=?", (comment_id,))
+        conn.execute("UPDATE posts SET comment_count = MAX(0, comment_count - 1) WHERE id=?", (row["post_id"],))
+        conn.commit()
+        return {"code": 0}
+    finally:
+        conn.close()
+
+
+def _resolve_target(conn, raw):
+    """主页、关注、私信都收"轻塑号或用户名"，一处解析，避免三个入口三套口径。"""
+    ident = str(raw or "").strip()
+    if not ident:
+        return None
+    row = conn.execute("SELECT id, public_id, username, nickname FROM users WHERE public_id=? OR username=?",
+                       (ident, ident)).fetchone()
+    if not row:
+        row = conn.execute("SELECT id, public_id, username, nickname FROM users WHERE nickname=? AND nickname<>''",
+                           (ident,)).fetchone()
+    if not row and ident.isdigit():
+        # 卡片上带的是内部 id，前端拿它来关注/私信是最自然的写法，别再要它先换一次轻塑号
+        row = conn.execute("SELECT id, public_id, username, nickname FROM users WHERE id=?",
+                           (int(ident),)).fetchone()
+    return row
+
+
+@app.post("/api/community/users/{ident}/follow")
+def toggle_follow(ident: str, req: FollowReq, user: dict = Depends(get_current_user)):
+    conn = get_db()
+    try:
+        ok, _where, _n = rate_hit("follow:%d" % user["id"], FOLLOW_RATE_LIMIT, 60)
+        if not ok:
+            raise HTTPException(status_code=429, detail="关注太频繁了，歇一会儿")
+        target = _resolve_target(conn, ident)
+        if not target:
+            raise HTTPException(status_code=404, detail="找不到这个用户")
+        if int(target["id"]) == int(user["id"]):
+            raise HTTPException(status_code=400, detail="不能关注自己")
+        if req.on:
+            cur = conn.execute("INSERT OR IGNORE INTO follows(follower_id,followee_id,created_at) VALUES (?,?,?)",
+                               (user["id"], target["id"], _now()))
+            if cur.rowcount:
+                _notify(conn, target["id"], "follow", user["id"], None, None, "",
+                        "follow:%d:%s" % (user["id"], target["id"]))
+        else:
+            cur = conn.execute("DELETE FROM follows WHERE follower_id=? AND followee_id=?",
+                               (user["id"], target["id"]))
+            if cur.rowcount:
+                conn.execute("DELETE FROM notifications WHERE kind='follow' AND dedup=?",
+                             ("follow:%d:%s" % (user["id"], target["id"]),))
+        conn.commit()
+        return {"code": 0, "following": bool(req.on),
+                "followers": int(conn.execute("SELECT COUNT(*) FROM follows WHERE followee_id=?",
+                                              (target["id"],)).fetchone()[0])}
+    finally:
+        conn.close()
+
+
+@app.get("/api/community/users/{ident}")
+def user_home(ident: str, user: dict = Depends(get_current_user)):
+    conn = get_db()
+    try:
+        target = _resolve_target(conn, ident)
+        if not target:
+            raise HTTPException(status_code=404, detail="找不到这个用户")
+        uid = int(target["id"])
+        cp = conn.execute("SELECT bio, region, discoverable FROM community_profile WHERE user_id=?",
+                          (uid,)).fetchone()
+        brief = _user_brief(conn, uid) or {}
+        rows = conn.execute("SELECT * FROM posts WHERE user_id=? AND status='open' ORDER BY id DESC LIMIT 12",
+                            (uid,)).fetchall()
+        return {"code": 0, "user": {
+            "id": uid, "public_id": target["public_id"] or "",
+            "name": brief.get("name", ""), "avatar": brief.get("avatar", ""),
+            "bio": (cp["bio"] if cp else "") or "", "region": (cp["region"] if cp else "") or "",
+            "discoverable": int(cp["discoverable"]) if cp else 1,
+            "followers": int(conn.execute("SELECT COUNT(*) FROM follows WHERE followee_id=?", (uid,)).fetchone()[0]),
+            "following": int(conn.execute("SELECT COUNT(*) FROM follows WHERE follower_id=?", (uid,)).fetchone()[0]),
+            "posts": int(conn.execute("SELECT COUNT(*) FROM posts WHERE user_id=? AND status='open'",
+                                      (uid,)).fetchone()[0]),
+            "likes_received": int(conn.execute(
+                "SELECT COUNT(*) FROM post_likes l JOIN posts p ON p.id=l.post_id "
+                "WHERE p.user_id=? AND p.status='open'", (uid,)).fetchone()[0]),
+            "is_me": uid == int(user["id"]),
+            "followed": bool(conn.execute("SELECT 1 FROM follows WHERE follower_id=? AND followee_id=?",
+                                          (user["id"], uid)).fetchone()),
+            "blocked_by_me": bool(conn.execute("SELECT 1 FROM user_blocks WHERE blocker=? AND blocked=?",
+                                               (user["id"], uid)).fetchone())},
+            "items": [_post_card(conn, r, user) for r in rows]}
+    finally:
+        conn.close()
+
+
+@app.get("/api/community/search")
+def community_search(q: str = "", limit: int = 12, user: dict = Depends(get_current_user)):
+    term = str(q or "").strip()[:community.SEARCH_Q_MAX]
+    if not term:
+        return {"code": 0, "items": []}
+    size = community.page_size(limit, 12)
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT u.id FROM users u JOIN community_profile cp ON cp.user_id=u.id "
+            "WHERE cp.discoverable=1 AND (u.public_id=? OR u.username LIKE ? OR u.nickname LIKE ?) "
+            "ORDER BY (u.public_id=?) DESC, u.id ASC LIMIT ?",
+            (term, "%" + term + "%", "%" + term + "%", term, size)).fetchall()
+        return {"code": 0, "items": [_user_brief(conn, r["id"], True) for r in rows]}
+    finally:
+        conn.close()
+
+
+@app.post("/api/community/profile")
+def community_profile(req: ProfileCommunityReq, user: dict = Depends(get_current_user)):
+    conn = get_db()
+    try:
+        if req.bio is not None:
+            bio = str(req.bio or "").strip()
+            if len(bio) > community.BIO_MAX:
+                raise HTTPException(status_code=400,
+                                    detail="签名最长 %d 字，你现在写了 %d 字" % (community.BIO_MAX, len(bio)))
+            conn.execute("UPDATE community_profile SET bio=?, updated_at=? WHERE user_id=?",
+                         (bio, _now(), user["id"]))
+        if req.discoverable is not None:
+            conn.execute("UPDATE community_profile SET discoverable=?, updated_at=? WHERE user_id=?",
+                         (1 if int(req.discoverable or 0) else 0, _now(), user["id"]))
+        conn.commit()
+        row = conn.execute("SELECT bio, region, discoverable FROM community_profile WHERE user_id=?",
+                           (user["id"],)).fetchone()
+        return {"code": 0, "bio": (row["bio"] if row else ""),
+                "region": (row["region"] if row else "") or "",
+                "discoverable": int(row["discoverable"]) if row else 1}
+    finally:
+        conn.close()
+
+
+@app.get("/api/community/stats")
+def community_stats(user: dict = Depends(get_current_user)):
+    uid = int(user["id"])
+    conn = get_db()
+    try:
+        return {"code": 0, "public_id": user.get("public_id") or "",
+                "followers": int(conn.execute("SELECT COUNT(*) FROM follows WHERE followee_id=?", (uid,)).fetchone()[0]),
+                "following": int(conn.execute("SELECT COUNT(*) FROM follows WHERE follower_id=?", (uid,)).fetchone()[0]),
+                "posts": int(conn.execute("SELECT COUNT(*) FROM posts WHERE user_id=? AND status='open'",
+                                          (uid,)).fetchone()[0]),
+                "likes_received": int(conn.execute(
+                    "SELECT COUNT(*) FROM post_likes l JOIN posts p ON p.id=l.post_id "
+                    "WHERE p.user_id=? AND p.status='open'", (uid,)).fetchone()[0]),
+                "notices_unread": int(conn.execute(
+                    "SELECT COUNT(*) FROM notifications WHERE user_id=? AND read_at IS NULL", (uid,)).fetchone()[0]),
+                "dm_unread": int(conn.execute(
+                    "SELECT COUNT(*) FROM messages WHERE to_id=? AND read_at IS NULL", (uid,)).fetchone()[0])}
+    finally:
+        conn.close()
+
+
+@app.post("/api/community/report")
+def report_content(req: ReportReq, user: dict = Depends(get_current_user)):
+    if req.kind not in ("post", "comment"):
+        raise HTTPException(status_code=400, detail="只能举报帖子或评论")
+    reason = str(req.reason or "").strip()[:200]
+    if not reason:
+        raise HTTPException(status_code=400, detail="写一句为什么举报")
+    conn = get_db()
+    try:
+        table = "posts" if req.kind == "post" else "comments"
+        if not conn.execute("SELECT id FROM %s WHERE id=?" % table, (req.target_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="要举报的内容不存在")
+        conn.execute("INSERT OR IGNORE INTO content_reports(target_kind,target_id,reporter,reason,created_at)"
+                     " VALUES (?,?,?,?,?)", (req.kind, req.target_id, user["id"], reason, _now()))
+        conn.commit()
+        return {"code": 0}
+    finally:
+        conn.close()
+
+
+@app.get("/api/notifications")
+def list_notifications(cursor: int = 0, limit: int = 30, user: dict = Depends(get_current_user)):
+    size = community.page_size(limit, community.DEFAULT_PAGE)
+    after = community.cursor_id(cursor)
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM notifications WHERE user_id=? AND (?=0 OR id<?) ORDER BY id DESC LIMIT ?",
+            (user["id"], after, after or 0, size + 1)).fetchall()
+        items = [{"id": int(r["id"]), "kind": r["kind"], "post_id": r["post_id"],
+                  "text": r["body_text"], "created_at": r["created_at"],
+                  "read_at": r["read_at"], "actor": _user_brief(conn, r["actor_id"]) if r["actor_id"] else None}
+                 for r in rows[:size]]
+        return {"code": 0, "items": items,
+                "unread": int(conn.execute("SELECT COUNT(*) FROM notifications WHERE user_id=?"
+                                           " AND read_at IS NULL", (user["id"],)).fetchone()[0]),
+                "next_cursor": items[-1]["id"] if len(rows) > size else 0,
+                "kinds": list(community.NOTICE_KINDS)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/notifications/read")
+def read_notifications(req: NoticeReadReq, user: dict = Depends(get_current_user)):
+    conn = get_db()
+    try:
+        stamp = _now()
+        if req.all:
+            cur = conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? AND read_at IS NULL",
+                               (stamp, user["id"]))
+        else:
+            ids = [int(x) for x in (req.ids or [])][:200]
+            if not ids:
+                return {"code": 0, "marked": 0}
+            cur = conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? AND read_at IS NULL AND id IN (%s)"
+                               % ",".join("?" * len(ids)), [stamp, user["id"]] + ids)
+        conn.commit()
+        return {"code": 0, "marked": int(cur.rowcount or 0)}
+    finally:
+        conn.close()
+
+
+# ── 私聊 ───────────────────────────────────────────────────────────────
+
+def _blocked(conn, a, b):
+    return bool(conn.execute("SELECT 1 FROM user_blocks WHERE blocker=? AND blocked=?", (b, a)).fetchone())
+
+
+def _deliver(conn, sender, to_id, body, request_id):
+    """落库 + 更新会话摘要，返回 (message dict, 是否重复)。WS 与 HTTP 兜底共用这一条路，
+    两条路各写一份存法就会出现"走 WS 发的重进 App 找不到"。"""
+    to = conn.execute("SELECT id FROM users WHERE id=?", (to_id,)).fetchone()
+    if not to:
+        raise HTTPException(status_code=404, detail="找不到这个用户")
+    if int(to_id) == int(sender["id"]):
+        raise HTTPException(status_code=400, detail="不能给自己发私信")
+    if _blocked(conn, sender["id"], to_id):
+        raise HTTPException(status_code=403, detail="对方不接受你的私信")
+    key = (request_id or "")[:64] or None
+    if key:
+        hit = conn.execute("SELECT * FROM messages WHERE from_id=? AND request_id=?",
+                           (sender["id"], key)).fetchone()
+        if hit:
+            return _message_dict(hit), True
+    ck = chat.conv_key(sender["id"], to_id)
+    stamp = _now()
+    cur = conn.execute("INSERT INTO messages(conv_key,from_id,to_id,body,request_id,created_at)"
+                       " VALUES (?,?,?,?,?,?)", (ck, sender["id"], to_id, body, key, stamp))
+    lo, hi = ck.split(chat.CONV_SEP)
+    conn.execute("INSERT OR IGNORE INTO conversations(conv_key,a_id,b_id,created_at) VALUES (?,?,?,?)",
+                 (ck, int(lo), int(hi), stamp))
+    conn.execute("UPDATE conversations SET last_body=?, last_at=?, last_from=? WHERE conv_key=?",
+                 (body[:60], stamp, sender["id"], ck))
+    conn.commit()
+    row = conn.execute("SELECT * FROM messages WHERE id=?", (cur.lastrowid,)).fetchone()
+    return _message_dict(row), False
+
+
+def _message_dict(row):
+    return {"id": int(row["id"]), "conv_key": row["conv_key"], "from_id": int(row["from_id"]),
+            "to_id": int(row["to_id"]), "body": row["body"], "created_at": row["created_at"],
+            "read_at": row["read_at"], "request_id": row["request_id"]}
+
+
+def _push(uid, payload):
+    """尽力投递：连接断了不算失败，消息已经在库里，对方下次拉历史一定拿得到。"""
+    for sock in list(_WS_HUB.get(int(uid), ())):
+        try:
+            asyncio.ensure_future(sock.send_json(payload))
+        except Exception:
+            pass
+
+
+@app.post("/api/chat/ticket")
+def chat_ticket(request: Request, user: dict = Depends(get_current_user)):
+    build = 0
+    try:
+        build = int(request.headers.get(BUILD_HEADER) or 0)
+    except ValueError:
+        build = 0
+    nonce = secrets.token_urlsafe(8)
+    token = chat.mint_ticket(ws_secret(), user["id"], build, nonce)
+    _presence_touch(user["id"])
+    return {"code": 0, "ticket": token, "expires_in": chat.TICKET_TTL, "ws_path": "/ws/chat"}
+
+
+@app.post("/api/chat/send")
+def chat_send(req: DmSendReq, user: dict = Depends(get_current_user)):
+    ok, _where, _n = rate_hit("dm:%d" % user["id"], DM_RATE_LIMIT, 60)
+    if not ok:
+        raise HTTPException(status_code=429, detail="发送太快了，歇一会儿")
+    try:
+        body = community.clean_body(req.text, 1000, "私信")
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    conn = get_db()
+    try:
+        msg, dup = _deliver(conn, user, int(req.to), body, req.request_id)
+    finally:
+        conn.close()
+    if not dup:
+        _push(msg["to_id"], {"t": "msg", "message": msg})
+        _push(msg["from_id"], {"t": "ack", "request_id": req.request_id, "message": msg})
+    return {"code": 0, "duplicate": dup, "message": msg}
+
+
+@app.get("/api/chat/conversations")
+def chat_conversations(user: dict = Depends(get_current_user)):
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT * FROM conversations WHERE a_id=? OR b_id=? "
+                            "ORDER BY last_at DESC LIMIT 100", (user["id"], user["id"])).fetchall()
+        out = []
+        for r in rows:
+            other = int(r["b_id"]) if int(r["a_id"]) == int(user["id"]) else int(r["a_id"])
+            unread = int(conn.execute("SELECT COUNT(*) FROM messages WHERE conv_key=? AND to_id=?"
+                                      " AND read_at IS NULL", (r["conv_key"], user["id"])).fetchone()[0])
+            brief = _user_brief(conn, other) or {}
+            out.append({"with": brief, "key": r["conv_key"], "last_body": r["last_body"],
+                        "last_at": r["last_at"], "last_from": int(r["last_from"]),
+                        "unread": unread, "online": _presence_online(other),
+                        "blocked": bool(conn.execute("SELECT 1 FROM user_blocks WHERE blocker=? AND blocked=?",
+                                                     (user["id"], other)).fetchone())})
+        return {"code": 0, "items": out}
+    finally:
+        conn.close()
+
+
+@app.get("/api/chat/messages")
+def chat_messages(with_user: int, cursor: int = 0, limit: int = 30,
+                  user: dict = Depends(get_current_user)):
+    size = community.page_size(limit, 30)
+    after = community.cursor_id(cursor)
+    ck = chat.conv_key(user["id"], with_user)
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT * FROM messages WHERE conv_key=? AND (?=0 OR id<?) "
+                            "ORDER BY id DESC LIMIT ?", (ck, after, after or 0, size + 1)).fetchall()
+        items = [_message_dict(r) for r in rows[:size]]
+        items.reverse()
+        return {"code": 0, "items": items, "partner": _user_brief(conn, with_user, True),
+                "next_cursor": items[0]["id"] if len(rows) > size else 0,
+                "more": len(rows) > size}
+    finally:
+        conn.close()
+
+
+@app.post("/api/chat/read")
+def chat_read(req: DmReadReq, user: dict = Depends(get_current_user)):
+    ck = chat.conv_key(user["id"], int(req.with_user))
+    conn = get_db()
+    try:
+        cur = conn.execute("UPDATE messages SET read_at=? WHERE conv_key=? AND to_id=? AND read_at IS NULL",
+                           (_now(), ck, user["id"]))
+        conn.commit()
+        marked = int(cur.rowcount or 0)
+    finally:
+        conn.close()
+    if marked:
+        _push(int(req.with_user), {"t": "read", "by": int(user["id"]), "marked": marked})
+    return {"code": 0, "marked": marked}
+
+
+@app.post("/api/chat/block")
+def chat_block(req: BlockReq, user: dict = Depends(get_current_user)):
+    other = int(req.with_user)
+    if other == int(user["id"]):
+        raise HTTPException(status_code=400, detail="不能拉黑自己")
+    conn = get_db()
+    try:
+        if not conn.execute("SELECT 1 FROM users WHERE id=?", (other,)).fetchone():
+            raise HTTPException(status_code=404, detail="找不到这个用户")
+        if req.on:
+            conn.execute("INSERT OR IGNORE INTO user_blocks(blocker,blocked,created_at) VALUES (?,?,?)",
+                         (user["id"], other, _now()))
+        else:
+            conn.execute("DELETE FROM user_blocks WHERE blocker=? AND blocked=?", (user["id"], other))
+        conn.commit()
+        return {"code": 0, "blocked": bool(req.on)}
+    finally:
+        conn.close()
+
+
+_WS_HUB = {}
+_ws_stats = {"peaks": 0, "rejected": 0, "handed_off": 0}
+
+
+@app.websocket("/ws/chat")
+async def chat_socket(ws: WebSocket, ticket: str = ""):
+    """握手不带登录头，所以只认那张 30 秒一次性票据；票据是 HTTP 侧发的，
+    强更门在发票那一步就已经生效（那条路走中间件）。"""
+    payload = chat.read_ticket(ws_secret(), ticket)
+    if not payload or not _ticket_redeem(payload.get("n", "")):
+        _ws_stats["rejected"] += 1
+        await ws.close(code=4401)
+        return
+    uid = int(payload["u"])
+    conn = get_db()
+    try:
+        alive = conn.execute("SELECT 1 FROM users WHERE id=?", (uid,)).fetchone()
+    finally:
+        conn.close()
+    if not alive:
+        _ws_stats["rejected"] += 1
+        await ws.close(code=4401)
+        return
+    await ws.accept()
+    _WS_HUB.setdefault(uid, []).append(ws)
+    _ws_stats["peaks"] = max(_ws_stats["peaks"], sum(len(v) for v in _WS_HUB.values()))
+    _presence_touch(uid)
+    await ws.send_json({"t": "ready", "server_time": int(time.time()), "online": _ws_stats["peaks"]})
+    try:
+        while True:
+            data = await ws.receive_json()
+            kind = data.get("t")
+            if kind == "ping":
+                _presence_touch(uid)
+                await ws.send_json({"t": "pong", "at": int(time.time())})
+                continue
+            sender = {"id": uid}
+            try:
+                if kind == "send":
+                    ok, _w, _n = rate_hit("dm:%d" % uid, DM_RATE_LIMIT, 60)
+                    if not ok:
+                        await ws.send_json({"t": "error", "request_id": data.get("request_id"),
+                                            "detail": "发送太快了，歇一会儿"})
+                        continue
+                    body = community.clean_body(data.get("text"), 1000, "私信")
+                    conn = get_db()
+                    try:
+                        msg, dup = _deliver(conn, sender, int(data.get("to") or 0), body,
+                                            (data.get("request_id") or "")[:64] or None)
+                    finally:
+                        conn.close()
+                    if not dup:
+                        _push(msg["to_id"], {"t": "msg", "message": msg})
+                    await ws.send_json({"t": "ack", "request_id": data.get("request_id"),
+                                        "message": msg, "duplicate": dup})
+                elif kind == "read":
+                    ck = chat.conv_key(uid, int(data.get("with") or 0))
+                    conn = get_db()
+                    try:
+                        cur = conn.execute("UPDATE messages SET read_at=? WHERE conv_key=? AND to_id=?"
+                                           " AND read_at IS NULL", (_now(), ck, uid))
+                        conn.commit()
+                        marked = int(cur.rowcount or 0)
+                    finally:
+                        conn.close()
+                    if marked:
+                        _push(int(data.get("with") or 0), {"t": "read", "by": uid, "marked": marked})
+                    await ws.send_json({"t": "read", "with": data.get("with"), "marked": marked})
+                else:
+                    await ws.send_json({"t": "error", "detail": "不认识的消息类型"})
+            except HTTPException as error:
+                await ws.send_json({"t": "error", "request_id": (data or {}).get("request_id"),
+                                    "detail": str(error.detail)})
+            except ValueError as error:
+                await ws.send_json({"t": "error", "request_id": (data or {}).get("request_id"),
+                                    "detail": str(error)})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        socks = _WS_HUB.get(uid, [])
+        if ws in socks:
+            socks.remove(ws)
+        if not socks:
+            _WS_HUB.pop(uid, None)
+            ok, _ = _redis_cmd(["DEL", chat.presence_key(uid)])
+            if not ok:
+                _presence_mem.pop(uid, None)
+
+
+# ── 意见反馈 ───────────────────────────────────────────────────────────
+
+FEEDBACK_KINDS = ("bug", "idea", "data", "other")
+FEEDBACK_STATUS = ("new", "doing", "done", "wontfix")
+
+
+@app.post("/api/feedback")
+def submit_feedback(req: FeedbackReq, request: Request,
+                    user: Optional[dict] = Depends(_optional_user)):
+    kind = str(req.kind or "").strip()
+    if kind not in FEEDBACK_KINDS:
+        raise HTTPException(status_code=400, detail="反馈类型不认识")
+    try:
+        body = community.clean_body(req.text, 800, "反馈内容")
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    uid = int(user["id"]) if user else None
+    ok, _where, _n = rate_hit("fb:%s" % (uid or _ip(request)), FEEDBACK_RATE_LIMIT, 600)
+    if not ok:
+        raise HTTPException(status_code=429, detail="反馈投得太密了，十分钟后再试")
+    try:
+        build = int(request.headers.get(BUILD_HEADER) or 0)
+    except ValueError:
+        build = 0
+    conn = get_db()
+    try:
+        cur = conn.execute("INSERT INTO feedback(user_id,kind,body,page,app_build,contact,created_at)"
+                           " VALUES (?,?,?,?,?,?,?)",
+                           (uid, kind, body, str(req.page or "")[:60], build,
+                            str(req.contact or "").strip()[:80], _now()))
+        conn.commit()
+        return {"code": 0, "id": int(cur.lastrowid)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/feedback/mine")
+def my_feedback(user: dict = Depends(get_current_user)):
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT * FROM feedback WHERE user_id=? ORDER BY id DESC LIMIT 50",
+                            (user["id"],)).fetchall()
+        return {"code": 0, "items": [{"id": int(r["id"]), "kind": r["kind"], "body": r["body"],
+                                      "status": r["status"], "reply": r["reply"] or "",
+                                      "created_at": r["created_at"], "replied_at": r["replied_at"]}
+                                     for r in rows],
+                "status_names": {"new": "待处理", "doing": "处理中", "done": "已处理", "wontfix": "暂不做"}}
+    finally:
+        conn.close()
+

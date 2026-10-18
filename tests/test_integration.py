@@ -525,4 +525,223 @@ class Integration(unittest.TestCase):
                          '门把找回密码也挡住，忘密码的人就彻底回不来了')
         self.assertEqual(self.c.get('/api/account/recovery-status').status_code, 200)
 
+    # ── 社区 / 私聊 / 反馈 ────────────────────────────────────────────────
+    def _member(self, name, nickname=None):
+        payload = dict(self.body, username=name, nickname=nickname or name)
+        r = self.c.post('/api/register', json=payload)
+        self.assertEqual(r.status_code, 200, '夹具注册失败: %s' % r.text)
+        return r.json(), {'Authorization': 'Bearer ' + r.json()['token']}
+
+    def test_public_id_assigned_and_unique(self):
+        """轻塑号：主页要展示、搜索要精确命中，所以注册就得有，且不能是内部自增 id。"""
+        me = self.signup
+        self.assertRegex(me.get('public_id') or '', r'^\d{8}$')
+        self.assertNotEqual(str(me['id']), me['public_id'])
+        other, _ = self._member('second')
+        self.assertRegex(other['public_id'], r'^\d{8}$')
+        self.assertNotEqual(me['public_id'], other['public_id'])
+        home = self.c.get('/api/community/users/%s' % other['public_id'], headers=self.auth).json()
+        self.assertEqual(home['user']['public_id'], other['public_id'])
+        self.assertFalse(home['user']['is_me'])
+        self.assertEqual(self.c.get('/api/community/users/00000000', headers=self.auth).status_code, 404)
+
+    def test_post_like_comment_counts_match_their_own_rows(self):
+        """计数与明细必须自洽：like_count == COUNT(post_likes)，comment_count 同理。
+        只要有一条路径忘了维护，这里就红，而不是等到用户看见"3 个赞"点开只有一个。"""
+        author, aauth = self._member('author', '写帖的人')
+        reader, rauth = self._member('reader', '路人甲')
+        post = self.c.post('/api/community/posts', headers=aauth,
+                           json={'text': '今天午餐鸡胸肉 150g，配糙米饭', 'request_id': 'k-1'}).json()
+        pid = post['post']['id']
+        again = self.c.post('/api/community/posts', headers=aauth,
+                            json={'text': '今天午餐鸡胸肉 150g，配糙米饭', 'request_id': 'k-1'}).json()
+        self.assertTrue(again['duplicate'], '同一个 request_id 再发必须判重')
+        self.assertEqual(again['post']['id'], pid, '判重还该返回原来那条，不是新建一条')
+        feed = self.c.get('/api/community/feed?tab=mine', headers=aauth).json()
+        self.assertEqual(len([x for x in feed['items'] if x['id'] == pid]), 1)
+        self.c.post('/api/community/posts/%d/like' % pid, headers=rauth, json={'on': True})
+        self.c.post('/api/community/posts/%d/like' % pid, headers=rauth, json={'on': True})
+        liked = self.c.get('/api/community/posts/%d' % pid, headers=rauth).json()['post']
+        self.assertEqual(liked['like_count'], 1, '重复点赞只能算一次')
+        self.assertTrue(liked['liked_by_me'])
+        for text in ('第一条', '第二条'):
+            self.c.post('/api/community/posts/%d/comments' % pid, headers=rauth, json={'text': text})
+        detail = self.c.get('/api/community/posts/%d' % pid, headers=aauth).json()
+        self.assertEqual(detail['post']['comment_count'], len(detail['comments']))
+        conn = self.m.get_db()
+        rows = conn.execute('SELECT like_count, comment_count FROM posts WHERE id=?', (pid,)).fetchone()
+        real_like = conn.execute('SELECT COUNT(*) FROM post_likes WHERE post_id=?', (pid,)).fetchone()[0]
+        real_cmt = conn.execute("SELECT COUNT(*) FROM comments WHERE post_id=? AND status='open'",
+                                (pid,)).fetchone()[0]
+        conn.close()
+        self.assertEqual((rows['like_count'], rows['comment_count']), (real_like, real_cmt),
+                         '计数和明细对不上')
+        # 取消点赞要把那条通知一起收掉，否则"取消赞了，对方还收到一条谁赞了我"
+        self.c.post('/api/community/posts/%d/like' % pid, headers=rauth, json={'on': False})
+        after = self.c.get('/api/community/posts/%d' % pid, headers=aauth).json()['post']
+        self.assertEqual(after['like_count'], 0)
+        notices = self.c.get('/api/notifications', headers=aauth).json()['items']
+        self.assertEqual([n for n in notices if n['kind'] == 'like'], [])
+        self.assertEqual(len([n for n in notices if n['kind'] == 'comment']), 2)
+        self.assertEqual(sorted(n['text'] for n in notices if n['kind'] == 'comment'),
+                         ['路人甲 评论：第一条', '路人甲 评论：第二条'],
+                         '通知句子由服务端拼一份，前端只负责显示')
+
+    def test_post_limits_and_ownership(self):
+        other, oauth = self._member('other')
+        long = self.c.post('/api/community/posts', headers=self.auth,
+                           json={'text': '字' * (self.m.community.POST_MAX + 1)}).status_code
+        self.assertIn(long, (400, 422), '超长正文要么 400 要么 422，不许静默截断')
+        empty = self.c.post('/api/community/posts', headers=self.auth, json={'text': '   '})
+        self.assertEqual(empty.status_code, 400)
+        pid = self.c.post('/api/community/posts', headers=self.auth, json={'text': '我的帖子'}).json()['post']['id']
+        self.assertEqual(self.c.delete('/api/community/posts/%d' % pid, headers=oauth).status_code, 403,
+                         '删别人的帖子必须被拒')
+        self.assertEqual(self.c.delete('/api/community/posts/%d' % pid, headers=self.auth).status_code, 200)
+        self.assertEqual(self.c.get('/api/community/posts/%d' % pid, headers=oauth).status_code, 404,
+                         '删掉的帖子不能再被读到')
+
+    def test_follow_search_and_discoverability(self):
+        target, tauth = self._member('target', '可搜索的昵称')
+        hidden, hauth = self._member('hidden', '不想被搜到')
+        self.c.post('/api/community/profile', headers=hauth, json={'discoverable': 0})
+        self.assertEqual(self.c.get('/api/community/search?q=%s' % target['public_id'],
+                                    headers=self.auth).json()['items'][0]['public_id'],
+                         target['public_id'], '按轻塑号要能精确找到')
+        names = [x['name'] for x in self.c.get('/api/community/search?q=不想',
+                                               headers=self.auth).json()['items']]
+        self.assertNotIn('不想被搜到', names, '关了可发现还出现在搜索结果里')
+        self.assertIn('可搜索的昵称', [x['name'] for x in self.c.get(
+            '/api/community/search?q=可搜索', headers=self.auth).json()['items']])
+        self.assertEqual(self.c.post('/api/community/users/%d/follow' % target['id'],
+                                     headers=tauth, json={'on': True}).status_code, 400,
+                         '不能关注自己')
+        self.c.post('/api/community/users/%d/follow' % target['id'], headers=self.auth, json={'on': True})
+        stats = self.c.get('/api/community/stats', headers=tauth).json()
+        self.assertEqual(stats['followers'], 1)
+        # 关注流 = 我关注的人发的帖子。所以要让 target 反过来关注 owner，
+        # 再由 target 读——方向写反的判据会把功能说反。
+        self.c.post('/api/community/users/%d/follow' % self.signup['id'], headers=tauth, json={'on': True})
+        self.c.post('/api/community/posts', headers=self.auth, json={'text': '关注流里该有这条'})
+        seen = self.c.get('/api/community/feed?tab=follow', headers=tauth).json()['items']
+        self.assertTrue(any('关注流里该有这条' in x['body'] for x in seen), '关注流没拿到关注对象的帖子')
+        outsider = self.c.get('/api/community/feed?tab=follow', headers=hauth).json()['items']
+        self.assertEqual(outsider, [], '没关注任何人的人不该看到别人的帖子')
+        self.c.post('/api/community/users/%d/follow' % target['id'], headers=self.auth, json={'on': False})
+        self.assertEqual(self.c.get('/api/community/stats', headers=tauth).json()['followers'], 0)
+        notices = self.c.get('/api/notifications', headers=tauth).json()['items']
+        self.assertEqual([n for n in notices if n['kind'] == 'follow'], [],
+                         '取关之后那条"某人关注了你"该一起收掉')
+
+    def test_media_rejects_foreign_files_and_bad_images(self):
+        mine, mauth = self._member('uploader')
+        other, oauth = self._member('stealer')
+        buf = io.BytesIO()
+        Image.new('RGB', (40, 40), (200, 30, 30)).save(buf, format='JPEG')
+        upload = self.c.post('/api/community/media', headers=mauth,
+                             files={'file': ('p.jpg', buf.getvalue(), 'image/jpeg')}).json()
+        self.assertEqual(upload['code'], 0)
+        name = upload['name']
+        self.assertTrue(self.m.re.fullmatch(r'[0-9a-f]{32}\.jpg', name), '文件名必须是随机十六进制')
+        ok = self.c.post('/api/community/posts', headers=mauth,
+                         json={'text': '配图帖', 'images': [name]})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertEqual(len(ok.json()['post']['images']), 1)
+        stolen = self.c.post('/api/community/posts', headers=oauth,
+                             json={'text': '偷别人的图', 'images': [name]})
+        self.assertEqual(stolen.status_code, 400, '别人上传的文件不能拼进自己的帖子')
+        bad = self.c.post('/api/community/media', headers=mauth,
+                          files={'file': ('x.jpg', b'not an image at all', 'image/jpeg')})
+        self.assertEqual(bad.status_code, 400)
+        external = self.c.post('/api/community/posts', headers=mauth,
+                               json={'text': '外链图', 'images': ['https://evil/x.jpg']})
+        self.assertEqual(external.status_code, 200)
+        self.assertEqual(external.json()['post']['images'], [], '外部 URL 一律丢掉，不给转成签名链接的机会')
+
+    def test_direct_messages_persist_and_unread(self):
+        """私信必须落在服务端：退出重进、换设备都还在，未读以 read_at 现算。"""
+        peer, pauth = self._member('peer')
+        sent = self.c.post('/api/chat/send', headers=self.auth,
+                           json={'to': peer['id'], 'text': '第一条私信', 'request_id': 'd-1'}).json()
+        self.assertFalse(sent['duplicate'])
+        again = self.c.post('/api/chat/send', headers=self.auth,
+                            json={'to': peer['id'], 'text': '第一条私信', 'request_id': 'd-1'}).json()
+        self.assertTrue(again['duplicate'], '同一个 request_id 不该发出第二条')
+        self.assertEqual(again['message']['id'], sent['message']['id'])
+        convs = self.c.get('/api/chat/conversations', headers=pauth).json()['items']
+        self.assertEqual(len(convs), 1)
+        self.assertEqual(convs[0]['unread'], 1, '未读计数不对')
+        history = self.c.get('/api/chat/messages?with_user=%d' % self.signup['id'], headers=pauth).json()
+        self.assertEqual([m['body'] for m in history['items']], ['第一条私信'])
+        self.assertEqual(self.c.post('/api/chat/read', headers=pauth,
+                                     json={'with_user': self.signup['id']}).json()['marked'], 1)
+        self.assertEqual(self.c.get('/api/chat/conversations', headers=pauth).json()['items'][0]['unread'], 0)
+        # "退出重进"= 重新拉一次历史，不看任何进程内状态
+        again_hist = self.c.get('/api/chat/messages?with_user=%d' % self.signup['id'], headers=pauth).json()
+        self.assertEqual(len(again_hist['items']), 1)
+        self.assertEqual(self.c.post('/api/chat/send', headers=self.auth,
+                                     json={'to': self.signup['id'], 'text': '自言自语'}).status_code, 400)
+        self.assertEqual(self.c.post('/api/chat/send', headers=self.auth,
+                                     json={'to': 999999, 'text': '不存在'}).status_code, 404)
+        self.assertEqual(self.c.post('/api/chat/block', headers=pauth,
+                                     json={'with_user': self.signup['id'], 'on': True}).status_code, 200)
+        blocked = self.c.post('/api/chat/send', headers=self.auth,
+                              json={'to': peer['id'], 'text': '被拉黑之后'})
+        self.assertEqual(blocked.status_code, 403, '对方拉黑了我还能发私信')
+
+    def test_ws_ticket_is_one_time_and_chat_round_trips(self):
+        peer, pauth = self._member('wsparty')
+        ticket = self.c.post('/api/chat/ticket', headers=self.auth).json()
+        self.assertTrue(ticket['ticket'].count('.') == 1)
+        with self.c.websocket_connect('/ws/chat?ticket=' + ticket['ticket']) as ws:
+            ready = ws.receive_json()
+            self.assertEqual(ready['t'], 'ready')
+            ws.send_json({'t': 'ping'})
+            self.assertEqual(ws.receive_json()['t'], 'pong')
+            ws.send_json({'t': 'send', 'to': peer['id'], 'text': '走 WS 发的', 'request_id': 'w-1'})
+            ack = ws.receive_json()
+            self.assertEqual(ack['t'], 'ack')
+            self.assertEqual(ack['message']['body'], '走 WS 发的')
+        # 票据一次性：重放必须被拒
+        with self.assertRaises(Exception):
+            with self.c.websocket_connect('/ws/chat?ticket=' + ticket['ticket']) as ws:
+                ws.receive_json()
+        # WS 发的消息必须和 HTTP 发的一样落在库里（两条路共用一条存法）
+        rows = self.c.get('/api/chat/messages?with_user=%d' % self.signup['id'], headers=pauth).json()
+        self.assertEqual([m['body'] for m in rows['items']], ['走 WS 发的'])
+        with self.assertRaises(Exception):
+            with self.c.websocket_connect('/ws/chat?ticket=garbage') as ws:
+                ws.receive_json()
+
+    def test_feedback_round_trip_and_region_honesty(self):
+        fb = self.c.post('/api/feedback', headers=self.auth,
+                         json={'kind': 'bug', 'text': '打卡后数字没刷新', 'page': 'dashboard'}).json()
+        self.assertEqual(fb['code'], 0)
+        mine = self.c.get('/api/feedback/mine', headers=self.auth).json()
+        self.assertEqual(mine['items'][0]['status'], 'new')
+        self.assertEqual(mine['status_names']['new'], '待处理', '界面要说的状态名服务端得给全')
+        self.assertEqual(self.c.post('/api/feedback', headers=self.auth,
+                                     json={'kind': 'magic', 'text': '不认识的类型'}).status_code, 400)
+        # 没登录也能投（正卡在登录问题上的人最需要这条出口）
+        anon = self.c.post('/api/feedback', json={'kind': 'idea', 'text': '希望有深色模式'})
+        self.assertEqual(anon.status_code, 200, anon.text)
+        conn = self.m.get_db()
+        rows = conn.execute('SELECT user_id FROM feedback ORDER BY id').fetchall()
+        conn.close()
+        self.assertIsNone(rows[-1]['user_id'], '匿名反馈不该被塞进某个用户名下')
+        # 属地：本机没有离线库时必须为空，绝不能编一个"某省"出来
+        self.assertFalse(self.m.geoip.status()['ok'], '这台跑测试的机器上不该有 xdb')
+        post = self.c.post('/api/community/posts', headers=self.auth, json={'text': '属地看这里'}).json()
+        self.assertEqual(post['post']['region'], '')
+        self.assertEqual(self.m.region_for('127.0.0.1'), '')
+        self.assertEqual(self.m.region_for('not-an-ip'), '')
+
+    def test_community_requires_login(self):
+        """社区是会员区：所有读写都要登录，不做匿名浏览，省掉一整类爬取与枚举。"""
+        for path in ('/api/community/feed', '/api/community/stats', '/api/chat/conversations',
+                     '/api/notifications', '/api/community/search?q=owner'):
+            self.assertIn(self.c.get(path).status_code, (401, 403), path + ' 不该免登录可读')
+        self.assertIn(self.c.post('/api/community/posts', json={'text': '匿名发帖'}).status_code,
+                      (401, 403))
+
 if __name__=='__main__':unittest.main(verbosity=2)

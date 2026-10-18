@@ -1611,6 +1611,105 @@ def main():
         # ── 排版层：三块界面重做后，形状要钉住，不能靠"我看着顺眼了" ──
         feat_css = read_asset("features.css")
         feat_js = read_asset("features.js")
+        # ── r149 社区 / 私信 / 反馈：能真跑的判据绝不只是查字符串 ──
+        import time as _gate_time   # main() 里 1800 行处有一句 import time，会让这个名字在整个函数里先变局部
+        _cm_tables = ("posts", "post_likes", "comments", "follows", "notifications", "conversations",
+                      "messages", "user_blocks", "content_reports", "feedback", "media_uploads",
+                      "community_profile")
+        _missing_tables = [t for t in _cm_tables
+                           if ("CREATE TABLE IF NOT EXISTS %s" % t) not in srv_txt]
+        check("社区与私信的表都在 migrate_db 里建好", not _missing_tables, _missing_tables)
+        check("建表集中在 migrate_db（不是路由里现建，第一次并发请求会抢着建）",
+              "_community_schema(c)" in srv_txt[srv_txt.index("def migrate_db"):srv_txt.index("\nmigrate_db()")], "")
+        # 未读一律现算：多存一份计数，就要在发/读/撤/重连四条路上各维护一次，早晚对不上
+        check("未读不落第二份存储",
+              "unread_a" not in srv_txt and "unread_b" not in srv_txt
+              and "unread INTEGER" not in srv_txt, "")
+        _ip_in_insert = [ln.strip()[:70] for ln in srv_txt.splitlines()
+                         if ln.strip().startswith("INSERT") and re.search(r"_ip\(|remote_addr|request\.client", ln)]
+        check("原始 IP 不写进任何一行库", not _ip_in_insert, _ip_in_insert[:2])
+        _gp = m.geoip.status()
+        if not _gp.get("ok"):
+            check("离线归属库没装时如实报原因，且不编属地",
+                  bool(_gp.get("why")) and m.geoip.region_of("8.8.8.8") == ""
+                  and m.geoip.region_of("127.0.0.1") == "" and m.geoip.region_of("垃圾") == "", _gp)
+        else:
+            check("离线归属库已装载时解析不抛异常", isinstance(m.geoip.region_of("8.8.8.8"), str), _gp)
+        # 字段位置是 `国家|省份|城市|运营商|国家代码`——第一版按 `国家|区域|省|市|运营商`
+        # 读，把城市当成了省，还和官方读取器对不上（202.38.64.1 错成澳大利亚）。
+        # 下面这些样本是拿官方 py-ip2region 在同一份 xdb 上跑出来的原话。
+        check("属地收敛到省一级，不带运营商、市和国家代码",
+              m.geoip._province("中国|江苏省|南京市|0|CN") == "江苏"
+              and m.geoip._province("中国|北京市|北京市|腾讯|CN") == "北京"
+              and m.geoip._province("中国|内蒙古自治区|呼和浩特|x|CN") == "内蒙古"
+              and m.geoip._province("United States|California|0|Google LLC|US") == "United States"
+              and m.geoip._province("Reserved|Reserved|Reserved|0|0") == ""
+              and m.geoip._province("中国|0|0|0|CN") == "中国"
+              and m.geoip._province("") == "", m.geoip._province("中国|江苏省|南京市|0|CN"))
+        _sec = b"x" * 32
+        _tk = m.chat.mint_ticket(_sec, 7, 31, "n-1")
+        check("WS 票据能验回身份", m.chat.read_ticket(_sec, _tk)["u"] == 7, _tk[:24])
+        check("票据过期即废、改一个字节即废、乱码即废",
+              m.chat.read_ticket(_sec, _tk, now=_gate_time.time() + m.chat.TICKET_TTL + 5) is None
+              and m.chat.read_ticket(_sec, _tk[:-3] + "AAA") is None
+              and m.chat.read_ticket(_sec, "garbage") is None
+              and m.chat.read_ticket(_sec, "") is None, "")
+        _ws_at = srv_txt.index("async def chat_socket")
+        _ws_body = srv_txt[_ws_at:_ws_at + 1200]
+        check("WS 握手自己校验一次性票据（HTTP 中间件盖不到 WS）",
+              "chat.read_ticket" in _ws_body and "_ticket_redeem" in _ws_body, _ws_body[:60])
+        _cm_routes = re.findall(r'@app\.(?:get|post|delete)\("(/api/(?:community|chat|notifications)[^"]*)"\)\n(.*?):\n',
+                                srv_txt, re.S)
+        _noauth = [p for p, sig in _cm_routes if "get_current_user" not in sig]
+        check("社区与私信的每个接口都要登录", len(_cm_routes) >= 12 and not _noauth,
+              {"接口数": len(_cm_routes), "漏鉴权": _noauth})
+        _idem_paths = re.search(r"const RECORD_PATHS = \[([^\]]*)\]", js_txt, re.S)
+        _idem_list = _idem_paths.group(1) if _idem_paths else ""
+        check("发帖、评论、私信都进了幂等白名单",
+              "/api/community/posts" in _idem_list and "/api/chat/send" in _idem_list
+              and "/api/food/log" in _idem_list and "/api/workout/complete" in _idem_list, _idem_list[:90])
+        _idem_models = [c for c in ("PostReq", "CommentReq", "DmSendReq")
+                        if "request_id" not in srv_txt[srv_txt.index("class " + c):srv_txt.index("class " + c) + 260]]
+        check("对应的服务端模型都收 request_id", not _idem_models, _idem_models)
+        _bad_kind = [k for k in m.community.NOTICE_KINDS
+                     if not m.community.notice_text(k, "小田", "今天吃了什么").startswith("小田")]
+        check("每种通知都拼得出人话", not _bad_kind, _bad_kind)
+        check("正文与评论的更严上限在模块里，不在界面字面量里",
+              m.community.POST_MAX == 1000 and m.community.COMMENT_MAX == 500
+              and m.community.BIO_MAX == 60 and m.community.IMAGES_MAX == 6, "")
+        _over = ""
+        try:
+            m.community.clean_body("字" * 1001, m.community.POST_MAX, "正文")
+        except ValueError as error:
+            _over = str(error)
+        check("超长正文要报出来说了多少字", "1001" in _over and "1000" in _over, _over)
+        check("帖子图片只收本机随机文件名，外链一律丢掉",
+              m.community.clean_images(["https://evil/x.jpg", "a" * 32 + ".jpg", ""]) == ["a" * 32 + ".jpg"], "")
+        check("反馈状态名两边一致",
+              set(m.FEEDBACK_STATUS) == set(["new", "doing", "done", "wontfix"])
+              and all(k in srv_txt[srv_txt.index("def my_feedback"):] for k in m.FEEDBACK_STATUS), "")
+        check("轻塑号是 8 位数字且不与已用号重复",
+              re.fullmatch(r"\d{8}", m.community.new_public_id(set())) is not None
+              and m.community.new_public_id({"11111111"}) != "11111111", "")
+        check("取消点赞要顺手收掉那条赞的通知",
+              "DELETE FROM notifications WHERE kind='like'" in srv_txt, "")
+        check("取关要顺手收掉那条关注通知",
+              "DELETE FROM notifications WHERE kind='follow'" in srv_txt, "")
+        check("底部导航五槽且新页面都在里面",
+              html_txt.count('class="nav-item') == 5
+              and all(('id="nav-' + x) in html_txt for x in ("dashboard", "community", "messages", "me", "tools")),
+              html_txt.count('class="nav-item'))
+        check("工具之间切换有吸顶条，不靠退回更多页再点一次",
+              'id="tool-strip"' in html_txt and html_txt.count('class="ts-chip') >= 6, "")
+        check("新页面不许留没接数据的数字占位",
+              'id="cm-post-count">0' not in html_txt and 'id="fb-count">0' not in html_txt, "")
+        check("帖子卡片与私信气泡都走转义，不拼裸 HTML",
+              "escapeHtml(p.body)" in feat_js and "escapeHtml(m.body)" in feat_js
+              and "escapeHtml(cmName(" in feat_js, "")
+        check("私信在没有 WebSocket 时退回 HTTP 发送",
+              'postApi("/api/chat/send"' in feat_js and "function wsOpen" in feat_js, "")
+        check("复制轻塑号不许不管结果就说已复制",
+              "复制没成功" in feat_js and "document.execCommand" in feat_js, "")
         check("开关是真 checkbox 且选中态有独立样式",
               ".td-switch:checked" in feat_css and 'type="checkbox"' in feat_js, "")
         check("分段控件靠 aria-selected 区分当前项，不是再画一颗胶囊",
