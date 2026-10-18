@@ -374,7 +374,10 @@ async function openAccountCenter(){
       <div class="td-group">
         <div class="td-avatar-row">
           ${a.avatar_url?`<img class="td-avatar" src="${escapeHtml(API_BASE+a.avatar_url)}" alt="当前头像">`:'<span class="td-avatar td-avatar-empty">还没头像</span>'}
-          <label class="td-field-row"><span class="td-field-label">选一张图（JPEG / PNG / WebP，4MB 内）</span><input type="file" id="avatar-file" accept="image/*"></label>
+          <div class="td-field-row"><span class="td-field-label">头像图片（JPEG / PNG / WebP，4MB 内）</span>
+            <input type="file" id="avatar-file" accept="image/*" class="file-hidden" onchange="qsPickAvatarName(this)">
+            <span class="td-file-line"><button type="button" class="td-btn td-btn-quiet" onclick="document.getElementById('avatar-file').click()">选择图片</button>
+            <span class="td-file-name" id="avatar-file-name">未选择</span></span></div>
         </div>
         <div class="td-actions"><button type="button" class="td-btn" onclick="uploadAvatar()">上传头像</button></div>
         <p id="avatar-status" class="td-status" role="status"></p>
@@ -1094,6 +1097,13 @@ function focusCommentInput() {
     if (input) input.focus();
 }
 
+function qsPickAvatarName(input) {
+    const name = cmEl("avatar-file-name");
+    if (!name) return;
+    const f = input && input.files && input.files[0];
+    name.textContent = f ? f.name : "未选择";
+}
+
 async function deletePostFromDetail(id) {
     if (!confirm("删掉这条帖子？删了就找不回来了。")) return;
     try {
@@ -1705,7 +1715,7 @@ async function loadMe() {
         cmText("me-region", region ? "属地 " + region : "属地未知（登录时按 IP 认，换网络后会自动跟上）");
         const disc = acc && typeof acc.discoverable !== "undefined" ? acc.discoverable : 1;
         const badge = cmEl("me-discoverable-badge");
-        if (badge) badge.textContent = disc ? "已开启" : "已关闭";
+        if (badge) { badge.textContent = disc ? "已开启" : "已关闭"; badge.dataset.tone = disc ? "on" : "off"; }
         cmText("me-discoverable-hint", disc ? "别人可以用轻塑号或昵称搜到你" : "别人搜不到你，但你仍能看和发");
         const slot = cmEl("me-avatar");
         if (slot) {

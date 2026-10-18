@@ -2329,6 +2329,21 @@ def main():
     check("评论改成小红书式的小号文字操作",
           "pd-cmt-meta" in _fjs and "pd-cmt-act" in _fjs and ".pd-cmt-meta{" in _fcss
           and "class=\"pd-reply\"" not in _fjs, "")
+    # ---- r153：按钮语言与遮挡收口 ----
+    check("弹窗按钮与页面按钮同一套胶囊（不再一套 12px 一套 999px）",
+          ".tool-dialog button,.account-tools button,#public-view button{border-radius:999px}" in _fcss, "")
+    check("次级动作按钮也统一胶囊",
+          ".td-btn,.td-btn-quiet,.td-mini,.me-copy" in _fcss and "border-radius:999px" in _fcss, "")
+    check("头像选择不再露原生 file 控件",
+          "file-hidden" in _fjs and "qsPickAvatarName" in _fjs
+          and '<input type="file" id="avatar-file" accept="image/*" class="file-hidden"' in _fjs, "")
+    check("手机窄屏不再有悬浮下载压住卡片",
+          "@media (max-width:760px){ #floating-dl-btn{display:none !important} }" in _fcss, "")
+    check("『已开启』不再用危险红",
+          'badge.dataset.tone = disc ? "on" : "off"' in _fjs
+          and '.td-badge[data-tone="on"]{background:#ECFDF5;color:#047857}' in _fcss, "")
+    check("切 tab 会把当前页写到 body（窄屏规则据此生效）",
+          'document.body.setAttribute("data-tab", tabName || "")' in js_txt, "")
     check("详情页能就地编辑帖子（patchJson + 保存）",
           "async function patchJson" in _fjs and "function editPostFromDetail" in _fjs
           and "async function savePostEdit" in _fjs, "")

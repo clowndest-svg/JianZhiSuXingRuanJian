@@ -409,3 +409,32 @@ body.qs-page-open{overflow:hidden}
 .pd-editor textarea{width:100%;min-height:120px;border:1px solid #DDE5E0;border-radius:12px;padding:10px 12px;font:inherit;font-size:16px;line-height:1.7;resize:vertical;background:#fff;color:#0F172A;outline:none}
 .pd-editor textarea:focus{box-shadow:inset 0 0 0 1px #CFE9DC}
 .pd-editor-acts{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+
+
+/* ── r153：按钮语言与遮挡收口 ───────────────────────────────── */
+/* 动作按钮统一胶囊：弹窗里原来单独一套 12px 方角，和页面上的胶囊对不上 */
+.tool-dialog button,.account-tools button,#public-view button{border-radius:999px}
+.td-btn,.td-btn-quiet,.td-mini,.me-copy,.btn-outline,.btn-secondary,
+.btn-log-meal,.btn-cheer-chip,.btn-copy-url,.btn-direct-download,.btn-exd-ctl{border-radius:999px}
+.td-close{border-radius:50%}
+/* 分段控件：同一套控件在弹窗里 12px、页面上 9px，收成 10px（选中态靠底色，不靠圆角） */
+.td-seg button{border-radius:10px}
+/* 文件选择：不把浏览器原生控件露给用户 */
+.file-hidden{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.td-file-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px}
+.td-file-name{font-size:13px;color:#64748B;overflow-wrap:anywhere}
+/* 徽标语义色：已开启是好事，不该用危险红 */
+.td-badge[data-tone="on"]{background:#ECFDF5;color:#047857}
+.td-badge[data-tone="off"]{background:#F1F5F9;color:#64748B}
+/* 悬浮下载胶囊不再压页面内容：整页打开时、在「我的」页时都藏起来 */
+body.qs-page-open #floating-dl-btn{display:none}
+body[data-tab="me"] #floating-dl-btn{display:none}
+#panel-me{padding-bottom:20px}
+/* 评论昵称统一深灰（原来会被上层链接色染绿） */
+.pd-cmt-name{color:#334155}
+
+/* r153：悬浮下载在手机上会压住卡片（监控页的周期数字、我的页的意见类型）。
+   顶栏已经有「下载App」，窄屏直接不要这个浮层；桌面保留。 */
+@media (max-width:760px){ #floating-dl-btn{display:none !important} }
+.tool-dialog .td-close{border-radius:50%}
+@media (max-width:480px){ .brand-tag{display:none} }
