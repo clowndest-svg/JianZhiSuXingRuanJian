@@ -1712,6 +1712,18 @@ def main():
         _lock = io.open(os.path.join(ROOT, "requirements.lock"), encoding="utf-8").read()
         check("WebSocket 实现库进了依赖清单", "websockets" in _req and "websockets" in _lock,
               {"txt": "websockets" in _req, "lock": "websockets" in _lock})
+        # redis-py 对 PING 有响应回调，真实返回是 True 不是 "PONG"。状态接口当初比字符串，
+        # 于是线上 Redis 一直在跑、health 却一直报"从未连上"——这条按真实返回值三种形状跑函数。
+        _saved_rc = m._redis_cmd
+        try:
+            shapes = {}
+            for label, ret in (("bool", (True, True)), ("pong", (True, "PONG")), ("down", (False, None))):
+                m._redis_cmd = lambda args, timeout=0.35, _r=ret: _r
+                shapes[label] = m.redis_up()
+            check("Redis 在不在要按 redis-py 的真实返回判，不是比字符串",
+                  shapes["bool"] is True and shapes["pong"] is True and shapes["down"] is False, shapes)
+        finally:
+            m._redis_cmd = _saved_rc
         _ops = io.open(os.path.join(ROOT, "docs/operations.md"), encoding="utf-8").read()
         check("运维手册写了 uvicorn 要显式选 ws 后端与 nginx 的 Upgrade 透传",
               "websockets-sansio" in _ops and "proxy_http_version" in _ops, _ops[:40])

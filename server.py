@@ -2352,7 +2352,9 @@ def _redis_cmd(args, timeout=0.35):
 
 def redis_up():
     ok, v = _redis_cmd(["PING"])
-    return bool(ok and v == "PONG")
+    # redis-py 给 PING 挂了响应回调，拿回来的是 True 而不是 "PONG"。
+    # 以前这里比字符串，Redis 一直在跑却对外报"从未连上"。
+    return bool(ok and v in (True, "PONG"))
 
 
 _mem_buckets = {}   # Redis 不可用时的进程内兜底
