@@ -451,3 +451,8 @@ body[data-tab="me"] #floating-dl-btn{display:none}
 .pd-report{color:#B3261E;border-color:#FCA5A5;background:#FEF2F2}
 .pd-report:hover{background:#B3261E;color:#fff}
 #report-reasons .td-seg-btn[aria-selected="true"]{background:#fff;color:#065F46;font-weight:700}
+/* 320px 下四个原因挤在一行会把"垃圾广告"折成两行，改成两列并禁止词内换行 */
+@media (max-width:380px){
+  #report-reasons{grid-auto-flow:row;grid-template-columns:1fr 1fr}
+  #report-reasons .td-seg-btn{white-space:nowrap}
+}
