@@ -36,3 +36,4 @@ mail.json
 
 # 真机截图证据目录：只在本机看，不进仓库（文字对账留在 docs/）
 _shot/
+release.tar
