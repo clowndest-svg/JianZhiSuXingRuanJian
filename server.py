@@ -3800,6 +3800,11 @@ def community_post_detail(post_id: int, user: dict = Depends(get_current_user)):
         return {"code": 0, "post": _post_card(conn, row, user),
                 "comments": [{"id": int(c["id"]), "body": c["body"], "region": c["region"] or "",
                               "created_at": c["created_at"], "reply_to": c["reply_to"],
+                              # 前端按这个决定要不要给「删除」。口径必须和 DELETE 端点一致：
+                              # 作者本人能删，楼主也能清理自己帖子下的评论（跟微博一样）。
+                              # 这个字段漏返回时按钮永远不出现，界面上看着像"本来就没有删除"。
+                              "deletable": int(c["user_id"]) == int(user["id"])
+                                         or int(row["user_id"]) == int(user["id"]),
                               "author": _user_brief(conn, c["user_id"])} for c in comments]}
     finally:
         conn.close()

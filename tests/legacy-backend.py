@@ -1765,6 +1765,12 @@ def main():
                if (".%s{display:block" % k) not in feat_css])
         check("关注按钮的初始态来自服务端而不是写死",
               "p.followed_by_me" in feat_js and '"followed_by_me": followed' in srv_src, "")
+        # 评论的「删除」按钮看的是服务端给的 deletable。这个字段一旦漏返回，
+        # 按钮就永远不出现，界面上看着像"本来就没有删除"——本轮真的这么漏过一次。
+        check("评论回执带 deletable，且口径与删除端点一致（作者或楼主）",
+              '"deletable": int(c["user_id"]) == int(user["id"])' in srv_src
+              and 'int(row["user_id"]) == int(user["id"])' in srv_src
+              and "c.deletable" in feat_js and "removeComment(" in feat_js, "")
         # 头像在这个版本里只有一种形状：圆形。方角 16px 的 me-avatar 曾和 34px 圆头像并存
         _av = [feat_css.split(".cm-avatar{")[1].split("}")[0] if ".cm-avatar{" in feat_css else "",
                feat_css.split(".me-avatar{")[1].split("}")[0] if ".me-avatar{" in feat_css else "",

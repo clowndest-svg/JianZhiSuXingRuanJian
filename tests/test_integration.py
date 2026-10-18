@@ -903,6 +903,33 @@ class Integration(unittest.TestCase):
                                      json={'bubble_theme': '<img onerror=1>'}).status_code, 400,
                          '脏值没被白名单拦住')
 
+    def test_comment_deletable_flag_and_removal(self):
+        """评论的「删除」按钮由服务端给的 deletable 决定。
+        这个字段漏返回时按钮永远不出现——界面上看着像"本来就没有删除"，最难发现。
+        口径与 DELETE 端点一致：作者本人 + 楼主都能删，第三方不能。"""
+        a, aauth = self._member('cdel_a')
+        b, bauth = self._member('cdel_b')
+        c_, cauth = self._member('cdel_c')
+        pid = self.c.post('/api/community/posts', headers=aauth, json={'text': '来删我评论'}).json()['post']['id']
+        mine = self.c.post('/api/community/posts/%d/comments' % pid, headers=bauth,
+                           json={'text': '别人写的评论'}).json()['comment']['id']
+        as_author = self.c.get('/api/community/posts/%d' % pid, headers=bauth).json()
+        self.assertTrue([x for x in as_author['comments'] if x['id'] == mine][0]['deletable'],
+                        '自己写的评论却说不能删')
+        as_owner = self.c.get('/api/community/posts/%d' % pid, headers=aauth).json()
+        self.assertTrue([x for x in as_owner['comments'] if x['id'] == mine][0]['deletable'],
+                        '楼主删不了自己帖子下的评论，跟端点口径不一致')
+        as_stranger = self.c.get('/api/community/posts/%d' % pid, headers=cauth).json()
+        self.assertFalse([x for x in as_stranger['comments'] if x['id'] == mine][0]['deletable'],
+                         '跟这条帖子无关的人也给了删除权')
+        self.assertEqual(self.c.delete('/api/community/comments/%d' % mine, headers=cauth).status_code,
+                         403, '无关的人能把这条评论删掉')
+        r = self.c.delete('/api/community/comments/%d' % mine, headers=bauth)
+        self.assertEqual(r.status_code, 200, r.text)
+        left = self.c.get('/api/community/posts/%d' % pid, headers=bauth).json()
+        self.assertEqual([x['id'] for x in left['comments']], [], '删了还列出来')
+        self.assertEqual(left['post']['comment_count'], 0, '评论数没跟着减')
+
     def test_new_community_endpoints_all_require_login(self):
         for path in ('/api/community/connections?user_id=2&kind=followers',
                      '/api/community/posts-of?user_id=2',
