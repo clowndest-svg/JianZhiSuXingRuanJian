@@ -59,16 +59,26 @@ def main():
             raise SystemExit("这些账号不像测试夹具，要删请加 --force：%s" % bad)
 
     pairs = user_refs(conn)
-    before = {}
+    by_table = {}
     for table, col in pairs:
+        by_table.setdefault(table, []).append(col)
+
+    def predicate(cols):
+        # 一张表可能有好几个指向 users 的列（messages 的 from_id/to_id、conversations 的
+        # a_id/b_id/last_from）。按列分别数会把同一行数好几遍，"任一列命中"才是真实行数。
+        return " OR ".join("%s IN (%s)" % (c, ",".join("?" * len(ids))) for c in cols)
+
+    def bound(cols):
+        return [v for _ in cols for v in ids]
+
+    before = {}
+    for table, cols in by_table.items():
         try:
-            before["%s.%s" % (table, col)] = conn.execute(
-                "SELECT COUNT(*) FROM %s WHERE %s IN (%s)" % (table, col, ",".join("?" * len(ids))),
-                ids).fetchone()[0]
+            before[table] = conn.execute(
+                "SELECT COUNT(*) FROM %s WHERE %s" % (table, predicate(cols)), bound(cols)).fetchone()[0]
         except sqlite3.OperationalError:
-            before["%s.%s" % (table, col)] = 0
-    keep_before = {t: conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0]
-                   for t, _c in pairs}
+            before[table] = 0
+    keep_before = {t: conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t in by_table}
 
     print(json.dumps({"将删除的账号": rows, "各表行数": {k: v for k, v in before.items() if v},
                       "合计子表行": sum(before.values())}, ensure_ascii=False))
@@ -76,13 +86,20 @@ def main():
         print("预演模式，什么都没删。确认无误再加 --apply")
         return 0
 
-    for table, col in pairs:
+    # 删除顺序天然会撞外键：清 posts 的时候 comments 还指着它。把外键检查推到 commit——
+    # 整个事务跑完仍然自洽才落盘，不自洽就整笔回滚，不会留下"删了一半"的库。
+    conn.execute("PRAGMA defer_foreign_keys=ON")
+    for table, cols in by_table.items():
         try:
-            conn.execute("DELETE FROM %s WHERE %s IN (%s)" % (table, col, ",".join("?" * len(ids))), ids)
+            conn.execute("DELETE FROM %s WHERE %s" % (table, predicate(cols)), bound(cols))
         except sqlite3.OperationalError:
             pass
     conn.execute("DELETE FROM users WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)
-    conn.commit()
+    try:
+        conn.commit()
+    except sqlite3.IntegrityError as error:
+        conn.rollback()
+        raise SystemExit("删完不自洽，整笔已回滚（库里一行没动）：%s" % error)
 
     left = [r[0] for r in conn.execute("SELECT id FROM users ORDER BY id").fetchall()]
     orphans = {}
@@ -94,10 +111,9 @@ def main():
                 orphans["%s.%s" % (table, col)] = n
         except sqlite3.OperationalError:
             pass
-    keep_after = {t: conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t, _c in pairs}
-    leaked = {t: (keep_before[t], keep_after[t]) for t in keep_before
-              if keep_before[t] - keep_after[t] != sum(
-                  v for k, v in before.items() if k.startswith(t + "."))}
+    keep_after = {t: conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t in by_table}
+    leaked = {t: (keep_before[t], keep_after[t], before[t]) for t in keep_before
+              if keep_before[t] - keep_after[t] != before[t]}
     print(json.dumps({
         "剩余账号": left,
         "孤儿行": orphans,
