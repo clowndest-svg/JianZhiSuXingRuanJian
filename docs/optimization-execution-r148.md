@@ -83,12 +83,35 @@ HEAD 还是 r147 的 HTML，没有 `.brand-profile`，几条老判据直接
 截图：`header-desktop.png`（1280）、`header-393.png`（手机常见档）、`header-320.png`（最窄档）。
 三张里顶栏都是「品牌 + 档案第二行 …… 圆点 + 小田」一行排完，齿轮已不在。
 
-## 6. 抬门仍然要机主亲手做
+## 6. 线上对账与清理
 
-线上 `min_build` 还停在 30。装完 1.9.9（31）之后要执行
-`python3 /opt/qingsu/set-min-build.py 31`，否则旧版客户端不会被挡。
+- 归档 `release-r148.tar`（6,758,400 字节，sha256 `e880a9d6…`）本机与服务器双向核对一致；
+  解出的 `web/qingsu.apk` 与本机 `qingsu.apk` 同为 5,355,557 字节、sha256 `f612f398…`。
+- `deploy.py --stage /opt/qingsu/releases/r148 --revision e578848fcce76958510173d440bb6fe0369856f1`
+  成功，回退快照 `/opt/qingsu/backups/release-20261018-044546`。
+- 服务器内网 `verify_live.py` **8 项通过**。
+- 公网独立复核（从本机发请求，不看部署日志）：
+  `/health/ready` 报 `release=r148`、`source_revision` 等于本次提交、`builds={"31":14}`；
+  `/version.json` 的 `version_code/min_version_code=31`、`size=5355557`、
+  `md5=0aa0bb1e…`、`sha256=f612f398…` 与本机 APK 和公网回读的 APK 三处一致；
+  `/api/account` 未登录 401；`/api/account/recovery-status` 免登录 200 且照实报 `mail=down`；
+  线上首页 `class="account-chip"` 在、`header-icon-btn` 恰好 1 颗、header 段里没有 ⚙️；
+  线上 `app.js` 有 `function displayName(u)`、提示语走 `displayName(data)`、
+  `updateUserUI(state.user.username)` 为 0；线上 `style.css` 有 `min-width: 92px`
+  且末尾覆盖组里不再有 `.account-chip`；线上 `features.css` 没有 `.header-row-1{flex-wrap:wrap}`；
+  线上 `features.js` 有 `updateUserUI(displayName(state.user))`。
+- 测试账号：只删今天建的 31 个 `uqa/usbqa` 账号（id 152–182，删前逐条断言过
+  「恰好 31 个、首 152 尾 182、2 和 3 不在集内」），连带 19 张带 `user_id` 的子表共 240 行。
+  删后：库里只剩 id 2（tiangang）和 id 3（木木），真实账号各表行数前后一致（合计 33 行），
+  无孤儿行，`foreign_key_check` 0 条，`integrity_check` ok，`email_codes` 本来就 0 行。
 
-## 7. 没做到 / 别当成已通过
+## 7. 抬门仍然要机主亲手做
+
+线上 `min_build` 还停在 0（`/health/ready` 里 `build_override=true`）。装完 1.9.9（31）之后
+要执行 `python3 /opt/qingsu/set-min-build.py 31`，否则旧版客户端不会被挡。
+这一版没抬门，所以"已装的 1.9.8 在真人手机上被挡"这一格依旧没有实拍证据。
+
+## 8. 没做到 / 别当成已通过
 
 - **vivo 真机没连**：320/393 是 MuMu 上把 WebView 窗口压到该宽度量的，
   MuMu 镜像缺 emoji 字体（截图里 tab 图标是方框），厂商浏览器的字重渲染没看过。
