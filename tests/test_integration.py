@@ -679,12 +679,14 @@ class Integration(unittest.TestCase):
         self.assertEqual(len(convs), 1)
         self.assertEqual(convs[0]['unread'], 1, '未读计数不对')
         history = self.c.get('/api/chat/messages?with_user=%d' % self.signup['id'], headers=pauth).json()
+        self.assertEqual(history['me_id'], peer['id'], '历史接口要明确告诉前端当前登录者是谁')
         self.assertEqual([m['body'] for m in history['items']], ['第一条私信'])
         self.assertEqual(self.c.post('/api/chat/read', headers=pauth,
                                      json={'with_user': self.signup['id']}).json()['marked'], 1)
         self.assertEqual(self.c.get('/api/chat/conversations', headers=pauth).json()['items'][0]['unread'], 0)
         # "退出重进"= 重新拉一次历史，不看任何进程内状态
         again_hist = self.c.get('/api/chat/messages?with_user=%d' % self.signup['id'], headers=pauth).json()
+        self.assertEqual(again_hist['me_id'], peer['id'])
         self.assertEqual(len(again_hist['items']), 1)
         self.assertEqual(self.c.post('/api/chat/send', headers=self.auth,
                                      json={'to': self.signup['id'], 'text': '自言自语'}).status_code, 400)
@@ -929,6 +931,23 @@ class Integration(unittest.TestCase):
         left = self.c.get('/api/community/posts/%d' % pid, headers=bauth).json()
         self.assertEqual([x['id'] for x in left['comments']], [], '删了还列出来')
         self.assertEqual(left['post']['comment_count'], 0, '评论数没跟着减')
+
+    def test_comment_detail_includes_reply_target_identity(self):
+        owner, owner_auth = self._member('reply_owner')
+        root_author, root_auth = self._member('reply_root')
+        reply_author, reply_auth = self._member('reply_child')
+        pid = self.c.post('/api/community/posts', headers=owner_auth,
+                          json={'text': '评论层级测试'}).json()['post']['id']
+        root = self.c.post('/api/community/posts/%d/comments' % pid, headers=root_auth,
+                           json={'text': '主评论'}).json()['comment']
+        child = self.c.post('/api/community/posts/%d/comments' % pid, headers=reply_auth,
+                            json={'text': '回复主评论', 'reply_to': root['id']}).json()['comment']
+        detail = self.c.get('/api/community/posts/%d' % pid, headers=owner_auth).json()
+        root_name = root['author']['name']
+        rendered_child = next(c for c in detail['comments'] if c['id'] == child['id'])
+        self.assertEqual(rendered_child['reply_to'], root['id'])
+        self.assertEqual(rendered_child['reply_to_user_id'], root_author['id'])
+        self.assertEqual(rendered_child['reply_to_name'], root_name)
 
     def test_new_community_endpoints_all_require_login(self):
         for path in ('/api/community/connections?user_id=2&kind=followers',

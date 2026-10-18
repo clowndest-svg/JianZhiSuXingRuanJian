@@ -483,7 +483,16 @@ def _community_schema(c):
     CREATE TABLE IF NOT EXISTS content_reports (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         target_kind TEXT NOT NULL, target_id INTEGER NOT NULL, reporter INTEGER NOT NULL,
-        reason TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(target_kind, target_id, reporter))""")
+        reason TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', handled_at TEXT,
+        handled_note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+        UNIQUE(target_kind, target_id, reporter))""")
+    # Moderation state belongs to the app schema. Older installs had these
+    # fields added by the admin console, so keep the migration additive.
+    _ensure_columns(c, "content_reports", [
+        ("status", "TEXT NOT NULL DEFAULT 'open'"),
+        ("handled_at", "TEXT"),
+        ("handled_note", "TEXT NOT NULL DEFAULT ''"),
+    ])
     c.execute("""
     CREATE TABLE IF NOT EXISTS feedback (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3921,11 +3930,20 @@ def community_post_detail(post_id: int, user: dict = Depends(get_current_user)):
         if not row:
             raise HTTPException(status_code=404, detail="帖子不存在或已删除")
         comments = conn.execute(
-            "SELECT c.*, u.username, u.nickname FROM comments c JOIN users u ON u.id=c.user_id "
+            "SELECT c.*, u.username, u.nickname, parent.user_id AS reply_to_user_id, "
+            "reply_user.username AS reply_to_username, reply_user.nickname AS reply_to_nickname "
+            "FROM comments c JOIN users u ON u.id=c.user_id "
+            "LEFT JOIN comments parent ON parent.id=c.reply_to AND parent.post_id=c.post_id "
+            "LEFT JOIN users reply_user ON reply_user.id=parent.user_id "
             "WHERE c.post_id=? AND c.status='open' ORDER BY c.id ASC LIMIT 200", (post_id,)).fetchall()
         return {"code": 0, "post": _post_card(conn, row, user),
                 "comments": [{"id": int(c["id"]), "body": c["body"], "region": c["region"] or "",
-                              "created_at": c["created_at"], "reply_to": c["reply_to"],
+                              "created_at": c["created_at"],
+                              "reply_to": int(c["reply_to"]) if c["reply_to"] is not None else None,
+                              "reply_to_user_id": int(c["reply_to_user_id"])
+                                                  if c["reply_to_user_id"] is not None else None,
+                              "reply_to_name": ((c["reply_to_nickname"] or c["reply_to_username"] or "")
+                                                if c["reply_to_user_id"] is not None else ""),
                               # 前端按这个决定要不要给「删除」。口径必须和 DELETE 端点一致：
                               # 作者本人能删，楼主也能清理自己帖子下的评论（跟微博一样）。
                               # 这个字段漏返回时按钮永远不出现，界面上看着像"本来就没有删除"。
@@ -4441,7 +4459,7 @@ def chat_messages(with_user: int, cursor: int = 0, limit: int = 30,
         if partner:
             partner["blocked"] = bool(conn.execute(
                 "SELECT 1 FROM user_blocks WHERE blocker=? AND blocked=?", (user["id"], with_user)).fetchone())
-        return {"code": 0, "items": items, "partner": partner,
+        return {"code": 0, "items": items, "partner": partner, "me_id": int(user["id"]),
                 "next_cursor": items[0]["id"] if len(rows) > size else 0,
                 "more": len(rows) > size}
     finally:

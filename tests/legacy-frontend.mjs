@@ -1815,6 +1815,26 @@ try {
   check("对方的消息靠左：dm-row them 且头像在气泡前",
         theirHtml.indexOf("dm-row them") >= 0
         && theirHtml.indexOf("dm-avatar") < theirHtml.indexOf("cm-bubble"), theirHtml.slice(0, 140));
+  r152('state.user={username:"old-session"};cm.thread={partner:{id:3,nickname:"p"}};');
+  const oldSessionMine = r152('cmBubbleHTML({id:12,from_id:2,to_id:3,body:"旧缓存里的我",created_at:"2026-10-18 12:00:00"},undefined)');
+  const oldSessionThem = r152('cmBubbleHTML({id:13,from_id:3,to_id:2,body:"对方",created_at:"2026-10-18 12:00:00"},undefined)');
+  check("旧登录缓存缺少用户 id 时仍按会话对端识别发送者",
+        oldSessionMine.indexOf("dm-row me") >= 0 && oldSessionThem.indexOf("dm-row them") >= 0,
+        oldSessionMine.slice(0, 100) + " / " + oldSessionThem.slice(0, 100));
+  const nested = r152('qsCommentsHTML([{id:1,body:"主评论",reply_to:null,author:{id:2,username:"mumu",nickname:"木木"},created_at:"x"},{id:2,body:"子评论",reply_to:1,reply_to_user_id:2,reply_to_name:"木木",author:{id:3,username:"reply",nickname:"回复者"},created_at:"x"}],9)');
+  check("子评论嵌在主评论下，并在正文前标明回复对象",
+        nested.indexOf("pd-cmt-replies") >= 0 && nested.indexOf("data-comment=\"1\"") < nested.indexOf("data-comment=\"2\"")
+          && nested.indexOf("（回复 ") >= 0 && nested.indexOf("木木") >= 0, nested.slice(0, 240));
+  check("评论头像和昵称都可打开对应主页",
+        nested.indexOf("openMemberHome(2)") >= 0 && nested.indexOf("openMemberHome(3)") >= 0, "");
+  const featuresCss152 = fs.readFileSync(path.join(ROOT, "app/src/main/assets/features.css"), "utf8");
+  check("少量私信从聊天区顶部开始显示，不再沉在大块空白下方",
+        featuresCss152.includes(".cm-bubbles.page{background:#EDEDED;gap:14px;padding:16px 12px;justify-content:flex-start}"), "");
+  check("窄屏与桌面模式的弹窗最大宽度都受视口约束",
+        featuresCss152.includes("max-width:min(420px,calc(100vw - 24px))")
+          && featuresCss152.includes("body.desktop-view .modal-card{max-width:min(480px,calc(100vw - 24px))}"), "");
+  check("私信联系人标题可直接打开主页",
+        feat152.includes("class=\"pl-title-profile\"") && feat152.includes("openMemberHome(' + partnerId + ')"), "");
   check("撤回提示不再用气泡样式",
         r152('cmBubbleHTML({id:11,from_id:3,recalled_at:"x",body:""},"2")').indexOf("dm-recall") >= 0, "");
 
@@ -1823,6 +1843,10 @@ try {
        'history={stack:[],state:null,pushState:function(s){this.stack.push(s);this.state=s;},' +
        'back:function(){this.stack.pop();this.state=this.stack[this.stack.length-1]||null;},' +
        'go:function(n){while(n<0){this.stack.pop();n++;}this.state=this.stack[this.stack.length-1]||null;}};');
+  r152('openPage("__t",1);openPage("__t","1");');
+  check("连续点击同一头像/姓名不会重复堆叠当前页",
+        r152('QS_PAGES.length+":"+history.stack.length') === "1:1", r152('QS_PAGES.length+":"+history.stack.length'));
+  r152('qsCloseAllPages();');
   r152('openPage("__t",1);openPage("__t",2);');
   check("打开两页 = 页面栈两层 + 历史两层",
         r152('QS_PAGES.length+":"+history.stack.length') === "2:2", r152('QS_PAGES.length+":"+history.stack.length'));

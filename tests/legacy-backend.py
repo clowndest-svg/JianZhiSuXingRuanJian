@@ -1779,8 +1779,8 @@ def main():
               all("border-radius:50%" in a for a in _av) and len(_av[0]) > 10 and len(_av[2]) > 10,
               [a[:34] for a in _av])
         # cmAvatarInner 返回的是 HTML，再套一层 escapeHtml 会把 <img> 当字面量印到屏上
-        _pd = (feat_js.split("async function qsRenderPost")[1].split("function focusCommentInput")[0]
-               if "async function qsRenderPost" in feat_js else "")
+        _pd = (feat_js.split("function qsCommentHTML")[1].split("function qsCommentsHTML")[0]
+               if "function qsCommentHTML" in feat_js else "")
         check("帖子详情里的人用圆形头像，不用功能图标方块",
               "cm-avatar sm" in _pd and "td-glyph" not in _pd, _pd[:60])
         check("头像片段不再被二次转义",

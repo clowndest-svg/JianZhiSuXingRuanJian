@@ -6,8 +6,8 @@
 
 1. 执行 README 中全部检查，生成正式 `qingsu.apk` 和自动版本清单。
 2. `python scripts/package-release.py --output release.tar`。此归档只包含白名单代码、网页、安装包、测试和运维脚本，不含数据库、照片、私钥或备份。
-3. 将归档上传至服务器，在 `/opt/qingsu/releases/<release>` 中解压。在隔离数据库和独立端口完成验收；禁止将压测指向生产。
-4. 在服务器执行 `python3 scripts/deploy.py --stage /opt/qingsu/releases/r131 --revision <已提交的源码SHA>`。脚本先创建 SQLite 一致性备份及媒体快照、备份代码/网页/service/nginx，后切换代码；就绪失败自动恢复代码和配置，不覆盖生产数据库。
+3. 将归档上传至服务器，在 `/opt/qingsu/releases/<release>` 中解压。执行 `python3 scripts/start-qa.py --release <release>`，在随机 TLS 路径、隔离数据库和独立端口验收；禁止将压测指向生产。
+4. 在服务器执行 `python3 scripts/deploy.py --stage /opt/qingsu/releases/<release> --revision <已提交的源码SHA>`。脚本先创建 SQLite 一致性备份及媒体快照、备份代码/网页/service/nginx，后切换代码；就绪失败自动恢复代码和配置，不覆盖生产数据库。
 5. 执行 `python3 scripts/verify_live.py`；只使用随机命名的临时账号，结束时按该账号ID清理。检查公网回读脚本/APK的 SHA-256、证书验证、HTTP重定向与版本清单一致性。
 6. 移除临时 QA 路由、停用 QA service，保留正式回退快照。不得删除 `data/`、`uploads/`、受保护的密钥或有效恢复备份。
 

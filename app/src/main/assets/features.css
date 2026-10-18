@@ -377,7 +377,7 @@ body.qs-page-open{overflow:hidden}
 /* ── r152：私信按小红书整行排（头像+气泡，自己靠右）──────────────────
    上一版只靠 align-self，对方气泡和聊天背景都是 #F1F5F9，
    看起来就是"没有气泡、全在左边"——机主截图里正是这个样子。 */
-.cm-bubbles.page{background:#EDEDED;gap:14px;padding:16px 12px}
+.cm-bubbles.page{background:#EDEDED;gap:14px;padding:16px 12px;justify-content:flex-start}
 .dm-row{display:flex;align-items:flex-start;gap:8px;width:100%}
 .dm-row.them{justify-content:flex-start}
 .dm-row.me{justify-content:flex-end}
@@ -395,13 +395,25 @@ body.qs-page-open{overflow:hidden}
 .pd-cmt{padding:12px 0;border-top:0;border-bottom:1px solid #F1F3F5;gap:10px;cursor:default}
 .pd-cmt:last-of-type{border-bottom:0}
 .pd-cmt .cm-avatar.sm{width:34px;height:34px;flex:0 0 34px;font-size:13px}
-.pd-cmt-name{font-size:13px;font-weight:600;color:#5C6B62}
-.pd-cmt-text{margin-top:2px;font-size:15px;line-height:1.62}
+.pd-cmt-profile{flex:0 0 34px;width:34px;height:34px;padding:0;border:0;background:none;cursor:pointer}
+.pd-cmt-name{display:block;padding:0;border:0;background:none;font:inherit;font-size:13px;font-weight:600;color:#334155;text-align:left;cursor:pointer}
+.pd-cmt-name:hover,.pd-reply-target:hover{color:#0A7A56;text-decoration:underline}
+.pd-cmt-content{margin-top:2px;line-height:1.62;overflow-wrap:anywhere}
+.pd-cmt-text{font-size:15px;line-height:1.62;white-space:pre-wrap;overflow-wrap:anywhere}
 .pd-cmt-meta{margin-top:6px;font-size:12px;color:#94A3B8;display:flex;align-items:center;gap:14px}
 .pd-cmt-time{margin-right:auto}
 .pd-cmt-act{background:none;border:0;padding:0;font:inherit;font-size:12.5px;color:#64748B;cursor:pointer}
 .pd-cmt-act:hover{color:#0A7A56}
 .pd-cmt-act.pd-cmt-del{color:#B3261E}
+.pd-cmt-replies{margin:6px 0 0 36px;padding-left:12px;border-left:2px solid #E2E8F0}
+.pd-cmt-replies .pd-cmt{padding:8px 0;border-bottom:0}
+.pd-cmt-replies .cm-avatar.sm{width:28px;height:28px;flex-basis:28px;font-size:11px}
+.pd-cmt-replies .pd-cmt-profile{flex-basis:28px;width:28px;height:28px}
+.pd-reply-prefix{color:#64748B;font-size:13px}
+.pd-reply-target{padding:0;border:0;background:none;font:inherit;color:#64748B;cursor:pointer}
+.pl-title-profile{display:inline-flex;align-items:center;gap:8px;max-width:100%;padding:0;border:0;background:none;color:inherit;font:inherit;font-size:inherit;font-weight:inherit;cursor:pointer}
+.pl-title-profile .cm-avatar{width:28px;height:28px;flex-basis:28px}
+.pl-title-profile>span:last-child{overflow:hidden;text-overflow:ellipsis}
 .pd-reply{display:none}
 
 /* 详情页内联编辑 */
@@ -456,3 +468,18 @@ body[data-tab="me"] #floating-dl-btn{display:none}
   #report-reasons{grid-auto-flow:row;grid-template-columns:1fr 1fr}
   #report-reasons .td-seg-btn{white-space:nowrap}
 }
+
+/* r155：个人资料与全站弹层收尾。短操作也有可点高度，窄屏/键盘弹出时弹层可滚动到底。 */
+.me-line{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px}
+.me-copy{min-height:38px;padding:6px 12px;font-size:13px;line-height:1.2}
+.modal-overlay{box-sizing:border-box;width:100vw;max-width:100vw;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.modal-card{box-sizing:border-box;width:100%;min-width:0;max-width:min(420px,calc(100vw - 24px));max-height:90vh;max-height:min(90dvh,840px);overscroll-behavior:contain}
+body.desktop-view .modal-card{max-width:min(480px,calc(100vw - 24px))}
+body.desktop-view #profile-modal .modal-card{max-width:min(520px,calc(100vw - 24px))}
+body.desktop-view .download-modal-card{max-width:min(460px,calc(100vw - 24px))}
+body.desktop-view .ex-detail{max-width:min(500px,calc(100vw - 24px))}
+.modal-body{overflow-wrap:anywhere}
+.modal-close-btn{min-height:40px}
+.td-btn,.td-btn-quiet,.td-btn-danger,.td-mini,.me-copy,.btn-primary,.btn-secondary,
+.btn-outline,.btn-log-meal,.btn-upload-photo,.btn-web-action{touch-action:manipulation}
+.tool-dialog .td-close{width:40px;height:40px;min-width:40px;min-height:40px}

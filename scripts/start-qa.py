@@ -1,7 +1,14 @@
 """Start an isolated candidate API behind a temporary, random TLS path."""
-import json,re,subprocess
+import argparse,json,re,subprocess
 from pathlib import Path
-base=Path('/opt/qingsu/releases/r131');config=json.loads(Path('/opt/qingsu/releases/qa-config.json').read_text())
+parser=argparse.ArgumentParser()
+parser.add_argument('--release',required=True,help='candidate release folder name, for example r155')
+args=parser.parse_args()
+if not re.fullmatch(r'r[0-9]{3,}',args.release):raise SystemExit('Invalid release name')
+releases=Path('/opt/qingsu/releases').resolve()
+base=(releases/args.release).resolve()
+if base.parent!=releases or not (base/'server.py').is_file():raise SystemExit('Candidate release not found')
+config=json.loads((releases/'qa-config.json').read_text())
 prefix=config['prefix']
 if not re.fullmatch('qa-[a-f0-9]{16}',prefix):raise SystemExit('Invalid QA path')
 for name in ('qa-data','qa-uploads'):

@@ -646,11 +646,18 @@ function qsRenderTop() {
 function openPage(name, arg) {
     const def = QS_PAGE_DEF[name];
     if (!def) return;
+    const top = QS_PAGES[QS_PAGES.length - 1];
+    // Repeated taps on the current avatar/name must not create duplicate
+    // history entries that force the user to press Back several times.
+    if (top && top.name === name && String(top.arg == null ? "" : top.arg) === String(arg == null ? "" : arg)) {
+        return false;
+    }
     QS_PAGES.push({ name: name, arg: arg, title: def.title, render: def.render });
     // 给每一页补一条历史记录：安卓的返回键/侧滑手势走的是 WebView.canGoBack，
     // 没有这条记录时它只能退出 App（机主截图里的"再按一次退出"）。
     try { history.pushState({ qsPage: QS_PAGES.length }, ""); } catch (e) {}
     qsRenderTop();
+    return true;
 }
 
 /** 关掉最上面一页；栈空时整层收起。返回 true 表示这一层还开着（给硬件返回键判断用）。 */
@@ -1022,6 +1029,57 @@ async function deletePost(id) {
     }
 }
 
+function qsCommentHTML(c, isReply, postId) {
+    const author = c.author || {};
+    const authorId = Number(author.id) || 0;
+    const name = cmName(author);
+    const avatar = '<button type="button" class="pd-cmt-profile" aria-label="打开 ' + escapeHtml(name) + ' 的主页"'
+        + ' onclick="openMemberHome(' + authorId + ')"><span class="cm-avatar sm">'
+        + cmAvatarInner(author) + "</span></button>";
+    const replyId = Number(c.reply_to_user_id) || 0;
+    const replyName = String(c.reply_to_name || "原评论");
+    const prefix = isReply
+        ? '<span class="pd-reply-prefix">（回复 '
+            + (replyId ? '<button type="button" class="pd-reply-target" onclick="openMemberHome(' + replyId + ')">' + escapeHtml(replyName) + "</button>"
+                : escapeHtml(replyName)) + "）</span> "
+        : "";
+    return '<div class="pd-cmt' + (isReply ? " pd-cmt-reply" : "") + '" data-comment="' + Number(c.id) + '">'
+        + avatar + '<div class="pd-cmt-main"><button type="button" class="pd-cmt-name" aria-label="打开 ' + escapeHtml(name) + ' 的主页"'
+        + ' onclick="openMemberHome(' + authorId + ')">' + escapeHtml(name) + "</button>"
+        + '<div class="pd-cmt-content">' + prefix + '<span class="pd-cmt-text">' + escapeHtml(c.body) + "</span></div>"
+        + '<div class="pd-cmt-meta"><span class="pd-cmt-time">' + cmRegionTag(c.region) + " · " + escapeHtml(cmAgo(c.created_at)) + "</span>"
+        + '<button type="button" class="pd-cmt-act" data-reply-id="' + Number(c.id) + '" data-reply-name="' + escapeHtml(name)
+        + '" onclick="setReplyTargetFromButton(this)">回复</button>'
+        + (c.deletable ? '<button type="button" class="pd-cmt-act pd-cmt-del" onclick="removeComment(' + Number(c.id) + ',' + Number(postId) + ')">删除</button>' : "")
+        + "</div></div></div>";
+}
+
+function qsCommentsHTML(comments, postId) {
+    const rows = Array.isArray(comments) ? comments : [];
+    const byId = new Map(rows.map(c => [Number(c.id), c]));
+    const roots = [];
+    const replies = new Map();
+    rows.forEach(c => {
+        const parent = c.reply_to == null ? null : byId.get(Number(c.reply_to));
+        if (!parent) { roots.push(c); return; }
+        let root = parent;
+        const seen = new Set();
+        while (root.reply_to != null && byId.has(Number(root.reply_to)) && !seen.has(Number(root.id))) {
+            seen.add(Number(root.id));
+            root = byId.get(Number(root.reply_to));
+        }
+        if (Number(root.id) === Number(c.id)) { roots.push(c); return; }
+        const key = Number(root.id);
+        if (!replies.has(key)) replies.set(key, []);
+        replies.get(key).push(c);
+    });
+    return roots.map(root => {
+        const nested = replies.get(Number(root.id)) || [];
+        return qsCommentHTML(root, root.reply_to != null, postId)
+            + (nested.length ? '<div class="pd-cmt-replies">' + nested.map(c => qsCommentHTML(c, true, postId)).join("") + "</div>" : "");
+    }).join("");
+}
+
 /* 帖子详情：整页跳转（机主："帖子不要做成弹窗，跳转页面，参考微博"）。
    正文大一号、配图单独一块、时间退到分割线下面，评论区铺满，输入框固定在底部。 */
 async function qsRenderPost(id) {
@@ -1038,6 +1096,7 @@ async function qsRenderPost(id) {
     }
     const p = r.post;
     if (!p) { body.innerHTML = '<p class="cm-state">这条帖子已经不在了。</p>'; return; }
+    if (Number(cm.postId) !== Number(id)) cmReplyTo = null;
     cm.postId = Number(id);
     cmText("pl-title", cmName(p.author) + " 的帖子");
     const mine = p.author && qsSameId(p.author.id, state.user && state.user.id);
@@ -1046,16 +1105,8 @@ async function qsRenderPost(id) {
             '<img src="' + escapeHtml(API_BASE + u) + '" alt="帖子配图" onclick="viewPostImage(\'' +
             escapeHtml(API_BASE + u).replace(/'/g, "%27") + '\')">').join("") + "</div>"
         : "";
-    // 评论照小红书：头像在左、昵称+正文+时间，操作是小号文字按钮，不做卡片不做大胶囊
-    const comments = (r.comments || []).map(c => '<div class="pd-cmt">'
-        + '<span class="cm-avatar sm">' + cmAvatarInner(c.author) + "</span>"
-        + '<div class="pd-cmt-main"><div class="pd-cmt-name">' + escapeHtml(cmName(c.author)) + "</div>"
-        + '<div class="pd-cmt-text">' + escapeHtml(c.body) + "</div>"
-        + '<div class="pd-cmt-meta"><span class="pd-cmt-time">' + cmRegionTag(c.region) + " · " + escapeHtml(cmAgo(c.created_at)) + "</span>"
-        + '<button type="button" class="pd-cmt-act" onclick="setReplyTarget(' + c.id + ",'" +
-          escapeHtml(cmName(c.author)).replace(/'/g, "%27") + "\')\">回复</button>"
-        + (c.deletable ? '<button type="button" class="pd-cmt-act pd-cmt-del" onclick="removeComment(' + c.id + ',' + p.id + ')\">删除</button>' : "")
-        + "</div></div></div>").join("");
+    // Keep replies under their parent and identify the person being answered.
+    const comments = qsCommentsHTML(r.comments || [], p.id);
     body.innerHTML = '<article class="pd-post">'
         + '<div class="pd-who"><button type="button" class="cm-who-btn" onclick="openPage(\'member\',' + (p.author ? p.author.id : 0) + ')">'
         + '<span class="cm-avatar">' + cmAvatarInner(p.author) + "</span>"
@@ -1160,6 +1211,10 @@ function setReplyTarget(id, name) {
     cmReplyTo = { id: id, name: name };
     const input = cmEl("cm-comment-text");
     if (input) { input.placeholder = "回复 @" + name; input.focus(); }
+}
+function setReplyTargetFromButton(button) {
+    if (!button) return;
+    setReplyTarget(Number(button.getAttribute("data-reply-id")), button.getAttribute("data-reply-name") || "");
 }
 
 async function submitComment(postId) {
@@ -1486,6 +1541,13 @@ async function refreshThread() {
     const uid = cm.thread.partner.id;
     try {
         const r = await getJson("/api/chat/messages?with_user=" + uid + "&limit=30");
+        // A pre-community local session may not have an id cached. The server
+        // knows the token owner, so hydrate it before assigning message sides.
+        const meId = Number(r.me_id);
+        if (Number.isFinite(meId) && meId > 0) {
+            state.user = Object.assign({}, state.user || {}, { id: meId });
+            try { localStorage.setItem(USER_KEY, JSON.stringify(state.user)); } catch (e) {}
+        }
         cm.thread.partner = r.partner || cm.thread.partner;
         cm.bubbles = r.items || [];
         cm.thread.more = !!r.more;
@@ -1507,7 +1569,13 @@ function paintThread() {
     if (!cm.thread) return;
     const me = state.user && state.user.id;
     const p = cm.thread.partner;
-    cmText("pl-title", cmName(p));
+    const title = cmEl("pl-title");
+    if (title) {
+        const partnerId = Number(p && p.id) || 0;
+        title.innerHTML = '<button type="button" class="pl-title-profile" aria-label="打开 ' + escapeHtml(cmName(p)) + ' 的主页"'
+            + ' onclick="openMemberHome(' + partnerId + ')"><span class="cm-avatar sm">' + cmAvatarInner(p) + "</span>"
+            + "<span>" + escapeHtml(cmName(p)) + "</span></button>";
+    }
     const slot = cmEl("pl-slot");
     if (slot) {
         const blocked = !!(p && p.blocked);
@@ -1529,7 +1597,9 @@ function paintThread() {
 }
 
 function cmBubbleHTML(m, me, pending) {
-    const mine = qsSameId(m.from_id, me);
+    const hasMeId = me !== undefined && me !== null && Number.isFinite(Number(me)) && Number(me) > 0;
+    const partnerId = cm.thread && cm.thread.partner && cm.thread.partner.id;
+    const mine = qsSameId(m.from_id, me) || (!hasMeId && qsSameId(m.to_id, partnerId));
     if (m.recalled_at) {
         return '<div class="dm-recall">' + (mine ? "你撤回了一条消息" : "对方撤回了一条消息") + "</div>";
     }
