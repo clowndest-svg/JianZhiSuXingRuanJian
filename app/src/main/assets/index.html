@@ -1070,6 +1070,9 @@
                     <button type="button" class="td-row" onclick="openMyFeedback()"><span class="td-glyph">📮</span>
                         <span class="td-row-main"><span class="td-row-title">我的反馈</span>
                         <span class="td-row-hint">看处理进度与官方回复</span></span><span class="td-badge" id="me-feedback-badge" data-empty="1">0</span><span class="td-chevron"></span></button>
+                    <button type="button" class="td-row" onclick="openFavorites()"><span class="td-glyph">★</span>
+                        <span class="td-row-main"><span class="td-row-title">我的收藏</span>
+                        <span class="td-row-hint">你点过星标的帖子</span></span><span class="td-chevron"></span></button>
                 </nav>
             </div>
 
@@ -1457,6 +1460,26 @@
             <span class="nav-icon">🧭</span><span>更多</span>
         </button>
     </nav>
+
+    <dialog class="tool-dialog" id="report-dialog" aria-labelledby="report-title">
+        <header><h2 id="report-title">举报这条内容</h2>
+            <button type="button" class="td-close" onclick="document.getElementById('report-dialog').close()" aria-label="关闭">✕</button></header>
+        <div class="td-body">
+            <p class="td-lead">选一个原因，写一句补充。举报会进后台队列，不会向对方公开是谁举报的。</p>
+            <div class="td-seg" id="report-reasons" role="tablist" aria-label="举报原因">
+                <button type="button" class="td-seg-btn" aria-selected="true" data-reason="垃圾广告">垃圾广告</button>
+                <button type="button" class="td-seg-btn" aria-selected="false" data-reason="色情低俗">色情低俗</button>
+                <button type="button" class="td-seg-btn" aria-selected="false" data-reason="辱骂攻击">辱骂攻击</button>
+                <button type="button" class="td-seg-btn" aria-selected="false" data-reason="其他">其他</button>
+            </div>
+            <label class="td-field"><span class="td-field-label">补充说明（可选）</span>
+                <textarea id="report-note" maxlength="120" rows="3" placeholder="哪一句、哪张图有问题"></textarea></label>
+        </div>
+        <footer class="td-foot">
+            <button type="button" class="td-btn td-btn-quiet" onclick="document.getElementById('report-dialog').close()">取消</button>
+            <button type="button" class="td-btn" onclick="submitReport()">提交举报</button>
+        </footer>
+    </dialog>
 
     <!-- 悬浮下载客户端胶囊按钮 (醒目快捷) -->
     <div class="floating-dl-btn" id="floating-dl-btn" onclick="openDownloadModal()" title="下载轻塑手机APP" role="button" tabindex="0">

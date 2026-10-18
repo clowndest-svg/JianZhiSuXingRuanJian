@@ -2347,6 +2347,38 @@ def main():
     check("详情页能就地编辑帖子（patchJson + 保存）",
           "async function patchJson" in _fjs and "function editPostFromDetail" in _fjs
           and "async function savePostEdit" in _fjs, "")
+    # ---- r154：收藏、帖子搜索、举报 ----
+    _fav_ddl = ""
+    if "CREATE TABLE IF NOT EXISTS post_favorites" in srv_txt:
+        _fav_ddl = srv_txt[srv_txt.index("CREATE TABLE IF NOT EXISTS post_favorites"):][:320]
+    check("收藏用独立表，同一人同一帖只能一行",
+          "CREATE TABLE IF NOT EXISTS post_favorites" in _fav_ddl
+          and "PRIMARY KEY(post_id, user_id)" in _fav_ddl
+          and "FOREIGN KEY(post_id) REFERENCES posts(id)" in _fav_ddl, _fav_ddl[:120])
+    check("帖子卡片带收藏态与收藏数（前端据此点亮星标）",
+          '"favorited_by_me": bool(' in srv_txt and '"favorite_count": int(' in srv_txt, "")
+    check("收藏开关是接口不是本地状态",
+          '@app.post("/api/community/posts/{post_id}/favorite")' in srv_txt
+          and "INSERT OR IGNORE INTO post_favorites" in srv_txt
+          and "DELETE FROM post_favorites WHERE post_id=? AND user_id=?" in srv_txt, "")
+    check("我的收藏按帖子游标分页，已删除的帖子不出现",
+          '@app.get("/api/community/favorites")' in srv_txt
+          and "JOIN post_favorites f ON f.post_id=p.id" in srv_txt
+          and "p.status='open'" in srv_txt, "")
+    check("搜索同时返回人和帖子，前端两段都渲染",
+          "posts = conn.execute(" in srv_txt and '"posts": [_post_card' in srv_txt
+          and "r.posts" in _fjs, "")
+    check("前端星标可点且状态跟着接口走",
+          "async function toggleFavorite" in _fjs and "favorited_by_me" in _fjs
+          and 'aria-pressed="' in _fjs, "")
+    check("前端有『我的收藏』页并从接口读",
+          "QS_PAGE_DEF.favorites" in _fjs and "async function qsRenderFavorites" in _fjs
+          and "/api/community/favorites?limit=12" in _fjs, "")
+    check("举报弹窗有理由选择与备注，提交走真实接口",
+          'id="report-dialog"' in _html and "report-reasons" in _html
+          and "async function submitReport" in _fjs and "/api/community/report" in _fjs, "")
+    check("自己的帖子不显示举报按钮（举报自己没有意义）",
+          '(mine ? "" : ' in _fjs and "openReport(&#39;post&#39;" in _fjs, "")
 
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (

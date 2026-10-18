@@ -1679,8 +1679,8 @@ try {
   check("r150 这块能真的把 features.js 跑起来", errs150.length === 0, errs150.join(" / "));
   const r150 = code => run(h150.context, code);
 
-  check("四个整页都注册了（主页/帖子/私信/统计）",
-        r150('Object.keys(QS_PAGE_DEF).sort().join(",")') === "dm,member,post,stats",
+  check("五个整页都注册了（主页/帖子/私信/统计/收藏）",
+        r150('Object.keys(QS_PAGE_DEF).sort().join(",")') === "dm,favorites,member,post,stats",
         r150('Object.keys(QS_PAGE_DEF).sort().join(",")'));
   check("未知页名不会把栈弄脏",
         r150('(function(){openPage("magic",1);return QS_PAGES.length+":"+qsPageOpen();})()') === "0:false", "");

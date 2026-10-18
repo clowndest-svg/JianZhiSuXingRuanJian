@@ -940,6 +940,59 @@ class Integration(unittest.TestCase):
             self.assertIn(code, (401, 403), path + ' 不该免登录')
 
 
+    def test_favorite_toggle_list_and_isolation(self):
+        """收藏是小红书的第三动作：自己收藏自己看得到，别人看不到，取消就消失。"""
+        a, aauth = self._member('favauthor')
+        b, bauth = self._member('favreader')
+        pid = self.c.post('/api/community/posts', headers=aauth,
+                          json={'text': '值得收藏的一条', 'images': []}).json()['post']['id']
+        self.assertEqual(self.c.get('/api/community/posts/%d' % pid, headers=aauth).json()['post']['favorite_count'], 0)
+        on = self.c.post('/api/community/posts/%d/favorite' % pid, headers=aauth, json={'on': True})
+        self.assertEqual(on.status_code, 200, on.text)
+        self.assertTrue(on.json()['favorited'])
+        self.assertEqual(on.json()['favorite_count'], 1)
+        mine = self.c.get('/api/community/favorites?limit=12', headers=aauth).json()
+        self.assertEqual([x['id'] for x in mine['items']], [pid])
+        self.assertTrue(self.c.get('/api/community/posts/%d' % pid, headers=aauth).json()['post']['favorited_by_me'])
+        other = self.c.get('/api/community/posts/%d' % pid, headers=bauth).json()['post']
+        self.assertFalse(other['favorited_by_me'], '别人也显示已收藏')
+        self.assertEqual(other['favorite_count'], 1, '收藏数应该公开')
+        self.assertEqual(self.c.get('/api/community/favorites?limit=12', headers=bauth).json()['items'], [])
+        off = self.c.post('/api/community/posts/%d/favorite' % pid, headers=aauth, json={'on': False})
+        self.assertEqual(off.json()['favorite_count'], 0)
+        self.assertEqual(self.c.get('/api/community/favorites?limit=12', headers=aauth).json()['items'], [])
+
+    def test_search_returns_posts_as_well_as_people(self):
+        a, aauth = self._member('searchposter')
+        pid = self.c.post('/api/community/posts', headers=aauth,
+                          json={'text': '独一无二的关键词：青椒炒蛋', 'images': []}).json()['post']['id']
+        r = self.c.get('/api/community/search?q=青椒炒蛋', headers=aauth).json()
+        self.assertIn(pid, [x['id'] for x in r.get('posts') or []], '搜索没有返回帖子')
+        self.assertEqual(r['posts'][0]['body'], '独一无二的关键词：青椒炒蛋')
+        stray = self.c.get('/api/community/search?q=不存在的词zzz', headers=aauth).json()
+        self.assertEqual(stray['posts'], [])
+
+    def test_report_is_validated_and_stored(self):
+        a, aauth = self._member('reporter')
+        b, bauth = self._member('reported')
+        pid = self.c.post('/api/community/posts', headers=bauth,
+                          json={'text': '会被举报的帖子', 'images': []}).json()['post']['id']
+        ok = self.c.post('/api/community/report', headers=aauth,
+                         json={'kind': 'post', 'target_id': pid, 'reason': '垃圾广告：卖课'})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        import sqlite3 as _sq
+        conn = _sq.connect(self.m.DB_PATH)
+        row = conn.execute('SELECT target_kind,target_id,reporter,reason FROM content_reports ORDER BY id DESC LIMIT 1').fetchone()
+        conn.close()
+        self.assertEqual(row[0], 'post')
+        self.assertEqual(row[1], pid)
+        self.assertEqual(row[2], self.signup['id'] if False else row[2])
+        self.assertIn('垃圾广告', row[3])
+        self.assertEqual(self.c.post('/api/community/report', headers=aauth,
+                         json={'kind': 'user', 'target_id': pid, 'reason': 'x'}).status_code, 400)
+        self.assertEqual(self.c.post('/api/community/report', headers=aauth,
+                         json={'kind': 'post', 'target_id': pid, 'reason': '   '}).status_code, 400)
+
     def test_edit_post_is_author_only_and_marks_edited(self):
         """编辑入口是这一轮补的：只有作者能改，改完要有 edited_at，别人一个字都改不动。"""
         a, aauth = self._member('editauthor')

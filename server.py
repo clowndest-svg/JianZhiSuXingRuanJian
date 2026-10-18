@@ -433,6 +433,10 @@ def _community_schema(c):
         post_id INTEGER NOT NULL, user_id INTEGER NOT NULL, created_at TEXT NOT NULL,
         PRIMARY KEY(post_id, user_id), FOREIGN KEY(post_id) REFERENCES posts(id))""")
     c.execute("""
+    CREATE TABLE IF NOT EXISTS post_favorites (
+        post_id INTEGER NOT NULL, user_id INTEGER NOT NULL, created_at TEXT NOT NULL,
+        PRIMARY KEY(post_id, user_id), FOREIGN KEY(post_id) REFERENCES posts(id))""")
+    c.execute("""
     CREATE TABLE IF NOT EXISTS comments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         post_id INTEGER NOT NULL, user_id INTEGER NOT NULL, reply_to INTEGER,
@@ -3621,6 +3625,11 @@ def _post_card(conn, row, me):
             "like_count": int(row["like_count"]),
             "comment_count": int(row["comment_count"]),
             "liked_by_me": liked,
+            "favorited_by_me": bool(conn.execute(
+                "SELECT 1 FROM post_favorites WHERE post_id=? AND user_id=?",
+                (pid, me["id"])).fetchone()) if me else False,
+            "favorite_count": int(conn.execute(
+                "SELECT COUNT(*) FROM post_favorites WHERE post_id=?", (pid,)).fetchone()[0]),
             "followed_by_me": followed,
             "mine": bool(me and int(row["user_id"]) == int(me["id"]))}
 
@@ -3815,6 +3824,49 @@ def edit_post(post_id: int, req: PostEditReq, user: dict = Depends(get_current_u
         conn.commit()
         row = conn.execute("SELECT * FROM posts WHERE id=?", (post_id,)).fetchone()
         return {"code": 0, "post": _post_card(conn, row, user)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/community/posts/{post_id}/favorite")
+def toggle_favorite(post_id: int, req: LikeReq, user: dict = Depends(get_current_user)):
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT id, user_id FROM posts WHERE id=? AND status='open'", (post_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="帖子不存在或已删除")
+        if req.on:
+            conn.execute("INSERT OR IGNORE INTO post_favorites(post_id,user_id,created_at) VALUES (?,?,?)",
+                         (post_id, user["id"], datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        else:
+            conn.execute("DELETE FROM post_favorites WHERE post_id=? AND user_id=?", (post_id, user["id"]))
+        conn.commit()
+        count = conn.execute("SELECT COUNT(*) FROM post_favorites WHERE post_id=?", (post_id,)).fetchone()[0]
+        return {"code": 0, "favorited": bool(req.on), "favorite_count": int(count)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/community/favorites")
+def my_favorites(cursor: int = 0, limit: int = community.DEFAULT_PAGE,
+                 user: dict = Depends(get_current_user)):
+    """我的收藏：按收藏时间倒序；分页用 post id 做游标（和列表同一套口径）。"""
+    size = community.page_size(limit)
+    after = community.cursor_id(cursor)
+    conn = get_db()
+    try:
+        sql = ("SELECT p.* FROM posts p JOIN post_favorites f ON f.post_id=p.id "
+               "WHERE f.user_id=? AND p.status='open'")
+        args = [user["id"]]
+        if after:
+            sql += " AND p.id<?"; args.append(after)
+        sql += " ORDER BY p.id DESC LIMIT ?"; args.append(size + 1)
+        rows = conn.execute(sql, args).fetchall()
+        more = len(rows) > size
+        rows = rows[:size]
+        items = [_post_card(conn, r, user) for r in rows]
+        return {"code": 0, "items": items, "more": more,
+                "next_cursor": (items[-1]["id"] if more and items else 0)}
     finally:
         conn.close()
 
@@ -4133,7 +4185,11 @@ def community_search(q: str = "", limit: int = 12, user: dict = Depends(get_curr
             "WHERE cp.discoverable=1 AND (u.public_id=? OR u.username LIKE ? OR u.nickname LIKE ?) "
             "ORDER BY (u.public_id=?) DESC, u.id ASC LIMIT ?",
             (term, "%" + term + "%", "%" + term + "%", term, size)).fetchall()
-        return {"code": 0, "items": [_user_brief(conn, r["id"], True) for r in rows]}
+        posts = conn.execute(
+            "SELECT * FROM posts WHERE status='open' AND body LIKE ? ORDER BY id DESC LIMIT ?",
+            ("%" + term + "%", size)).fetchall()
+        return {"code": 0, "items": [_user_brief(conn, r["id"], True) for r in rows],
+                "posts": [_post_card(conn, r, user) for r in posts]}
     finally:
         conn.close()
 

@@ -445,3 +445,9 @@ body[data-tab="me"] #floating-dl-btn{display:none}
   body:not(.desktop-view) nav{max-width:960px;margin-left:auto;margin-right:auto}
   body:not(.desktop-view) .me-stats,body:not(.desktop-view) .td-seg{max-width:780px}
 }
+
+/* r154：收藏与举报 */
+.cm-act[aria-pressed="true"],.td-mini[aria-pressed="true"]{color:#B45309}
+.pd-report{color:#B3261E;border-color:#FCA5A5;background:#FEF2F2}
+.pd-report:hover{background:#B3261E;color:#fff}
+#report-reasons .td-seg-btn[aria-selected="true"]{background:#fff;color:#065F46;font-weight:700}

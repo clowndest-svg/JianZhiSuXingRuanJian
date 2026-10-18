@@ -824,6 +824,8 @@ function cmCardHTML(p, withId) {
         + '<button type="button" class="cm-act" aria-pressed="' + (p.liked_by_me ? "true" : "false") + '" '
         + 'onclick="toggleLike(' + p.id + ',this)">❤ <b data-like>' + Number(p.like_count) + "</b></button>"
         + '<button type="button" class="cm-act" onclick="openPostDetail(' + p.id + ')">💬 <b>' + Number(p.comment_count) + "</b></button>"
+        + '<button type="button" class="cm-act" aria-pressed="' + (p.favorited_by_me ? "true" : "false") + '" '
+        + 'onclick="toggleFavorite(' + p.id + ',this)">★ <b data-fav>' + Number(p.favorite_count || 0) + "</b></button>"
         + (mine ? '<button type="button" class="cm-act" style="margin-left:auto" onclick="deletePost(' + p.id + ')">删除</button>' : "")
         + "</div></article>";
 }
@@ -960,6 +962,24 @@ async function toggleLike(id, btn) {
     }
 }
 
+async function toggleFavorite(id, btn) {
+    const cur = btn.getAttribute("aria-pressed") === "true";
+    btn.setAttribute("aria-pressed", cur ? "false" : "true");
+    try {
+        const r = await postApi("/api/community/posts/" + id + "/favorite", { on: !cur });
+        const card = btn.closest(".cm-card");
+        const b = card && card.querySelector("[data-fav]");
+        if (b) b.textContent = Number(r.favorite_count);
+        const item = cm.items.find(x => x.id === id);
+        if (item) { item.favorite_count = r.favorite_count; item.favorited_by_me = r.favorited; }
+        const detailB = document.querySelector(".pd-acts [data-fav]");
+        if (detailB) detailB.textContent = Number(r.favorite_count);
+    } catch (e) {
+        btn.setAttribute("aria-pressed", cur ? "true" : "false");
+        callNativeToast("收藏没生效：" + (e.message || "网络不通"));
+    }
+}
+
 /* PATCH 同样单独走一条：帖子编辑用它 */
 async function patchJson(path, body) {
     const r = await fetch(API_BASE + path, {
@@ -1052,6 +1072,9 @@ async function qsRenderPost(id) {
         + '<button type="button" class="td-mini" aria-pressed="' + (p.liked_by_me ? "true" : "false") + '" '
         + 'onclick="toggleLike(' + p.id + ',this)">❤ 赞 ' + Number(p.like_count) + "</button>"
         + '<button type="button" class="td-mini" onclick="focusCommentInput()">💬 评论 ' + Number(p.comment_count) + "</button>"
+        + '<button type="button" class="td-mini" aria-pressed="' + (p.favorited_by_me ? "true" : "false") + '" '
+        + 'onclick="toggleFavorite(' + p.id + ',this)">★ 收藏 <b data-fav>' + Number(p.favorite_count || 0) + "</b></button>"
+        + (mine ? "" : '<button type="button" class="td-mini pd-report" onclick="openReport(&#39;post&#39;,' + p.id + ')">举报</button>')
         + (p.author && !mine ? '<button type="button" class="td-mini" onclick="openDM(' + p.author.id + ')">私信 TA</button>' : "")
         + (mine ? '<button type="button" class="td-mini" onclick="editPostFromDetail(' + p.id + ')">编辑</button>'
             + '<button type="button" class="td-mini pd-danger" onclick="deletePostFromDetail(' + p.id + ')">删除</button>' : "")
@@ -1169,6 +1192,35 @@ async function toggleFollow(uid, btn) {
     }
 }
 
+let cmReport = { kind: "post", id: 0 };
+
+function openReport(kind, id) {
+    if (!state.token) { openAuthModal(); return; }
+    cmReport = { kind: kind || "post", id: Number(id) || 0 };
+    const dlg = cmEl("report-dialog");
+    if (!dlg) return;
+    const note = cmEl("report-note");
+    if (note) note.value = "";
+    dlg.querySelectorAll("#report-reasons .td-seg-btn").forEach(b =>
+        b.setAttribute("aria-selected", b.dataset.reason === "垃圾广告" ? "true" : "false"));
+    dlg.showModal();
+}
+
+async function submitReport() {
+    const active = document.querySelector('#report-reasons .td-seg-btn[aria-selected="true"]');
+    const noteEl = cmEl("report-note");
+    const note = (noteEl && noteEl.value || "").trim().slice(0, 120);
+    const reason = (active ? active.dataset.reason : "其他") + (note ? "：" + note : "");
+    try {
+        await postApi("/api/community/report", { kind: cmReport.kind, target_id: cmReport.id, reason: reason });
+        const dlg = cmEl("report-dialog");
+        if (dlg) dlg.close();
+        callNativeToast("已提交，后台会处理");
+    } catch (e) {
+        callNativeToast("没提交上：" + (e.message || "网络不通"));
+    }
+}
+
 async function searchMembers() {
     const input = cmEl("cm-search-input");
     const q = (input && input.value || "").trim();
@@ -1180,13 +1232,18 @@ async function searchMembers() {
     try {
         const r = await getJson("/api/community/search?q=" + encodeURIComponent(q));
         const items = r.items || [];
-        host.innerHTML = items.length ? items.map(u =>
+        const posts = r.posts || [];
+        const usersHtml = items.length ? items.map(u =>
             '<button type="button" class="cm-row" onclick="openMemberHome(' + u.id + ')">'
             + '<span class="cm-avatar">' + cmAvatarInner(u) + "</span>"
             + '<span class="cm-row-main"><span class="cm-row-title">' + escapeHtml(cmName(u)) + "</span>"
             + '<span class="cm-row-meta">轻塑号 ' + escapeHtml(u.public_id || "—") +
             (u.region ? " · 属地 " + escapeHtml(u.region) : "") + "</span></span></button>").join("")
             : '<p class="td-empty">没找到这个人。轻塑号要输全 8 位，昵称可以只输几个字。</p>';
+        const postsHtml = posts.length
+            ? '<h3 class="pd-sec">相关帖子</h3>' + posts.map(x => cmCardHTML(x, false)).join("")
+            : "";
+        host.innerHTML = usersHtml + postsHtml;
     } catch (e) {
         host.innerHTML = '<p class="td-empty">搜索没成功：' + escapeHtml(e.message || "网络不通") + "</p>";
     }
@@ -1396,6 +1453,26 @@ async function qsRenderDm(uid) {
     paintThread();
 }
 
+async function openFavorites() {
+    if (!state.token) { openAuthModal(); return; }
+    openPage("favorites", 0);
+}
+
+async function qsRenderFavorites() {
+    const body = cmEl("pl-body");
+    if (!body) return;
+    body.innerHTML = '<p class="cm-state">在读…</p>';
+    try {
+        const r = await getJson("/api/community/favorites?limit=12");
+        body.innerHTML = '<div class="cm-feed">' + ((r.items || []).length
+            ? r.items.map(x => cmCardHTML(x, false)).join("")
+            : '<p class="td-empty">还没有收藏。看到喜欢的帖子，点一下星标。</p>') + "</div>";
+    } catch (e) {
+        body.innerHTML = '<p class="cm-state">没读到：' + escapeHtml(e.message || "网络不通") + "</p>";
+    }
+}
+
+QS_PAGE_DEF.favorites = { title: "我的收藏", render: qsRenderFavorites };
 QS_PAGE_DEF.dm = { title: "私信", render: qsRenderDm };
 
 function closeThread() {
