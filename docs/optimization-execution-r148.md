@@ -67,7 +67,8 @@ HEAD 还是 r147 的 HTML，没有 `.brand-profile`，几条老判据直接
 
 ## 5. 真机（MuMu 127.0.0.1:16384，正式包 versionCode 31）
 
-`DeviceSmokeTest` 4 个用例全过（`Time: 54.661`）。顶栏度量原样落档：
+`DeviceSmokeTest` **4 个用例全过**（最后一轮 `Time: 55.086`，跑的是最终包 + 最终测试代码）。
+顶栏度量原样落档：
 
 - **桌面 1280**（`header-desktop.json`）：
   `topDiff 0`、`chipH 32`、`iconH 34`、`extraIcons 0`、`nameText 小田`、
@@ -110,6 +111,14 @@ HEAD 还是 r147 的 HTML，没有 `.brand-profile`，几条老判据直接
   「恰好 31 个、首 152 尾 182、2 和 3 不在集内」），连带 19 张带 `user_id` 的子表共 240 行。
   删后：库里只剩 id 2（tiangang）和 id 3（木木），真实账号各表行数前后一致（合计 33 行），
   无孤儿行，`foreign_key_check` 0 条，`integrity_check` ok，`email_codes` 本来就 0 行。
+- 对账之后又跑了两轮真机（补网页版那一档 + 最后一轮全量），**再清一次**：
+  id 184–187 共 4 个账号、31 行子表；删前断言「库里除 2/3 之外只剩这四个且 id 集完全相等」，
+  删后复核只剩 [2, 3]、真实账号 33 行未变、无孤儿、`foreign_key_check` 0、`integrity_check` ok。
+  **收尾顺序有代价**：先清账号再跑设备测试＝白清，最后一轮测试之后才是清理的时点。
+- 推送分两笔上线后的状态：`4257352`（feat+docs）与 `1d1f2b1`（test）。
+  `git ls-remote` 回读 `refs/heads/main = 1d1f2b1b67d279884c0e68959dca1ebd231e1459` 等于本地 HEAD。
+  CI（`1d1f2b1` 这一笔）：`integration` 与 `android` 两个作业都 `completed / success`。
+  上一笔 `4257352` 的 `integration` 同样 success。
 
 ## 7. 抬门仍然要机主亲手做
 
