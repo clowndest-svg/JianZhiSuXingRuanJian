@@ -149,6 +149,11 @@ DEL -> 1
 - 清账号脚本本身修了两个 bug（外键顺序、按列重复计数），记录与标定见 commit `ccbded9`。
 - 服务器 `/tmp` 里今晚自己造的探针文件已删（`geoip_probe.py`、`ip2lib/`、`ip2t/`、
   `xdb.done`、`xdb.err`、`__pycache__/`）；盘 8.5G/40G（22%）。
+- 推送后 `git ls-remote` 回读 `refs/heads/main` 等于本地 HEAD。
+  GitHub Actions 只在**每次 push 的头一笔**上跑检查：`ccbded9` 与文档这一笔
+  `integration` / `android` 两个作业都 `completed / success`；
+  **线上部署那一笔 `d3ca20d` 是中间提交，GitHub 没为它单独跑检查**——
+  它和 `ccbded9` 之间只差那个清账号脚本，运行时代码一致，所以线上现役代码是被检查过的同一份。
 
 ## 8. 抬门仍然要机主亲手做
 
