@@ -940,4 +940,79 @@ class Integration(unittest.TestCase):
             self.assertIn(code, (401, 403), path + ' 不该免登录')
 
 
+    def _set_ban(self, uid, at='2026-10-18T12:00:00Z', reason='发布违规内容'):
+        """后台的封号动作最终就是改这两列；测试直接落库，绕开"运维 API 还没建"这件事。"""
+        import sqlite3
+        conn = sqlite3.connect(self.m.DB_PATH)
+        conn.execute('UPDATE users SET banned_at=?, ban_reason=? WHERE id=?',
+                     (None if at is None else at, '' if at is None else reason, uid))
+        conn.commit(); conn.close()
+
+    def test_ban_blocks_api_and_login_and_reverts(self):
+        """封号不是给后台自己看的标记：请求必须真被拦住，且能解封恢复。"""
+        self.assertEqual(self.c.get('/api/dashboard', headers=self.auth).status_code, 200)
+        self._set_ban(self.signup['id'])
+        r = self.c.get('/api/dashboard', headers=self.auth)
+        self.assertEqual(r.status_code, 403, r.text)
+        self.assertEqual(r.json().get('code'), 'account_banned',
+                         '没有机器码，前端只能拿 403 猜——而 403 在本服务里还用于"只能删自己的帖子"')
+        self.assertIn('已被停用', r.json()['detail'])
+        self.assertIn('发布违规内容', r.json()['detail'], '封号原因没带出来，用户只会看到一个谜')
+        # 登录路径也要拦（否则被封的人还能拿到新 token）
+        bad = self.c.post('/api/login', json={'username': 'owner', 'password': 'Review!123'})
+        self.assertEqual(bad.status_code, 403, bad.text)
+        self.assertEqual(bad.json().get('code'), 'account_banned')
+        # 解封
+        self._set_ban(self.signup['id'], at=None)
+        self.assertEqual(self.c.get('/api/dashboard', headers=self.auth).status_code, 200)
+        self.assertEqual(self.c.post('/api/login', json={'username': 'owner',
+                                 'password': 'Review!123'}).status_code, 200)
+
+    def test_ban_never_leaks_before_the_password_is_proved(self):
+        """被封的号密码错时仍要说"用户名或密码错误"：不然"这个号被封过"就成了免口令可探的信号。"""
+        other, _ = self._member('bystander')
+        self._set_ban(self.signup['id'])
+        wrong = self.c.post('/api/login', json={'username': 'owner', 'password': 'WrongPass!1'})
+        self.assertEqual(wrong.status_code, 400, wrong.text)
+        self.assertNotIn('停用', wrong.text)
+        self.assertEqual(wrong.json()['detail'], '用户名或密码错误', '口径和未封号时不一致了')
+        # 别人的请求不受牵连
+        self.assertEqual(self.c.get('/api/dashboard',
+                                    headers={'Authorization': 'Bearer ' + other['token']}).status_code, 200)
+
+    def test_banned_user_cannot_open_ws_even_with_a_ticket_in_hand(self):
+        """票据 30 秒内有效：先拿票再被封，这条连接必须连不上。"""
+        ticket = self.c.post('/api/chat/ticket', headers=self.auth).json()
+        self.assertTrue(ticket.get('ticket'))
+        self._set_ban(self.signup['id'])
+        with self.assertRaises(Exception):
+            with self.c.websocket_connect('/ws/chat?ticket=' + ticket['ticket']) as ws:
+                ws.receive_json()
+
+    def test_keys_can_live_outside_the_database_dir_and_say_when_rebuilt(self):
+        """后台要读同一个库文件，密钥就不能留在那个目录里；被新建过也必须说得出。"""
+        import shutil
+        from pathlib import Path
+        key_dir = Path(self.tmp.name) / 'KEYS'
+        shutil.rmtree(key_dir, ignore_errors=True)
+        key_dir.mkdir()          # 部署时这个目录由 bootstrap 建；缺了就要人看见，不在函数里偷偷补
+        self.m.KEY_DIR = str(key_dir)
+        self.m._KEYS_REGENERATED.clear()
+        first = self.m.media_key()
+        self.assertTrue((key_dir / 'media-signing.key').is_file(), '密钥没落到 KEY_DIR')
+        self.assertFalse((Path(self.m.DB_PATH).parent / 'media-signing.key').exists(),
+                         '业务库目录里还留着密钥，容器挂载就一定能读到')
+        self.assertEqual(self.m._KEYS_REGENERATED, {'media-signing.key'})
+        self.assertIn('media-signing.key', self.c.get('/health/ready').json()['keys']['regenerated'])
+        second = self.m.media_key()
+        self.assertEqual(first, second, '第二次调用把密钥换了，所有已签名链接会当场失效')
+        self.assertEqual(self.m._KEYS_REGENERATED, {'media-signing.key'}, '新建过却"忘掉"了')
+        self.m.ws_secret()
+        ready = self.c.get('/health/ready').json()['keys']
+        self.assertTrue(ready['isolated'], '健康检查没看出密钥目录已隔离')
+        self.assertEqual(sorted(ready['present']), ['media-signing.key', 'ws-secret.key'])
+        # 健康检查是公开接口：可以报"有没有、新建过没"，但不能把密钥本身吐出去
+        self.assertNotIn(first, self.c.get('/health/ready').content, '健康检查泄了密钥内容')
+
+
 if __name__=='__main__':unittest.main(verbosity=2)

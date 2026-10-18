@@ -100,6 +100,7 @@ function showUpdateWall(policy) {
                 if (res && res.status === 403 && typeof res.clone === "function") {
                     res.clone().json().then(policy => {
                         if (policy && policy.code === "update_required") showUpdateWall(policy);
+                        else if (policy && policy.code === "account_banned") handleAccountBanned(policy.detail);
                     }).catch(() => {});
                 }
             } catch (e) {}
@@ -541,6 +542,13 @@ function postApi(path, body, opts) {
     const task=rawPostApi(path,body,opts).then(data=>{uncertainWrites.delete(key);return data;})
         .finally(()=>pendingWrites.delete(key));
     pendingWrites.set(key,task);return task;
+}
+
+// 被封号时把话说清楚：只报"网络不通"或让人停在空白页，等于把服务端的决定藏起来了。
+function handleAccountBanned(detail) {
+    localStorage.removeItem(TOKEN_KEY);
+    callNativeToast("⚠️ " + (detail || "该账号已被停用"));
+    openAuthModal();
 }
 
 // 打卡类操作的共用收尾：说清这条没存，登录失效时把人拉回登录

@@ -2268,6 +2268,48 @@ def main():
           "recalled_at" in srv_txt and "bubble_theme" in srv_txt
           and 'data-t="' in _fjs and "cm.myTheme" in _fjs, "")
 
+    # ---- 后台上线前置：封号要真的有人执行，密钥不能被后台读到 ----
+    def _func_src(text, head):
+        seg = text.split(head, 1)[1] if head in text else ""
+        cut = re.search(r"\n(?:@app\.|def |class |# )", seg)
+        return seg[:cut.start()] if cut else seg
+
+    _gcu = _func_src(srv_txt, "def get_current_user(")
+    _login_fn = _func_src(srv_txt, "def login(")
+    _ws_fn = _func_src(srv_txt, "async def chat_socket(")
+    check("users 用补列方式拿到封号两列（不重建表、不动现有数据）",
+          '("banned_at", "TEXT")' in srv_txt and '"ban_reason", "TEXT NOT NULL DEFAULT' in srv_txt, "")
+    check("登录态校验里真的判了封号", "banned_at" in _gcu and "AccountBanned" in _gcu, _gcu[:120])
+    # 这条是 T-80 的静态那一半：get_current_user 每个 /api/ 请求都跑，多一次查询＝全站多一次锁竞争
+    check("封号判定并进已有那条查询，没有多出一次数据库往返",
+          _gcu.count("conn.execute(") == 1 and "SELECT u.*" in _gcu,
+          "execute 次数=%d" % _gcu.count("conn.execute("))
+    check("登录接口也拦封号，且排在口令校验之后（不给免口令可探的信号）",
+          "banned_at" in _login_fn and "AccountBanned" in _login_fn
+          and _login_fn.find("用户名或密码错误") < _login_fn.find("banned_at"), "")
+    check("私信建连也认封号（手里已有票据也连不上，且复用原来那次存在性查询）",
+          "SELECT banned_at FROM users WHERE id=?" in _ws_fn and "SELECT 1 FROM users" not in _ws_fn
+          and "4403" in _ws_fn, "execute 次数=%d，封号在切片里=%s" % (_ws_fn.count("conn.execute("), "banned_at" in _ws_fn))
+    check("封号响应带机器码，前端不拿 403 当凭据",
+          '"code": "account_banned"' in srv_txt and "@app.exception_handler(AccountBanned)" in srv_txt, "")
+    check("前端认这个机器码并清会话、说清原因",
+          'policy.code === "account_banned"' in js_txt and "handleAccountBanned" in js_txt
+          and "localStorage.removeItem(TOKEN_KEY)" in js_txt.split("function handleAccountBanned")[1][:300], "")
+    check("签名密钥改从 KEY_DIR 取，业务库目录里不再留密钥",
+          'os.environ.get("QINGSU_KEY_DIR"' in srv_txt and 'os.path.join(KEY_DIR, name)' in srv_txt
+          and 'DB_DIR, "media-signing.key"' not in srv_txt and 'DB_DIR, "ws-secret.key"' not in srv_txt, "")
+    check("密钥被新建过要说得出：日志、健康检查两处都留痕",
+          "_KEYS_REGENERATED.add(name)" in srv_txt and "key_regenerated" in srv_txt
+          and '"regenerated": sorted(_KEYS_REGENERATED)' in srv_txt, "")
+    check("健康检查报密钥隔离状态与存在性，但不报内容",
+          '"isolated": os.path.abspath(KEY_DIR) != os.path.abspath(DB_DIR)' in srv_txt
+          and '"present"' in srv_txt, "")
+    # 口径钉住：分享链接走自己的开关，封号不牵连访客页（写清楚是为了下次改动是有意的）
+    _share_fn = _func_src(srv_txt, "def check_share(")
+    check("分享页不受封号牵连（口径：分享有自己的开关与有效期）",
+          "share_secret" in _share_fn and "banned_at" not in _share_fn,
+          "切片长度=%d；share_secret 不在里面说明取到的不是 check_share 的函数体，判据在空转" % len(_share_fn))
+
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (
         "变异样本(HEAD 改动前)" if mutant else "当前源码",

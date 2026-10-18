@@ -27,9 +27,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 from pydantic import BaseModel, Field, field_validator
 
 DB_DIR = os.environ.get("QINGSU_DB_DIR", "/opt/qingsu/data")
+# 签名密钥与业务库分目录：后台的 Directus 容器要挂 DB_DIR 读写同一个库文件，
+# 密钥留在这里面它就一定读得到。不设 QINGSU_KEY_DIR 时行为与以前完全一致。
+KEY_DIR = os.environ.get("QINGSU_KEY_DIR", DB_DIR)
 UPLOAD_DIR = os.environ.get("QINGSU_UPLOAD_DIR", "/opt/qingsu/uploads")
 WEB_DIR = os.environ.get("QINGSU_WEB_DIR", "/opt/qingsu/web")
 os.makedirs(DB_DIR, exist_ok=True)
+os.makedirs(KEY_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(WEB_DIR, exist_ok=True)
 
@@ -276,6 +280,10 @@ def migrate_db():
         ("pw_salt", "TEXT"),
         ("token_hash", "TEXT"),
         ("share_secret", "TEXT"),
+        # 后台的"封号"要有落点。用时间戳而不是布尔值：除了"封没封"还得答得出
+        # "什么时候封的、为什么"，以后要加"到期自动解封"也复用同一列。
+        ("banned_at", "TEXT"),
+        ("ban_reason", "TEXT NOT NULL DEFAULT ''"),
     ])
     _ensure_columns(c, "profiles", [
         ("day_mode", "TEXT DEFAULT 'rest'"),
@@ -834,6 +842,19 @@ def hash_pw(pw: str) -> str:
     """仅用于校验历史账号的旧 sha256 口令；新口令一律走 make_pw。"""
     return hashlib.sha256(pw.encode()).hexdigest()
 
+class AccountBanned(HTTPException):
+    """封号。detail 给人看，code 给客户端判定——和强更门那套约定完全一致，
+    因为 403 在这个服务里还用于"只能删自己的帖子"等业务拒绝，前端不能拿状态码当凭据。"""
+
+    def __init__(self, reason):
+        super().__init__(status_code=403, detail="该账号已被停用：" + (reason or "详见站内说明"))
+
+
+@app.exception_handler(AccountBanned)
+def account_banned_response(request, exc: AccountBanned):
+    return JSONResponse({"detail": exc.detail, "code": "account_banned"}, status_code=403)
+
+
 def get_current_user(authorization: Optional[str] = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="请先登录")
@@ -843,6 +864,10 @@ def get_current_user(authorization: Optional[str] = Header(None)):
     conn.close()
     if not row:
         raise HTTPException(status_code=401, detail="登录已失效，请重新登录")
+    # 封号判定并在这条已有查询上，不另开一次 DB 往返：这个函数每个 /api/ 请求都跑，
+    # 为后台多查一次就等于全站每次请求多一次锁竞争。
+    if row["banned_at"]:
+        raise AccountBanned(row["ban_reason"])
     user=dict(row); user["_session_hash"]=token_hash
     return user
 
@@ -1067,6 +1092,12 @@ def login(req: LoginReq, request: Request):
         conn.close()
         # 不区分"用户不存在"与"密码错"，免得给枚举留信号
         raise HTTPException(status_code=400, detail="用户名或密码错误")
+
+    # 封号判定放在口令校验之后：先判就会让"这个用户名被封过"变成免口令可探的信号，
+    # 和上面刻意不区分"不存在/密码错"的口径冲突。只有本人（持正确口令）才看得到原因。
+    if user["banned_at"]:
+        conn.close()
+        raise AccountBanned(user["ban_reason"])
 
     token = new_token()
     c.execute("DELETE FROM sessions WHERE expires_at<=?", (int(time.time()),))
@@ -3262,13 +3293,30 @@ def logout(user: dict = Depends(get_current_user)):
     finally: conn.close()
     return {"code":0}
 
-def media_key():
-    path=os.path.join(DB_DIR,"media-signing.key")
+_KEYS_REGENERATED = set()
+
+
+def _load_or_create_key(name):
+    """读签名密钥；文件不在时新建，并把"这是新建的"这件事留下可见痕迹。
+
+    静默重建是这台机器上最难查的一类故障：图片链接全部 403、私信连不上，
+    而每一步看起来都"正常返回"。所以日志、/health/ready 两处都要说清楚。
+    """
+    path = os.path.join(KEY_DIR, name)
     try:
-        fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-        with os.fdopen(fd,"wb") as f: f.write(secrets.token_bytes(32))
-    except FileExistsError: pass
-    with open(path,"rb") as f: return f.read()
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(secrets.token_bytes(32))
+        _KEYS_REGENERATED.add(name)
+        logging.warning("key_regenerated name=%s 此前签发的签名链接与 WS 票据已全部失效", name)
+    except FileExistsError:
+        pass
+    with open(path, "rb") as handle:
+        return handle.read()
+
+
+def media_key():
+    return _load_or_create_key("media-signing.key")
 
 def signed_photo(url,share_user=None):
     name=os.path.basename(url.split("?",1)[0]); expiry=int(time.time())+900
@@ -3350,6 +3398,12 @@ def health():
     # 社区这几条外部依赖必须"通没通"一眼看得见：属地库没装、Redis 掉了、
     # WS 握手一直被拒，都属于"功能看着在、其实早就没人用得了"的那一类。
     info["geoip"] = geoip.status()
+    # 密钥是不是被"静默重建"过，必须在这里看得见：图片链接全体失效、私信连不上，
+    # 追根溯源常常是某个文件不在了又被自动补上。只报存在性与"是否新建过"，不报内容。
+    info["keys"] = {"isolated": os.path.abspath(KEY_DIR) != os.path.abspath(DB_DIR),
+                    "regenerated": sorted(_KEYS_REGENERATED),
+                    "present": {n: os.path.exists(os.path.join(KEY_DIR, n))
+                                for n in ("media-signing.key", "ws-secret.key")}}
     info["chat"] = {"online": len(_WS_HUB), "sockets": int(sum(len(v) for v in _WS_HUB.values())),
                     "rejected": int(_ws_stats["rejected"]), "redis": bool(redis_up())}
     return info
@@ -3447,15 +3501,7 @@ FEEDBACK_RATE_LIMIT = 5
 
 
 def ws_secret():
-    path = os.path.join(DB_DIR, "ws-secret.key")
-    try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(secrets.token_bytes(32))
-    except FileExistsError:
-        pass
-    with open(path, "rb") as f:
-        return f.read()
+    return _load_or_create_key("ws-secret.key")
 
 
 _presence_mem = {}
@@ -4403,12 +4449,14 @@ async def chat_socket(ws: WebSocket, ticket: str = ""):
     uid = int(payload["u"])
     conn = get_db()
     try:
-        alive = conn.execute("SELECT 1 FROM users WHERE id=?", (uid,)).fetchone()
+        # 票据是 30 秒一次性，HTTP 侧发票时已经过封号判定，但"先拿到票、随后被封"这
+        # 30 秒内还能连上来；这里顺手在同一次查询里把封号一起看了，不多跑一次 DB。
+        alive = conn.execute("SELECT banned_at FROM users WHERE id=?", (uid,)).fetchone()
     finally:
         conn.close()
-    if not alive:
+    if not alive or alive["banned_at"]:
         _ws_stats["rejected"] += 1
-        await ws.close(code=4401)
+        await ws.close(code=4403 if (alive and alive["banned_at"]) else 4401)
         return
     await ws.accept()
     _WS_HUB.setdefault(uid, []).append(ws)

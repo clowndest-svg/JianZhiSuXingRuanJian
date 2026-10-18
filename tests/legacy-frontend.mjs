@@ -1749,6 +1749,49 @@ try {
 }
 }
 
+// ===== r151：后台封号之后，客户端要清会话、说清原因，且不能把普通 403 误判成封号 =====
+try {
+  const banResp = (body) => ({ ok: false, status: 403, clone() { return this; }, json: async () => body });
+
+  log.toasts.length = 0;
+  run(h.context, `var authOpened=0; openAuthModal=function(){authOpened++;};
+                  localStorage.setItem("QINGSU_AUTH_TOKEN","tk-ban"); state.token="tk-ban";`);
+  sandbox.__fetchHandler = () => Promise.resolve(banResp(
+    { detail: "该账号已被停用：发布违规内容", code: "account_banned" }));
+  run(h.context, `fetch("/api/dashboard",{headers:{Authorization:"Bearer tk-ban"}});`);
+  await drain(8);
+  check("封号会清掉本机登录态",
+        run(h.context, `localStorage.getItem("QINGSU_AUTH_TOKEN")`) === null,
+        String(run(h.context, `localStorage.getItem("QINGSU_AUTH_TOKEN")`)));
+  check("封号原因原样播报，不说成网络不通",
+        log.toasts.some(t => t.includes("已被停用") && t.includes("发布违规内容")),
+        log.toasts.join(" | "));
+  check("封号之后把人带回登录页", run(h.context, "authOpened") >= 1, String(run(h.context, "authOpened")));
+
+  // 对照组：这个服务里 403 还用于"只能删自己的帖子"，那种拒绝不许清会话
+  log.toasts.length = 0;
+  run(h.context, `authOpened=0; localStorage.setItem("QINGSU_AUTH_TOKEN","tk2");`);
+  sandbox.__fetchHandler = () => Promise.resolve(banResp({ detail: "只能删自己的帖子" }));
+  run(h.context, `fetch("/api/community/comments/1",{method:"DELETE"});`);
+  await drain(8);
+  check("没有机器码的普通 403 不被当成封号（登录态必须还在）",
+        run(h.context, `localStorage.getItem("QINGSU_AUTH_TOKEN")`) === "tk2"
+        && run(h.context, "authOpened") === 0,
+        `token=${run(h.context, "localStorage.getItem(\"QINGSU_AUTH_TOKEN\")")} authOpened=${run(h.context, "authOpened")}`);
+
+  // 对照组：强更门那套不能被封号逻辑抢走（两者都是 403，靠 code 区分）
+  log.toasts.length = 0;
+  sandbox.__fetchHandler = () => Promise.resolve(banResp(
+    { detail: "当前 App 版本已停用，请更新到 v1.9.9 后再继续使用", code: "update_required", min_build: 31 }));
+  run(h.context, `fetch("/api/dashboard",{headers:{Authorization:"Bearer tk2"}});`);
+  await drain(8);
+  check("强更门仍然走门的那条路，没被误判成封号",
+        run(h.context, `localStorage.getItem("QINGSU_AUTH_TOKEN")`) === "tk2",
+        String(run(h.context, `localStorage.getItem("QINGSU_AUTH_TOKEN")`)));
+} catch (e) {
+  check("r151 判据块本身跑通了", false, String(e && e.message));
+}
+
 const bad = R.filter(x => !x[1]);
 console.log(`\n=== ${MUTANT ? "变异样本(HEAD 改动前)" : "当前源码"}：${R.length} 条，绿 ${R.length - bad.length}，红 ${bad.length} ===`);
 for (const [name, ok, detail] of R) console.log(`  ${ok ? "绿" : "红"} ${name}${ok ? "" : "  -> " + detail}`);
