@@ -1,17 +1,25 @@
+// 国内本地先走阿里云镜像；GitHub Actions 上阿里云偶发 502 会让整次构建直接失败，
+// 所以 CI 里改成官方仓库优先（CI=true 由 GitHub Actions 自动注入）。
 pluginManagement {
+    def ciBuild = System.getenv("CI") == "true"
     repositories {
-        maven { url 'https://maven.aliyun.com/repository/google' }
-        maven { url 'https://maven.aliyun.com/repository/public' }
+        if (!ciBuild) {
+            maven { url 'https://maven.aliyun.com/repository/google' }
+            maven { url 'https://maven.aliyun.com/repository/public' }
+        }
         google()
         mavenCentral()
         gradlePluginPortal()
     }
 }
 dependencyResolutionManagement {
+    def ciBuild = System.getenv("CI") == "true"
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        maven { url 'https://maven.aliyun.com/repository/google' }
-        maven { url 'https://maven.aliyun.com/repository/public' }
+        if (!ciBuild) {
+            maven { url 'https://maven.aliyun.com/repository/google' }
+            maven { url 'https://maven.aliyun.com/repository/public' }
+        }
         google()
         mavenCentral()
     }
