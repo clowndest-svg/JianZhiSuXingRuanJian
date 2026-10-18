@@ -3617,6 +3617,7 @@ def _post_card(conn, row, me):
             "author": _user_brief(conn, row["user_id"]),
             "region": row["region"] or "",
             "created_at": row["created_at"],
+            "edited_at": row["edited_at"],
             "like_count": int(row["like_count"]),
             "comment_count": int(row["comment_count"]),
             "liked_by_me": liked,
@@ -3787,6 +3788,33 @@ def delete_post(post_id: int, user: dict = Depends(get_current_user)):
         conn.execute("UPDATE posts SET status='deleted' WHERE id=?", (post_id,))
         conn.commit()
         return {"code": 0}
+    finally:
+        conn.close()
+
+
+class PostEditReq(ValidatedModel):
+    text: str
+
+
+@app.patch("/api/community/posts/{post_id}")
+def edit_post(post_id: int, req: PostEditReq, user: dict = Depends(get_current_user)):
+    """作者改自己的帖子。只改正文与 edited_at；点赞/评论/属地一概不碰。"""
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM posts WHERE id=? AND status='open'", (post_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="帖子不存在或已删除")
+        if int(row["user_id"]) != int(user["id"]):
+            raise HTTPException(status_code=403, detail="只能改自己的帖子")
+        try:
+            body = community.clean_body(req.text, 1200, "帖子内容")
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error))
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("UPDATE posts SET body=?, edited_at=? WHERE id=?", (body, stamp, post_id))
+        conn.commit()
+        row = conn.execute("SELECT * FROM posts WHERE id=?", (post_id,)).fetchone()
+        return {"code": 0, "post": _post_card(conn, row, user)}
     finally:
         conn.close()
 

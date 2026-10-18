@@ -1792,6 +1792,54 @@ try {
   check("r151 判据块本身跑通了", false, String(e && e.message));
 }
 
+// ===== r152：私信左右分侧与 id 容错（features.js 需要 app.js 的全局）=====
+try {
+  const F152_REL = "app/src/main/assets/features.js";
+  const feat152 = MUTANT ? execFileSync("git", ["show", MUT_REF + ":" + F152_REL],
+      { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+    : fs.readFileSync(path.join(ROOT, F152_REL), "utf8");
+  const h152 = makeCtx();
+  loadJs(h152.context);
+  const clean152 = feat152.replace(/^\s*let localGuidanceRows\s*=\s*\[\s*\]\s*;\s*$/m, "/* 由 app.js 声明 */");
+  run(h152.context, clean152);
+  const r152 = code => run(h152.context, code);
+
+  check("id 比较能容下字符串/数字两种形态",
+        r152('qsSameId(2,"2")') === true && r152('qsSameId("x",2)') === false, "");
+  r152('state.user={id:"2",username:"u",nickname:"u"}; cm.thread={partner:{id:3,nickname:"p"}}; cm.myTheme="green";');
+  const mineHtml = r152('cmBubbleHTML({id:9,from_id:2,body:"hi",created_at:"2026-10-18 12:00:00"},"2")');
+  const theirHtml = r152('cmBubbleHTML({id:10,from_id:3,body:"yo",created_at:"2026-10-18 12:00:00"},"2")');
+  check("自己的消息靠右：dm-row me 且气泡在头像前",
+        mineHtml.indexOf("dm-row me") >= 0
+        && mineHtml.indexOf("cm-bubble") < mineHtml.indexOf("dm-avatar"), mineHtml.slice(0, 140));
+  check("对方的消息靠左：dm-row them 且头像在气泡前",
+        theirHtml.indexOf("dm-row them") >= 0
+        && theirHtml.indexOf("dm-avatar") < theirHtml.indexOf("cm-bubble"), theirHtml.slice(0, 140));
+  check("撤回提示不再用气泡样式",
+        r152('cmBubbleHTML({id:11,from_id:3,recalled_at:"x",body:""},"2")').indexOf("dm-recall") >= 0, "");
+
+  // 页面栈 × 历史：用一个假 history 驱动真实的 openPage/closePage/popstate
+  r152('QS_PAGE_DEF.__t={title:"t",render:function(){}};' +
+       'history={stack:[],state:null,pushState:function(s){this.stack.push(s);this.state=s;},' +
+       'back:function(){this.stack.pop();this.state=this.stack[this.stack.length-1]||null;},' +
+       'go:function(n){while(n<0){this.stack.pop();n++;}this.state=this.stack[this.stack.length-1]||null;}};');
+  r152('openPage("__t",1);openPage("__t",2);');
+  check("打开两页 = 页面栈两层 + 历史两层",
+        r152('QS_PAGES.length+":"+history.stack.length') === "2:2", r152('QS_PAGES.length+":"+history.stack.length'));
+  r152('history.back();');
+  const pops = h152.listeners["popstate"] || [];
+  pops.forEach(fn => { try { fn(); } catch (e) {} });
+  check("浏览器返回一次，页面栈跟着回到一层",
+        r152('QS_PAGES.length') === 1 && r152('history.state && history.state.qsPage') === 1,
+        r152('QS_PAGES.length') + ":" + r152('history.state && history.state.qsPage'));
+  r152('qsCloseAllPages();');
+  check("切 tab 收层时历史也一起退回，不留幽灵页",
+        r152('QS_PAGES.length') === 0 && r152('history.stack.length') === 0,
+        r152('QS_PAGES.length') + ":" + r152('history.stack.length'));
+} catch (e) {
+  check("r152 判据块本身跑通了", false, String(e && e.message));
+}
+
 const bad = R.filter(x => !x[1]);
 console.log(`\n=== ${MUTANT ? "变异样本(HEAD 改动前)" : "当前源码"}：${R.length} 条，绿 ${R.length - bad.length}，红 ${bad.length} ===`);
 for (const [name, ok, detail] of R) console.log(`  ${ok ? "绿" : "红"} ${name}${ok ? "" : "  -> " + detail}`);

@@ -2310,6 +2310,29 @@ def main():
           "share_secret" in _share_fn and "banned_at" not in _share_fn,
           "切片长度=%d；share_secret 不在里面说明取到的不是 check_share 的函数体，判据在空转" % len(_share_fn))
 
+    # ---- r152：返回手势、帖子编辑、私信左右、评论排版 ----
+    check("页面栈接进 history（安卓返回键/侧滑不再直接退出 App）",
+          "history.pushState" in _fjs and "popstate" in _fjs
+          and "closePage(true)" in _fjs, "")
+    check("帖子编辑接口存在且只有作者能改",
+          '@app.patch("/api/community/posts/{post_id}")' in srv_txt
+          and "只能改自己的帖子" in srv_txt and "SET body=?, edited_at=?" in srv_txt, "")
+    check("帖子卡片带 edited_at（前端才能显示已编辑）",
+          '"edited_at": row["edited_at"]' in srv_txt, "")
+    check("自己/对方的 id 比较用 qsSameId（=== 会把字符串 id 判成别人）",
+          "function qsSameId" in _fjs and _fjs.count("qsSameId(") >= 4
+          and "m.from_id === me" not in _fjs and "p.author.id === (state.user" not in _fjs, "")
+    check("私信气泡整行分侧并带头像",
+          "dm-row" in _fjs and "dm-avatar" in _fjs and ".dm-row.me{justify-content:flex-end}" in _fcss, "")
+    check("对方气泡不再和聊天背景同色（截图里像没有气泡）",
+          ".cm-bubble.them{background:#fff" in _fcss and ".cm-bubbles.page{background:#EDEDED" in _fcss, "")
+    check("评论改成小红书式的小号文字操作",
+          "pd-cmt-meta" in _fjs and "pd-cmt-act" in _fjs and ".pd-cmt-meta{" in _fcss
+          and "class=\"pd-reply\"" not in _fjs, "")
+    check("详情页能就地编辑帖子（patchJson + 保存）",
+          "async function patchJson" in _fjs and "function editPostFromDetail" in _fjs
+          and "async function savePostEdit" in _fjs, "")
+
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (
         "变异样本(HEAD 改动前)" if mutant else "当前源码",

@@ -373,3 +373,39 @@ body.qs-page-open{overflow:hidden}
 .me-stat:active{background:#ECFDF5}
 .me-stat b{display:block;font-size:18px;font-weight:800;color:#0F172A;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .me-stat span{display:block;margin-top:2px;font-size:11.5px;color:#64748B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ── r152：私信按小红书整行排（头像+气泡，自己靠右）──────────────────
+   上一版只靠 align-self，对方气泡和聊天背景都是 #F1F5F9，
+   看起来就是"没有气泡、全在左边"——机主截图里正是这个样子。 */
+.cm-bubbles.page{background:#EDEDED;gap:14px;padding:16px 12px}
+.dm-row{display:flex;align-items:flex-start;gap:8px;width:100%}
+.dm-row.them{justify-content:flex-start}
+.dm-row.me{justify-content:flex-end}
+.dm-avatar{width:34px;height:34px;flex:0 0 34px;font-size:13px}
+.dm-row .cm-bubble{max-width:70%}
+.cm-bubble.them{background:#fff;color:#0F172A;border:1px solid #E3E6EA;border-bottom-left-radius:6px}
+.cm-bubble.me{background:#0A7A56;color:#fff;border-bottom-right-radius:6px}
+.dm-recall{align-self:center;color:#8A8F96;font-size:12px;padding:2px 10px;background:#E3E3E3;border-radius:999px}
+
+/* 输入框：去掉浏览器默认的蓝色聚焦框，跟整站一个形状 */
+.pl-foot input,.pl-foot textarea{border:0;outline:none;border-radius:999px;background:#F5F7F6;padding:10px 14px;font:inherit;color:#0F172A}
+.pl-foot input:focus,.pl-foot textarea:focus{outline:none;box-shadow:inset 0 0 0 1px #CFE9DC}
+
+/* ── r152：评论照小红书（头像+昵称+正文+小号文字操作，不做卡片不做大胶囊）── */
+.pd-cmt{padding:12px 0;border-top:0;border-bottom:1px solid #F1F3F5;gap:10px;cursor:default}
+.pd-cmt:last-of-type{border-bottom:0}
+.pd-cmt .cm-avatar.sm{width:34px;height:34px;flex:0 0 34px;font-size:13px}
+.pd-cmt-name{font-size:13px;font-weight:600;color:#5C6B62}
+.pd-cmt-text{margin-top:2px;font-size:15px;line-height:1.62}
+.pd-cmt-meta{margin-top:6px;font-size:12px;color:#94A3B8;display:flex;align-items:center;gap:14px}
+.pd-cmt-time{margin-right:auto}
+.pd-cmt-act{background:none;border:0;padding:0;font:inherit;font-size:12.5px;color:#64748B;cursor:pointer}
+.pd-cmt-act:hover{color:#0A7A56}
+.pd-cmt-act.pd-cmt-del{color:#B3261E}
+.pd-reply{display:none}
+
+/* 详情页内联编辑 */
+.pd-editor{margin-top:12px}
+.pd-editor textarea{width:100%;min-height:120px;border:1px solid #DDE5E0;border-radius:12px;padding:10px 12px;font:inherit;font-size:16px;line-height:1.7;resize:vertical;background:#fff;color:#0F172A;outline:none}
+.pd-editor textarea:focus{box-shadow:inset 0 0 0 1px #CFE9DC}
+.pd-editor-acts{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}

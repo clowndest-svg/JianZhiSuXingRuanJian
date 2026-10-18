@@ -940,6 +940,33 @@ class Integration(unittest.TestCase):
             self.assertIn(code, (401, 403), path + ' 不该免登录')
 
 
+    def test_edit_post_is_author_only_and_marks_edited(self):
+        """编辑入口是这一轮补的：只有作者能改，改完要有 edited_at，别人一个字都改不动。"""
+        a, aauth = self._member('editauthor')
+        b, bauth = self._member('editreader')
+        made = self.c.post('/api/community/posts', headers=aauth, json={'text': '第一版正文', 'images': []})
+        self.assertEqual(made.status_code, 200, made.text)
+        pid = made.json()['post']['id']
+        self.assertIsNone(self.c.get('/api/community/posts/%d' % pid, headers=aauth).json()['post'].get('edited_at'))
+        bad = self.c.patch('/api/community/posts/%d' % pid, headers=bauth, json={'text': '我要改别人的'})
+        self.assertEqual(bad.status_code, 403, bad.text)
+        empty = self.c.patch('/api/community/posts/%d' % pid, headers=aauth, json={'text': '   '})
+        self.assertIn(empty.status_code, (400, 422), empty.text)
+        ok = self.c.patch('/api/community/posts/%d' % pid, headers=aauth, json={'text': '第二版正文'})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertEqual(ok.json()['post']['body'], '第二版正文')
+        self.assertTrue(ok.json()['post'].get('edited_at'), '改完没记 edited_at')
+        detail = self.c.get('/api/community/posts/%d' % pid, headers=aauth).json()['post']
+        self.assertEqual(detail['body'], '第二版正文')
+        self.assertTrue(detail.get('edited_at'))
+        # 列表里也必须是新正文，不能只改详情
+        feed = self.c.get('/api/community/feed?tab=latest&limit=20', headers=aauth).json()['items']
+        self.assertEqual([x['body'] for x in feed if x['id'] == pid], ['第二版正文'])
+        gone = self.c.delete('/api/community/posts/%d' % pid, headers=aauth)
+        self.assertEqual(gone.status_code, 200)
+        self.assertEqual(self.c.patch('/api/community/posts/%d' % pid, headers=aauth,
+                                      json={'text': '删了还改'}).status_code, 404)
+
     def _set_ban(self, uid, at='2026-10-18T12:00:00Z', reason='发布违规内容'):
         """后台的封号动作最终就是改这两列；测试直接落库，绕开"运维 API 还没建"这件事。"""
         import sqlite3

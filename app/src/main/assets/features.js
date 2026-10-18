@@ -609,6 +609,10 @@ function resetCommunity() {
     paintNavBadge();
 }
 
+function qsSameId(a, b) {
+    const x = Number(a), y = Number(b);
+    return isFinite(x) && isFinite(y) && x === y;
+}
 function cmEl(id) { return document.getElementById(id); }
 function cmText(id, text) { const el = cmEl(id); if (el) el.textContent = text || ""; }
 
@@ -640,12 +644,20 @@ function openPage(name, arg) {
     const def = QS_PAGE_DEF[name];
     if (!def) return;
     QS_PAGES.push({ name: name, arg: arg, title: def.title, render: def.render });
+    // 给每一页补一条历史记录：安卓的返回键/侧滑手势走的是 WebView.canGoBack，
+    // 没有这条记录时它只能退出 App（机主截图里的"再按一次退出"）。
+    try { history.pushState({ qsPage: QS_PAGES.length }, ""); } catch (e) {}
     qsRenderTop();
 }
 
 /** 关掉最上面一页；栈空时整层收起。返回 true 表示这一层还开着（给硬件返回键判断用）。 */
-function closePage() {
+function closePage(fromHistory) {
     if (!QS_PAGES.length) return false;
+    if (!fromHistory) {
+        // 点顶栏的返回时也先退历史，真正的出栈交给 popstate——
+        // 否则历史里会留下一条"已经关掉的页"，再按返回要空按一次。
+        if (history.state && history.state.qsPage) { history.back(); return true; }
+    }
     QS_PAGES.pop();
     if (QS_PAGES.length) { qsRenderTop(); return true; }
     const layer = cmEl("page-layer");
@@ -656,11 +668,20 @@ function closePage() {
 
 /** 真在页面里（不是被压在栈底下）才算"当前页"，切 tab 时要先把栈清空。 */
 function qsPageOpen() { return QS_PAGES.length > 0; }
-function qsCloseAllPages() { while (QS_PAGES.length) { QS_PAGES.pop(); }
+function qsCloseAllPages() {
+    const depth = QS_PAGES.length;
+    while (QS_PAGES.length) { QS_PAGES.pop(); }
+    // 切 tab 时把页面层整个收掉：历史也要一起退回去，不然返回键会按到"幽灵页"
+    if (depth) { try { history.go(-depth); } catch (e) {} }
     const layer = cmEl("page-layer");
     if (layer) layer.hidden = true;
     document.body.classList.remove("qs-page-open");
 }
+
+window.addEventListener("popstate", function () {
+    const depth = (history.state && history.state.qsPage) || 0;
+    while (QS_PAGES.length > depth) closePage(true);
+});
 
 function qsSetFoot(html) {
     const foot = cmEl("pl-foot");
@@ -784,7 +805,7 @@ function cmCardHTML(p, withId) {
             '<img src="' + escapeHtml(API_BASE + u) + '" alt="帖子配图" loading="lazy" onclick="viewPostImage(\'' +
             escapeHtml(API_BASE + u).replace(/'/g, "%27") + '\')">').join("") + "</div>"
         : "";
-    const mine = p.author && p.author.id === (state.user && state.user.id);
+    const mine = p.author && qsSameId(p.author.id, state.user && state.user.id);
     return '<article class="cm-card"' + (withId ? ' id="post-' + p.id + '"' : '') + ' data-post="' + p.id + '">'
         + '<div class="cm-card-head">'
         + '<button type="button" class="cm-who-btn" onclick="openMemberHome(' + (p.author ? p.author.id : 0) + ')">'
@@ -936,6 +957,22 @@ async function toggleLike(id, btn) {
     }
 }
 
+/* PATCH 同样单独走一条：帖子编辑用它 */
+async function patchJson(path, body) {
+    const r = await fetch(API_BASE + path, {
+        method: "PATCH",
+        headers: { "Authorization": "Bearer " + state.token, "Content-Type": "application/json" },
+        body: JSON.stringify(body || {})
+    });
+    if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        const err = new Error(j && j.detail ? j.detail : ("HTTP " + r.status));
+        err.status = r.status;
+        throw err;
+    }
+    return r.json().catch(() => ({}));
+}
+
 /* postApi 只会 POST，删除要单独走一条，失败原因照样要说出来 */
 async function deleteJson(path) {
     const r = await fetch(API_BASE + path, {
@@ -980,20 +1017,21 @@ async function qsRenderPost(id) {
     if (!p) { body.innerHTML = '<p class="cm-state">这条帖子已经不在了。</p>'; return; }
     cm.postId = Number(id);
     cmText("pl-title", cmName(p.author) + " 的帖子");
-    const mine = p.author && state.user && p.author.id === state.user.id;
+    const mine = p.author && qsSameId(p.author.id, state.user && state.user.id);
     const imgs = (p.images || []).length
         ? '<div class="pd-imgs' + (p.images.length === 1 ? " one" : "") + '">' + p.images.map(u =>
             '<img src="' + escapeHtml(API_BASE + u) + '" alt="帖子配图" onclick="viewPostImage(\'' +
             escapeHtml(API_BASE + u).replace(/'/g, "%27") + '\')">').join("") + "</div>"
         : "";
+    // 评论照小红书：头像在左、昵称+正文+时间，操作是小号文字按钮，不做卡片不做大胶囊
     const comments = (r.comments || []).map(c => '<div class="pd-cmt">'
         + '<span class="cm-avatar sm">' + cmAvatarInner(c.author) + "</span>"
         + '<div class="pd-cmt-main"><div class="pd-cmt-name">' + escapeHtml(cmName(c.author)) + "</div>"
         + '<div class="pd-cmt-text">' + escapeHtml(c.body) + "</div>"
-        + '<div class="pd-cmt-sub"><span>' + cmRegionTag(c.region) + " · " + escapeHtml(cmAgo(c.created_at)) + "</span>"
-        + '<button type="button" class="pd-reply" onclick="setReplyTarget(' + c.id + ",'" +
-          escapeHtml(cmName(c.author)).replace(/'/g, "%27") + '\')">回复</button>'
-        + (c.deletable ? '<button type="button" class="pd-reply" onclick="removeComment(' + c.id + ',' + p.id + ')">删除</button>' : "")
+        + '<div class="pd-cmt-meta"><span class="pd-cmt-time">' + cmRegionTag(c.region) + " · " + escapeHtml(cmAgo(c.created_at)) + "</span>"
+        + '<button type="button" class="pd-cmt-act" onclick="setReplyTarget(' + c.id + ",'" +
+          escapeHtml(cmName(c.author)).replace(/'/g, "%27") + "\')\">回复</button>"
+        + (c.deletable ? '<button type="button" class="pd-cmt-act pd-cmt-del" onclick="removeComment(' + c.id + ',' + p.id + ')\">删除</button>' : "")
         + "</div></div></div>").join("");
     body.innerHTML = '<article class="pd-post">'
         + '<div class="pd-who"><button type="button" class="cm-who-btn" onclick="openPage(\'member\',' + (p.author ? p.author.id : 0) + ')">'
@@ -1005,13 +1043,15 @@ async function qsRenderPost(id) {
             (p.followed_by_me ? "已关注" : "关注") + "</button>")
         + "</div>"
         + '<div class="pd-text">' + escapeHtml(p.body) + "</div>" + imgs
-        + '<div class="pd-meta">' + escapeHtml(cmTime(p.created_at)) + " · " + cmRegionTag(p.region) + "</div>"
+        + '<div class="pd-meta">' + escapeHtml(cmTime(p.created_at)) + " · " + cmRegionTag(p.region)
+        + (p.edited_at ? " · 已编辑" : "") + "</div>"
         + '<div class="pd-acts">'
         + '<button type="button" class="td-mini" aria-pressed="' + (p.liked_by_me ? "true" : "false") + '" '
         + 'onclick="toggleLike(' + p.id + ',this)">❤ 赞 ' + Number(p.like_count) + "</button>"
         + '<button type="button" class="td-mini" onclick="focusCommentInput()">💬 评论 ' + Number(p.comment_count) + "</button>"
         + (p.author && !mine ? '<button type="button" class="td-mini" onclick="openDM(' + p.author.id + ')">私信 TA</button>' : "")
-        + (mine ? '<button type="button" class="td-mini pd-danger" style="margin-left:auto" onclick="deletePostFromDetail(' + p.id + ')">删除</button>' : "")
+        + (mine ? '<button type="button" class="td-mini" onclick="editPostFromDetail(' + p.id + ')">编辑</button>'
+            + '<button type="button" class="td-mini pd-danger" onclick="deletePostFromDetail(' + p.id + ')">删除</button>' : "")
         + "</div></article>"
         + '<h3 class="pd-sec">评论 ' + Number(p.comment_count) + "</h3>"
         + (comments || '<p class="td-empty">还没有人评论，说第一句。</p>');
@@ -1019,6 +1059,34 @@ async function qsRenderPost(id) {
         '" placeholder="' + (cmReplyTo ? "回复 @" + escapeHtml(cmReplyTo.name) : "友善一点，别报体重之外的数字") +
         '" aria-label="评论内容" onkeydown="if(event.key===\'Enter\'){event.preventDefault();submitComment(' + p.id + ');}">'
         + '<button type="button" class="td-btn" onclick="submitComment(' + p.id + ')">发送</button>');
+}
+
+function editPostFromDetail(id) {
+    const art = document.querySelector(".pd-post");
+    if (!art) return;
+    const textEl = art.querySelector(".pd-text");
+    if (!textEl || art.querySelector(".pd-editor")) return;
+    const original = textEl.textContent || "";
+    textEl.outerHTML = '<div class="pd-editor"><textarea id="pd-edit-text" maxlength="1200" aria-label="编辑帖子">'
+        + escapeHtml(original) + "</textarea>"
+        + '<div class="pd-editor-acts"><button type="button" class="td-btn td-btn-quiet" onclick="qsRenderPost(' + id + ')">取消</button>'
+        + '<button type="button" class="td-btn" onclick="savePostEdit(' + id + ')">保存</button></div></div>';
+    const area = cmEl("pd-edit-text");
+    if (area) { area.focus(); area.setSelectionRange(area.value.length, area.value.length); }
+}
+
+async function savePostEdit(id) {
+    const area = cmEl("pd-edit-text");
+    const text = ((area && area.value) || "").trim();
+    if (!text) { callNativeToast("内容不能为空"); return; }
+    try {
+        const r = await patchJson("/api/community/posts/" + id, { text: text });
+        const item = cm.items.find(x => x.id === id);
+        if (item && r.post) { item.body = r.post.body; item.edited_at = r.post.edited_at; }
+        renderFeed();
+        qsRenderPost(id);
+        callNativeToast("已保存");
+    } catch (e) { callNativeToast("没保存：" + (e.message || "网络不通")); }
 }
 
 function focusCommentInput() {
@@ -1374,17 +1442,23 @@ function paintThread() {
 }
 
 function cmBubbleHTML(m, me, pending) {
-    const mine = m.from_id === me;
+    const mine = qsSameId(m.from_id, me);
     if (m.recalled_at) {
-        return '<div class="cm-bubble recalled">' + (mine ? "你撤回了一条消息" : "对方撤回了一条消息") + "</div>";
+        return '<div class="dm-recall">' + (mine ? "你撤回了一条消息" : "对方撤回了一条消息") + "</div>";
     }
     const mid = Number(m.id || 0);
-    return '<div class="cm-bubble ' + (mine ? "me" : "them") + (pending ? " pending" : "") + '"'
+    const who = mine ? (state.user || {}) : ((cm.thread && cm.thread.partner) || {});
+    const avatar = '<span class="cm-avatar dm-avatar">' + cmAvatarInner(who) + "</span>";
+    const bubble = '<div class="cm-bubble ' + (mine ? "me" : "them") + (pending ? " pending" : "") + '"'
         + (mine && cm.myTheme && cm.myTheme !== "green" ? ' data-t="' + escapeHtml(cm.myTheme) + '"' : "")
         + ' data-mid="' + mid + '" data-mine="' + (mine ? 1 : 0) + '"'
         + ' oncontextmenu="return qsBubbleMenu(event,' + mid + ')"'
         + ' ontouchstart="qsBubbleHold(event,' + mid + ')" ontouchend="qsBubbleCancel()" ontouchmove="qsBubbleCancel()">'
         + escapeHtml(m.body) + "<time>" + escapeHtml(pending ? "发送中" : cmAgo(m.created_at)) + "</time></div>";
+    // 自己发的靠右、对方靠左，各带一个头像——小红书的私信就是这条规矩；
+    // 只靠 align-self 时气泡和背景同色，看起来像"没有气泡"（截图里的样子）。
+    return '<div class="dm-row ' + (mine ? "me" : "them") + '">'
+        + (mine ? bubble + avatar : avatar + bubble) + "</div>";
 }
 
 /* 气泡菜单：右击（桌面）或长按（手机）都能出，给"复制"和"撤回"。
@@ -1407,7 +1481,7 @@ function qsShowMenu(anchor, mid, x, y) {
     const m = qsFindBubble(mid);
     if (!m || !anchor) return;
     const me = state.user && state.user.id;
-    const mine = m.from_id === me;
+    const mine = qsSameId(m.from_id, me);
     const menu = document.createElement("div");
     menu.id = "bubble-menu";
     menu.className = "bubble-menu";
