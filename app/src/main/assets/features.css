@@ -438,3 +438,10 @@ body[data-tab="me"] #floating-dl-btn{display:none}
 @media (max-width:760px){ #floating-dl-btn{display:none !important} }
 .tool-dialog .td-close{border-radius:50%}
 @media (max-width:480px){ .brand-tag{display:none} }
+
+/* r153：宽屏（未切电脑版）时内容不再横向拉满，居中限宽更耐看 */
+@media (min-width:900px){
+  body:not(.desktop-view) main,
+  body:not(.desktop-view) nav{max-width:960px;margin-left:auto;margin-right:auto}
+  body:not(.desktop-view) .me-stats,body:not(.desktop-view) .td-seg{max-width:780px}
+}
