@@ -5,7 +5,9 @@
 
 /* ---------- 对话框外壳：标题与操作区固定，中间滚动 ---------- */
 .tool-dialog:not([open]){display:none}
-.tool-dialog{box-sizing:border-box;display:flex;flex-direction:column;width:min(94vw,560px);max-height:88dvh;border:0;border-radius:18px;padding:0;background:#fff;color:#0F172A;font-size:15px;overflow:hidden;box-shadow:0 18px 48px rgba(15,23,42,.22)}
+/* 全局 reset 里那条 `* { margin:0 }` 把 <dialog> 自带的 margin-inline:auto 抹掉了，
+   于是 showModal() 弹出来的框贴在左上角。居中要显式写回来，别指望 UA 样式。 */
+.tool-dialog{position:fixed;inset:0;margin:auto;box-sizing:border-box;display:flex;flex-direction:column;width:min(94vw,560px);max-height:88dvh;border:0;border-radius:18px;padding:0;background:#fff;color:#0F172A;font-size:15px;overflow:hidden;box-shadow:0 18px 48px rgba(15,23,42,.22)}
 .tool-dialog::backdrop{background:rgba(15,23,42,.55)}
 .tool-dialog>header{display:flex;align-items:flex-start;gap:12px;padding:18px 18px 14px;border-bottom:1px solid #EEF2F6;flex:0 0 auto}
 .tool-dialog>header h2{margin:0;font-size:17px;font-weight:800;letter-spacing:-.01em;line-height:1.4;flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
@@ -115,6 +117,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
  .td-body{padding:14px 14px 16px}
  .td-item-acts{flex-direction:column}
  .td-actions{flex-wrap:wrap}
+ /* 四列统计在 320 档每格只有 60px，获赞数四位就被省略号截掉；改 2×2。
+    复用既有断点而不是新开一档，免得又多一条没人测过的宽度区间。 */
+ .me-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 /* 餐食核对弹窗的头部：原文是主角，匹配说明退成一行小字 */
 .td-meal-head{padding:12px 14px;margin:0 0 14px;border:1px solid #E2E8F0;border-radius:14px;background:#F8FAFC}
@@ -225,6 +230,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .cm-thread-name{flex:1 1 auto;min-width:0;font-size:14.5px;font-weight:700;color:#0F172A;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .cm-thread-sub{flex:0 0 auto;font-size:11.5px;color:#94A3B8}
 .cm-bubbles{max-height:52vh;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;background:#FCFDFE}
+/* 整页里的聊天要撑满可用高度，52vh 那个上限是给旧的内嵌线程用的 */
+.pl-body.chat{display:flex;flex-direction:column;overflow:hidden;padding:0}
+.cm-bubbles.page{flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto;background:#F1F5F9;padding:14px 12px}
 .cm-bubble{max-width:78%;padding:9px 12px;border-radius:14px;font-size:14.5px;line-height:1.55;overflow-wrap:anywhere;white-space:pre-wrap}
 .cm-bubble.them{align-self:flex-start;background:#F1F5F9;color:#0F172A;border-bottom-left-radius:5px}
 .cm-bubble.me{align-self:flex-end;background:#065F46;color:#fff;border-bottom-right-radius:5px}
@@ -243,9 +251,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .me-copy{margin-left:6px;border:1px solid #E2E8F0;background:#F8FAFC;border-radius:7px;font:inherit;font-size:11.5px;color:#475569;padding:1px 7px;cursor:pointer;min-height:24px}
 .me-bio{margin-top:6px;font-size:13.5px;line-height:1.55;color:#334155;overflow-wrap:anywhere}
 .me-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:12px 8px}
-.me-stat{text-align:center;min-width:0}
-.me-stat b{display:block;font-size:18px;font-weight:800;color:#0F172A;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
-.me-stat span{display:block;margin-top:2px;font-size:11.5px;color:#64748B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 @media(min-width:760px){
  .cm-feed{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
@@ -258,3 +263,109 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .nav-avatar{width:22px;height:22px;font-size:11px;line-height:1}
 .dnav-avatar{width:18px;height:18px;font-size:10px;display:inline-flex;vertical-align:-3px}
 .nav-avatar img,.dnav-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* ============================================================
+   r150 机主实拍第二轮：形状统一、弹窗居中、文本可选中、整页跳转
+   ============================================================ */
+
+/* ---------- 按钮统一 ----------
+   原来同一屏里白底的、绿描边的、渐变填充的、8px 方角的、14px 方角的、胶囊的混在一起
+   （图一点名了搜索/配图/发布，图二点名了打卡/确认今天记完整了/算一下）。
+   统一成一套形状与一套 hover 反馈，只保留"主/次"两档权重：
+   次按钮=浅绿底→hover 深绿底白字，主按钮=深绿渐变→hover 更深。
+   分段控件（mode-btn / td-seg / plan-tab / gender-mini / dining-mode）不动，
+   它们是"当前选中哪一项"的指示器，不是动作按钮，压成胶囊会丢掉选中态。 */
+.td-btn,.td-btn-quiet,.td-mini,.cm-follow,.btn-primary,.btn-secondary,.btn-outline,
+.btn-log-meal,.btn-upload-photo,.btn-web-action,.btn-copy-remark,.btn-copy-url,
+.btn-cheer-chip,.header-download-btn,.btn-exd-ctl,.cm-compose-collapsed,.me-copy{border-radius:999px}
+.td-btn-quiet,.td-mini,.btn-secondary,.btn-outline,.me-copy{background:#ECFDF5;color:#047857;border:1px solid #A7F3D0}
+.td-btn-quiet:hover,.td-mini:hover,.btn-secondary:hover,.btn-outline:hover,.me-copy:hover,
+.td-btn:hover,.btn-primary:hover,.btn-log-meal:hover,.btn-upload-photo:hover,.btn-web-action:hover,
+.btn-copy-remark:hover,.btn-copy-url:hover,.cm-follow:hover,.header-download-btn:hover{
+  background:#059669;border-color:#059669;color:#fff}
+.td-btn,.btn-primary,.btn-log-meal,.btn-upload-photo,.btn-web-action{
+  background:linear-gradient(135deg,#10B981,#059669);border:1px solid transparent;color:#fff}
+.td-btn:hover,.btn-primary:hover,.btn-log-meal:hover,.btn-upload-photo:hover,.btn-web-action:hover{
+  background:linear-gradient(135deg,#059669,#047857)}
+.td-btn:active,.btn-primary:active,.btn-secondary:active,.td-mini:active{transform:scale(.98)}
+/* 选中/关闭态不能被 hover 规则带走，权重要更高 */
+.cm-follow[aria-pressed="true"],.td-actions .td-btn[aria-pressed="true"],
+.cm-thread-head .td-mini[aria-pressed="true"],.ts-chip[aria-selected="true"]{
+  background:#F1F5F9;border-color:#E2E8F0;color:#475569;box-shadow:none}
+.cm-thread-head .td-mini[aria-pressed="true"]{background:#FEF2F2;border-color:#FECACA;color:#B91C1C}
+.cm-follow[aria-pressed="true"]:hover,.td-actions .td-btn[aria-pressed="true"]:hover{
+  background:#E2E8F0;border-color:#CBD5E1;color:#334155}
+.cm-thread-head .td-mini[aria-pressed="true"]:hover{background:#FEE2E2;border-color:#FCA5A5;color:#991B1B}
+button:disabled,.td-mini:disabled,.btn-primary:disabled,.btn-secondary:disabled{
+  background:#F1F5F9;border-color:#E2E8F0;color:#94A3B8;cursor:not-allowed;transform:none}
+
+/* ---------- 文本要能选中复制 ----------
+   全局 `* { user-select:none }` 是为了防长按误选，但它把聊天气泡和帖子正文
+   一起锁死了——机主原话"对话框不能鼠标复制文本"。凡是读的东西都放开。 */
+.cm-bubble,.cm-body,.cm-row-meta,.pd-text,.td-item-title,.td-item-meta,.me-bio,
+.tav-item-title,.tav-item-meta,.history-row,.td-meal-name,.td-meal-why{
+  user-select:text;-webkit-user-select:text}
+
+/* ---------- 整页跳转的页面层（用户主页 / 帖子详情 / 私信会话 / 统计列表） ----------
+   机主："小红书都是直接跳转页面的，弹窗放那里丑死了"。
+   结构：固定顶栏（返回 + 标题 + 右侧动作）+ 可滚动正文 + 可选固定底栏。 */
+.page-layer{position:fixed;inset:0;z-index:900;display:flex;flex-direction:column;background:#F1F5F9;color:#0F172A;font-size:15px}
+.page-layer[hidden]{display:none}
+/* 页面层开着的时候不许滚背景，否则转轮/惯性滚动会把底下的面板挪走，返回后位置对不上 */
+body.qs-page-open{overflow:hidden}
+.pl-head{display:flex;align-items:center;gap:10px;flex:0 0 auto;padding:10px 14px;background:#fff;border-bottom:1px solid #EEF2F6}
+.pl-back{flex:0 0 auto;display:inline-flex;align-items:center;gap:2px;min-height:40px;padding:6px 12px 6px 4px;border:0;background:none;font:inherit;font-size:15px;font-weight:700;color:#047857;cursor:pointer}
+.pl-back:hover{color:#059669}
+.pl-title{flex:1 1 auto;min-width:0;margin:0;font-size:16.5px;font-weight:800;line-height:1.3;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.pl-slot{flex:0 0 auto;display:flex;align-items:center;gap:8px}
+.pl-body{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px}
+.pl-foot{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:10px 12px;background:#fff;border-top:1px solid #EEF2F6}
+.pl-foot[hidden]{display:none}
+.pl-foot input,.pl-foot textarea{flex:1 1 auto;min-width:0;min-height:44px;padding:10px 12px;border:1px solid #CBD5E1;border-radius:999px;font:inherit;font-size:15px;background:#fff;color:#0F172A}
+.pl-foot .td-btn{flex:0 0 auto;min-height:44px;padding:10px 20px}
+
+/* ---------- 帖子详情：照微博的形状（正文大、配图独立一块、时间与操作分开） ---------- */
+.pd-post{background:#fff;border-radius:14px;padding:14px;border:1px solid #E2E8F0}
+.pd-who{display:flex;align-items:center;gap:10px}
+.pd-text{margin:12px 0 0;font-size:16.5px;line-height:1.72;color:#0F172A;white-space:pre-wrap;overflow-wrap:anywhere}
+.pd-imgs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}
+.pd-imgs img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:12px;background:#F1F5F9;display:block;cursor:zoom-in}
+.pd-imgs.one{grid-template-columns:minmax(0,1fr)}
+.pd-imgs.one img{aspect-ratio:auto;max-height:60vh;object-fit:contain;cursor:zoom-in}
+.pd-meta{margin-top:12px;padding-top:10px;border-top:1px solid #EEF2F6;font-size:12.5px;color:#94A3B8}
+.pd-acts{display:flex;align-items:center;gap:8px;margin-top:10px}
+.pd-sec{margin:16px 0 8px;font-size:12.5px;font-weight:800;letter-spacing:.03em;color:#64748B}
+.pd-cmt{display:flex;gap:10px;align-items:flex-start;padding:12px 0;border-top:1px solid #EEF2F6;background:none;border-left:0;border-right:0;border-bottom:0;width:100%;text-align:left;font:inherit;cursor:pointer}
+.pd-cmt:first-of-type{border-top:0}
+.pd-cmt-main{flex:1 1 auto;min-width:0}
+.pd-cmt-name{font-size:13.5px;font-weight:700;color:#0F172A}
+.pd-cmt-text{margin-top:3px;font-size:15px;line-height:1.6;color:#0F172A;white-space:pre-wrap;overflow-wrap:anywhere}
+.pd-cmt-sub{margin-top:4px;font-size:11.5px;color:#94A3B8;display:flex;align-items:center;gap:10px}
+.pd-reply{margin-left:40px}
+
+/* ---------- 聊天：长按/右键菜单 + 气泡装扮 ---------- */
+.bubble-menu{position:fixed;z-index:1200;display:flex;gap:2px;padding:4px;border-radius:999px;background:rgba(15,23,42,.92);box-shadow:0 8px 24px rgba(15,23,42,.3)}
+.bubble-menu[hidden]{display:none}
+.bubble-menu button{min-height:34px;padding:0 12px;border:0;border-radius:999px;background:none;color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.bubble-menu button:hover{background:rgba(255,255,255,.18)}
+.cm-bubble{cursor:default}
+.cm-bubble.recalled{align-self:center;max-width:100%;background:none;color:#94A3B8;font-size:12.5px;text-align:center;padding:4px 0}
+.cm-bubble[data-t="blue"].me{background:#1D4ED8}
+.cm-bubble[data-t="rose"].me{background:#BE185D}
+.cm-bubble[data-t="ink"].me{background:#0F172A}
+.cm-bubble[data-t="amber"].me{background:#B45309}
+.theme-dots{display:flex;gap:8px;align-items:center}
+.theme-dot{width:26px;height:26px;padding:0;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px #CBD5E1;cursor:pointer}
+.theme-dot[aria-pressed="true"]{box-shadow:0 0 0 2px #059669}
+.theme-dot[data-t="green"]{background:#065F46}
+.theme-dot[data-t="blue"]{background:#1D4ED8}
+.theme-dot[data-t="rose"]{background:#BE185D}
+.theme-dot[data-t="ink"]{background:#0F172A}
+.theme-dot[data-t="amber"]{background:#B45309}
+
+/* ---------- 统计格要能点：给出手型与按压反馈 ---------- */
+.me-stat{text-align:center;min-width:0;border:0;background:none;font:inherit;cursor:pointer;padding:8px 2px;border-radius:12px}
+.me-stat:hover{background:#F8FAFC}
+.me-stat:active{background:#ECFDF5}
+.me-stat b{display:block;font-size:18px;font-weight:800;color:#0F172A;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.me-stat span{display:block;margin-top:2px;font-size:11.5px;color:#64748B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

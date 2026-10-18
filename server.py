@@ -401,6 +401,8 @@ def _community_schema(c):
         updated_at TEXT,
         FOREIGN KEY(user_id) REFERENCES users(id)
     )""")
+    # 气泡装扮：只影响自己这一侧的显示，所以存在自己的档案里，不写进消息本体。
+    _ensure_columns(c, "community_profile", [("bubble_theme", "TEXT NOT NULL DEFAULT 'green'")])
     c.execute("""
     CREATE TABLE IF NOT EXISTS posts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -458,6 +460,9 @@ def _community_schema(c):
     # 存了就得在四条路径（发、读、撤、重连）上各维护一次，早晚和明细对不上。
     c.execute("CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_key, id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_messages_unread ON messages(to_id, read_at)")
+    # 撤回是"标记"不是"删除"：行留着（对方还要看到"对方撤回了一条消息"），
+    # 但 _message_dict 会把正文换成空串，历史接口不再回正文。
+    _ensure_columns(c, "messages", [("recalled_at", "TEXT")])
     c.execute("""
     CREATE TABLE IF NOT EXISTS user_blocks (
         blocker INTEGER NOT NULL, blocked INTEGER NOT NULL, created_at TEXT NOT NULL,
@@ -969,7 +974,7 @@ def _body_or_400(age, height, weight_jin, target_weight_jin):
 
 
 @app.post("/api/register")
-def register(req: RegisterReq):
+def register(req: RegisterReq, request: Request):
     if req.special_population:raise HTTPException(400,'本版本只提供一般成人记录预算，不适用于孕哺期或需要个性化营养治疗的情况')
     body = _body_or_400(req.age, req.height, req.weight_jin, req.target_weight_jin)
     conn = get_db()
@@ -1000,6 +1005,12 @@ def register(req: RegisterReq):
             raise HTTPException(status_code=500, detail="轻塑号分配失败，请稍后再试")
         c.execute("UPDATE users SET public_id=? WHERE id=?", (public_id, user_id))
         c.execute("INSERT OR IGNORE INTO community_profile(user_id, updated_at) VALUES (?,?)", (user_id, now))
+        # 注册当次就把属地认下来：新账号一进主页就挂着"属地未知"很难看
+        try:
+            touch_region(c, user_id, _ip(request))
+        except Exception as error:
+            logging.getLogger("uvicorn.error").warning("region_touch_failed uid=%s err=%s",
+                                                       user_id, type(error).__name__)
         c.execute('INSERT INTO share_settings VALUES (?,?,?,?)',(user_id,1,int(time.time())+7*86400,json.dumps(DEFAULT_SCOPE)))
         c.execute("INSERT INTO sessions VALUES (?,?,?)", (hash_token(token),user_id,int(time.time())+2592000))
 
@@ -1065,6 +1076,13 @@ def login(req: LoginReq, request: Request):
         salt, pw_hash = make_pw(req.password)
         c.execute("UPDATE users SET pw_salt = ?, password_hash = ? WHERE id = ?",
                   (salt, pw_hash, user["id"]))
+    # 属地以前要等到发帖/评论才认，结果刚登录的人主页一直挂着"属地未知"。
+    # 登录本身就是一次可信的"这个人从哪个省连上来"，这时候就落库。
+    try:
+        touch_region(c, user["id"], _ip(request))
+    except Exception as error:
+        logging.getLogger("uvicorn.error").warning("region_touch_failed uid=%s err=%s",
+                                                   user["id"], type(error).__name__)
     conn.commit()
     conn.close()
     rate_reset("login:" + key)
@@ -3485,6 +3503,21 @@ def region_for(ip):
         return ""
 
 
+def touch_region(conn, uid, ip):
+    """把这次请求的 IP 认成属地并落到档案里。解析不出来时保留原值——
+    换了一次代理就掉成"属地未知"比什么都不改更难看。"""
+    region = region_for(ip)
+    if not region:
+        return ""
+    stamp = _now()
+    conn.execute("INSERT INTO community_profile(user_id,region,region_seen_at,updated_at)"
+                 " VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET"
+                 " region=excluded.region, region_seen_at=excluded.region_seen_at,"
+                 " updated_at=excluded.updated_at",
+                 (int(uid), region, stamp, stamp))
+    return region
+
+
 def _user_brief(conn, uid, with_region=False):
     u = conn.execute("SELECT id, public_id, username, nickname FROM users WHERE id = ?", (uid,)).fetchone()
     if not u:
@@ -3573,6 +3606,7 @@ class FollowReq(ValidatedModel):
 class ProfileCommunityReq(ValidatedModel):
     bio: Optional[str] = None
     discoverable: Optional[int] = None
+    bubble_theme: Optional[str] = None
 
 
 class DmSendReq(ValidatedModel):
@@ -3583,6 +3617,15 @@ class DmSendReq(ValidatedModel):
 
 class DmReadReq(ValidatedModel):
     with_user: int
+
+
+class RecallReq(ValidatedModel):
+    message_id: int
+
+
+# 撤回窗口：和微信/小红书一个量级。超了就不给撤——消息可能已经被对方看到并截图，
+# 这时候还允许抹掉记录只会让"聊天记录"这件事变得更不可信。
+RECALL_WINDOW_SEC = 300
 
 
 class BlockReq(ValidatedModel):
@@ -3674,8 +3717,11 @@ def create_post(req: PostReq, request: Request, user: dict = Depends(get_current
         cur = conn.execute("INSERT INTO posts(user_id,body,images,region,request_id,created_at)"
                            " VALUES (?,?,?,?,?,?)",
                            (user["id"], body, community.images_json(images), region, key, stamp))
-        conn.execute("UPDATE community_profile SET region=?, region_seen_at=?, updated_at=?"
-                     " WHERE user_id=?", (region or "", stamp, stamp, user["id"]))
+        # 解析不出来的那一次不许把已有属地洗掉：走代理或换网络时属地说没就没了，
+        # 用户看到的是"我明明有属地"，很难解释。帖子本身照实记空串。
+        if region:
+            conn.execute("UPDATE community_profile SET region=?, region_seen_at=?, updated_at=?"
+                         " WHERE user_id=?", (region, stamp, stamp, user["id"]))
         conn.commit()
         row = conn.execute("SELECT * FROM posts WHERE id=?", (cur.lastrowid,)).fetchone()
         return {"code": 0, "duplicate": False, "post": _post_card(conn, row, user)}
@@ -3702,7 +3748,7 @@ def delete_post(post_id: int, user: dict = Depends(get_current_user)):
 @app.get("/api/community/feed")
 def community_feed(tab: str = "latest", cursor: int = 0, limit: int = community.DEFAULT_PAGE,
                    user: dict = Depends(get_current_user)):
-    if tab not in ("latest", "follow", "mine"):
+    if tab not in ("latest", "follow", "mine", "city"):
         raise HTTPException(status_code=400, detail="未知的列表类型")
     size = community.page_size(limit)
     after = community.cursor_id(cursor)
@@ -3716,6 +3762,17 @@ def community_feed(tab: str = "latest", cursor: int = 0, limit: int = community.
         elif tab == "mine":
             sql += " AND user_id=?"
             args.append(user["id"])
+        elif tab == "city":
+            # 同城 = 发帖时按 IP 认出来的省与自己档案里的省一致。两边任一为空就不给看，
+            # 宁可不给结果也不拿"全部"冒充"同城"。
+            mine = conn.execute("SELECT region FROM community_profile WHERE user_id=?",
+                                (user["id"],)).fetchone()
+            region = ((mine["region"] if mine else "") or "").strip()
+            if not region:
+                return {"code": 0, "items": [], "next_cursor": 0, "more": False,
+                        "region": "", "why": "还没有你的属地，发一条帖子或评论就会认出来"}
+            sql += " AND region=?"
+            args.append(region)
         if after:
             sql += " AND id < ?"
             args.append(after)
@@ -3808,6 +3865,10 @@ def create_comment(post_id: int, req: CommentReq, request: Request,
                            " VALUES (?,?,?,?,?,?,?)",
                            (post_id, user["id"], req.reply_to, body, region, key, stamp))
         conn.execute("UPDATE posts SET comment_count = comment_count + 1 WHERE id=?", (post_id,))
+        # 界面上写的是"发一次帖子或评论就会带上属地"，评论这条也得真的落库才算话
+        if region:
+            conn.execute("UPDATE community_profile SET region=?, region_seen_at=?, updated_at=?"
+                         " WHERE user_id=?", (region, stamp, stamp, user["id"]))
         if parent:
             _notify(conn, parent["user_id"], "reply", user["id"], post_id, cur.lastrowid, body,
                     "reply:%d" % cur.lastrowid)
@@ -3925,6 +3986,61 @@ def user_home(ident: str, user: dict = Depends(get_current_user)):
         conn.close()
 
 
+@app.get("/api/community/connections")
+def community_connections(user_id: int = 0, kind: str = "followers", offset: int = 0,
+                          limit: int = 30, user: dict = Depends(get_current_user)):
+    """粉丝 / 关注列表。机主："这些数字只能看不能点"——数字背后必须能翻出明细。
+    这里用 offset 而不是游标：follows 的主键是复合的，没有可比的单调列可当游标。"""
+    if kind not in ("followers", "following"):
+        raise HTTPException(status_code=400, detail="未知的列表类型")
+    target = int(user_id or user["id"])
+    size = community.page_size(limit, 30)
+    start = max(0, int(offset or 0))
+    # 两个列名都来自这张写死的分支，不接外部输入
+    mine_col, peer_col = ("followee_id", "follower_id") if kind == "followers" \
+        else ("follower_id", "followee_id")
+    conn = get_db()
+    try:
+        total = int(conn.execute("SELECT COUNT(*) FROM follows WHERE %s=?" % mine_col, (target,)).fetchone()[0])
+        rows = conn.execute(
+            "SELECT %s AS peer_id FROM follows WHERE %s=? ORDER BY created_at DESC, %s DESC LIMIT ? OFFSET ?"
+            % (peer_col, mine_col, peer_col), (target, size + 1, start)).fetchall()
+        items = []
+        for r in rows[:size]:
+            brief = _user_brief(conn, r["peer_id"], True) or {}
+            brief["followed_by_me"] = bool(conn.execute(
+                "SELECT 1 FROM follows WHERE follower_id=? AND followee_id=?",
+                (user["id"], r["peer_id"])).fetchone())
+            items.append(brief)
+        return {"code": 0, "items": items, "total": total, "offset": start,
+                "next_offset": start + size if len(rows) > size else 0, "more": len(rows) > size}
+    finally:
+        conn.close()
+
+
+@app.get("/api/community/posts-of")
+def community_posts_of(user_id: int = 0, sort: str = "recent", offset: int = 0,
+                       limit: int = 30, user: dict = Depends(get_current_user)):
+    """某个人的帖子；sort=likes 就是"收到的赞"那张列表（按赞数排，赞最多的在前）。"""
+    if sort not in ("recent", "likes"):
+        raise HTTPException(status_code=400, detail="未知的排序方式")
+    target = int(user_id or user["id"])
+    size = community.page_size(limit, 30)
+    start = max(0, int(offset or 0))
+    order = "like_count DESC, id DESC" if sort == "likes" else "id DESC"
+    conn = get_db()
+    try:
+        total = int(conn.execute("SELECT COUNT(*) FROM posts WHERE user_id=? AND status='open'",
+                                 (target,)).fetchone()[0])
+        rows = conn.execute("SELECT * FROM posts WHERE user_id=? AND status='open' ORDER BY %s LIMIT ? OFFSET ?"
+                            % order, (target, size + 1, start)).fetchall()
+        cards = [_post_card(conn, r, user) for r in rows[:size]]
+        return {"code": 0, "items": cards, "total": total, "offset": start,
+                "next_offset": start + size if len(rows) > size else 0, "more": len(rows) > size}
+    finally:
+        conn.close()
+
+
 @app.get("/api/community/search")
 def community_search(q: str = "", limit: int = 12, user: dict = Depends(get_current_user)):
     term = str(q or "").strip()[:community.SEARCH_Q_MAX]
@@ -3957,11 +4073,18 @@ def community_profile(req: ProfileCommunityReq, user: dict = Depends(get_current
         if req.discoverable is not None:
             conn.execute("UPDATE community_profile SET discoverable=?, updated_at=? WHERE user_id=?",
                          (1 if int(req.discoverable or 0) else 0, _now(), user["id"]))
+        if req.bubble_theme is not None:
+            theme = str(req.bubble_theme or "").strip().lower()
+            if theme not in community.BUBBLE_THEMES:
+                raise HTTPException(status_code=400, detail="没有这种气泡颜色")
+            conn.execute("UPDATE community_profile SET bubble_theme=?, updated_at=? WHERE user_id=?",
+                         (theme, _now(), user["id"]))
         conn.commit()
-        row = conn.execute("SELECT bio, region, discoverable FROM community_profile WHERE user_id=?",
+        row = conn.execute("SELECT bio, region, discoverable, bubble_theme FROM community_profile WHERE user_id=?",
                            (user["id"],)).fetchone()
         return {"code": 0, "bio": (row["bio"] if row else ""),
                 "region": (row["region"] if row else "") or "",
+                "bubble_theme": (row["bubble_theme"] if row else "green") or "green",
                 "discoverable": int(row["discoverable"]) if row else 1}
     finally:
         conn.close()
@@ -3973,6 +4096,11 @@ def community_stats(user: dict = Depends(get_current_user)):
     conn = get_db()
     try:
         return {"code": 0, "public_id": user.get("public_id") or "",
+                "region": (conn.execute("SELECT region FROM community_profile WHERE user_id=?",
+                                        (uid,)).fetchone() or {"region": ""})["region"] or "",
+                "bubble_theme": ((conn.execute("SELECT bubble_theme FROM community_profile WHERE user_id=?",
+                                               (uid,)).fetchone() or {"bubble_theme": "green"})["bubble_theme"]
+                                 or "green"),
                 "followers": int(conn.execute("SELECT COUNT(*) FROM follows WHERE followee_id=?", (uid,)).fetchone()[0]),
                 "following": int(conn.execute("SELECT COUNT(*) FROM follows WHERE follower_id=?", (uid,)).fetchone()[0]),
                 "posts": int(conn.execute("SELECT COUNT(*) FROM posts WHERE user_id=? AND status='open'",
@@ -4045,7 +4173,8 @@ def read_notifications(req: NoticeReadReq, user: dict = Depends(get_current_user
             cur = conn.execute("UPDATE notifications SET read_at=? WHERE user_id=? AND read_at IS NULL AND id IN (%s)"
                                % ",".join("?" * len(ids)), [stamp, user["id"]] + ids)
         conn.commit()
-        return {"code": 0, "marked": int(cur.rowcount or 0)}
+        # changed 与 marked 都给：前端拿 changed 说话，老判据钉的是 marked
+        return {"code": 0, "marked": int(cur.rowcount or 0), "changed": int(cur.rowcount or 0)}
     finally:
         conn.close()
 
@@ -4087,8 +4216,13 @@ def _deliver(conn, sender, to_id, body, request_id):
 
 
 def _message_dict(row):
+    names = row.keys()
+    recalled = (row["recalled_at"] or "") if "recalled_at" in names else ""
     return {"id": int(row["id"]), "conv_key": row["conv_key"], "from_id": int(row["from_id"]),
-            "to_id": int(row["to_id"]), "body": row["body"], "created_at": row["created_at"],
+            "to_id": int(row["to_id"]),
+            # 撤回之后正文不再外发，只留一个时间戳让两端都能显示"撤回了一条消息"
+            "body": "" if recalled else row["body"], "recalled_at": recalled,
+            "created_at": row["created_at"],
             "read_at": row["read_at"], "request_id": row["request_id"]}
 
 
@@ -4211,6 +4345,39 @@ def chat_block(req: BlockReq, user: dict = Depends(get_current_user)):
             conn.execute("DELETE FROM user_blocks WHERE blocker=? AND blocked=?", (user["id"], other))
         conn.commit()
         return {"code": 0, "blocked": bool(req.on)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/chat/recall")
+def chat_recall(req: RecallReq, user: dict = Depends(get_current_user)):
+    """撤回 = 打个标记，不删行。两端都还能看到"谁撤回了一条消息"，
+    但正文不再外发（_message_dict 里按 recalled_at 抹掉）。"""
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM messages WHERE id=?", (int(req.message_id),)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="这条消息不在了")
+        if int(row["from_id"]) != int(user["id"]):
+            raise HTTPException(status_code=403, detail="只能撤回自己发出的消息")
+        if row["recalled_at"]:
+            return {"code": 0, "recalled_at": row["recalled_at"]}
+        try:
+            sent = datetime.strptime(row["created_at"], "%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError):
+            sent = None
+        if sent is None or (datetime.now() - sent).total_seconds() > RECALL_WINDOW_SEC:
+            raise HTTPException(status_code=400,
+                                detail="超过 %d 分钟就不能撤回了" % (RECALL_WINDOW_SEC // 60))
+        stamp = _now()
+        conn.execute("UPDATE messages SET recalled_at=? WHERE id=?", (stamp, int(row["id"])))
+        # 会话摘要如果正是这一句，跟着改口，否则列表会一直显示一句已经撤回的话
+        conn.execute("UPDATE conversations SET last_body=? WHERE conv_key=? AND last_body=?",
+                     (u'（已撤回）', row["conv_key"], row["body"]))
+        conn.commit()
+        _push(int(row["to_id"]), {"t": "recall", "message_id": int(row["id"]),
+                                  "recalled_at": stamp, "by": int(user["id"])})
+        return {"code": 0, "recalled_at": stamp}
     finally:
         conn.close()
 

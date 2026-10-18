@@ -995,6 +995,7 @@
                     <button type="button" class="td-seg-btn" aria-selected="true" data-feed="latest" onclick="setCommunityTab('latest')">广场</button>
                     <button type="button" class="td-seg-btn" aria-selected="false" data-feed="follow" onclick="setCommunityTab('follow')">关注</button>
                     <button type="button" class="td-seg-btn" aria-selected="false" data-feed="mine" onclick="setCommunityTab('mine')">我的</button>
+                    <button type="button" class="td-seg-btn" aria-selected="false" data-feed="city" onclick="setCommunityTab('city')">同城</button>
                 </div>
                 <div class="cm-search">
                     <input id="cm-search-input" type="search" placeholder="输入轻塑号或昵称找人" aria-label="搜索用户"
@@ -1041,21 +1042,6 @@
             <p class="cm-ws-state" id="cm-ws-state" role="status"></p>
             <div id="msg-list" class="cm-list"></div>
             <p class="td-empty cm-state" id="msg-state" role="status"></p>
-
-            <div class="cm-thread" id="msg-thread" hidden>
-                <div class="cm-thread-head">
-                    <button type="button" class="cm-back" onclick="closeThread()">‹ 返回</button>
-                    <span class="cm-thread-name" id="thread-name"></span>
-                    <span class="cm-thread-sub" id="thread-sub"></span>
-                    <button type="button" class="td-mini" id="thread-block-btn" aria-pressed="false" onclick="toggleBlock()">拉黑</button>
-                </div>
-                <div class="cm-bubbles" id="thread-bubbles" role="log" aria-live="polite"></div>
-                <div class="cm-composer">
-                    <input id="dm-input" type="text" maxlength="1000" placeholder="说点什么…" aria-label="私信内容"
-                           onkeydown="if(event.key==='Enter'){event.preventDefault();sendDM();}">
-                    <button type="button" class="td-btn" onclick="sendDM()">发送</button>
-                </div>
-            </div>
         </section>
 
         <!-- ================= TAB 10: 我的主页 ================= -->
@@ -1163,6 +1149,18 @@
         </section>
     </main>
 
+    <!-- ================= 整页跳转层（用户主页 / 帖子详情 / 私信会话 / 统计列表） =================
+         机主原话："用户主页直接跳转页面不要弹窗了，加一个返回按钮"。
+         这一层盖住整个视口，顶栏固定带返回，正文滚动，底栏可选（评论框、发私信框）。 -->
+    <section id="page-layer" class="page-layer" hidden role="dialog" aria-modal="true" aria-labelledby="pl-title">
+        <header class="pl-head">
+            <button type="button" class="pl-back" onclick="closePage()">‹ 返回</button>
+            <h2 class="pl-title" id="pl-title"></h2>
+            <span class="pl-slot" id="pl-slot"></span>
+        </header>
+        <div class="pl-body" id="pl-body"></div>
+        <footer class="pl-foot" id="pl-foot" hidden></footer>
+    </section>
 
     <!-- ================= 核心弹窗 1: 个性化身材档案定制与目标管理弹窗 ================= -->
     <div class="modal-overlay" id="profile-modal">

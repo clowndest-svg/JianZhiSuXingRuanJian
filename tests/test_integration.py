@@ -762,4 +762,155 @@ class Integration(unittest.TestCase):
         self.assertIn(self.c.post('/api/community/posts', json={'text': '匿名发帖'}).status_code,
                       (401, 403))
 
+    # ---------- r150：撤回 / 统计明细 / 同城 / 登录落属地 / 气泡装扮 ----------
+
+    def _sql(self, statement, args=()):
+        conn = self.m.get_db()
+        try:
+            conn.execute(statement, args)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_notifications_read_clears_the_unread_count(self):
+        """机主清单 P0 第 1 条：那个按钮绑了一个不存在的函数，未读永远清不掉。
+        这条钉的是"标已读之后，stats 与通知列表两处都得归零"。"""
+        me, mauth = self._member('notice_me')
+        other, oauth = self._member('notice_other')
+        pid = self.c.post('/api/community/posts', headers=mauth, json={'text': '给我点赞'}).json()['post']['id']
+        self.c.post('/api/community/posts/%d/like' % pid, headers=oauth, json={})
+        before = self.c.get('/api/community/stats', headers=mauth).json()['notices_unread']
+        self.assertEqual(before, 1, '别人点赞之后我这边该有一条未读')
+        r = self.c.post('/api/notifications/read', headers=mauth, json={'all': True})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()['changed'], 1, '回执要说清改了几条')
+        self.assertEqual(self.c.get('/api/community/stats', headers=mauth).json()['notices_unread'], 0)
+        items = self.c.get('/api/notifications', headers=mauth).json()['items']
+        self.assertTrue(all(n['read_at'] for n in items), '列表里还留着未读标记')
+
+    def test_recall_only_own_within_window_and_clears_body(self):
+        a, aauth = self._member('recall_a')
+        b, bauth = self._member('recall_b')
+        mid = self.c.post('/api/chat/send', headers=aauth,
+                          json={'to': b['id'], 'text': '这句要撤回'}).json()['message']['id']
+        # 对方不能撤我的
+        self.assertEqual(self.c.post('/api/chat/recall', headers=bauth,
+                                     json={'message_id': mid}).status_code, 403,
+                         '不是发送者也能撤回')
+        r = self.c.post('/api/chat/recall', headers=aauth, json={'message_id': mid})
+        self.assertEqual(r.status_code, 200, r.text)
+        hist = self.c.get('/api/chat/messages?with_user=%d' % b['id'], headers=aauth).json()
+        mine = [x for x in hist['items'] if x['id'] == mid][0]
+        self.assertEqual(mine['body'], '', '撤回之后正文还在往外发')
+        self.assertTrue(mine['recalled_at'], '撤回标记没落到回执里')
+        conv = [c for c in self.c.get('/api/chat/conversations', headers=bauth).json()['items']
+                if c['with']['id'] == a['id']][0]
+        self.assertEqual(conv['last_body'], u'（已撤回）', '会话列表还显示着被撤回的那句原话')
+        # 超过窗口就不给撤
+        mid2 = self.c.post('/api/chat/send', headers=aauth,
+                           json={'to': b['id'], 'text': '这句太久了'}).json()['message']['id']
+        self._sql("UPDATE messages SET created_at=? WHERE id=?",
+                  ((self.m.datetime.now() - self.m.timedelta(minutes=9)).strftime('%Y-%m-%d %H:%M:%S'), mid2))
+        self.assertEqual(self.c.post('/api/chat/recall', headers=aauth,
+                                     json={'message_id': mid2}).status_code, 400,
+                         '超过 5 分钟还能撤回')
+
+    def test_connections_and_posts_of_agree_with_their_own_rows(self):
+        """统计格点进去的列表，必须和数字自己数出来的一致（父=Σ子那条老规矩）。"""
+        a, aauth = self._member('conn_a')
+        b, bauth = self._member('conn_b')
+        self.c.post('/api/community/users/%d/follow' % a['id'], headers=bauth, json={'on': True})
+        followers = self.c.get('/api/community/connections?user_id=%d&kind=followers' % a['id'],
+                               headers=aauth).json()
+        self.assertEqual([x['id'] for x in followers['items']], [b['id']], '粉丝列表方向不对或漏人')
+        self.assertEqual(followers['total'], 1)
+        self.assertEqual(followers['items'][0]['followed_by_me'], False)
+        following = self.c.get('/api/community/connections?user_id=%d&kind=following' % b['id'],
+                               headers=bauth).json()
+        self.assertEqual([x['id'] for x in following['items']], [a['id']], '关注列表方向反了')
+        self.assertEqual(following['items'][0]['followed_by_me'], True, '我关注过的人该标成已关注')
+        self.assertEqual(self.c.get('/api/community/connections?user_id=%d&kind=magic' % a['id'],
+                                    headers=aauth).status_code, 400)
+        # 获赞列表按赞数排（两条赞的那条要压过一条赞的）
+        c_, cauth = self._member('conn_c')
+        p1 = self.c.post('/api/community/posts', headers=aauth, json={'text': '两条赞'}).json()['post']['id']
+        p2 = self.c.post('/api/community/posts', headers=aauth, json={'text': '一条赞'}).json()['post']['id']
+        for who in (bauth, cauth):
+            self.c.post('/api/community/posts/%d/like' % p1, headers=who, json={})
+        self.c.post('/api/community/posts/%d/like' % p2, headers=bauth, json={})
+        liked = self.c.get('/api/community/posts-of?user_id=%d&sort=likes' % a['id'], headers=aauth).json()
+        self.assertEqual([x['id'] for x in liked['items']][:1], [p1], '按赞数排序排错了')
+        self.assertEqual(liked['items'][0]['like_count'], 2)
+        self.assertEqual(liked['total'], 2)
+        mine = self.c.get('/api/community/posts-of?user_id=%d' % a['id'], headers=aauth).json()
+        self.assertEqual(len(mine['items']), 2)
+        self.assertEqual(self.c.get('/api/community/posts-of?user_id=%d&sort=magic' % a['id'],
+                                    headers=aauth).status_code, 400)
+
+    def test_city_feed_needs_region_and_only_shows_same_province(self):
+        a, aauth = self._member('city_a')
+        b, bauth = self._member('city_b')
+        # 没有属地时宁可给空，也不拿"全部"冒充"同城"
+        empty = self.c.get('/api/community/feed?tab=city', headers=aauth).json()
+        self.assertEqual(empty['items'], [])
+        self.assertIn('属地', empty.get('why', ''), '没属地却不解释原因')
+        self._sql("UPDATE community_profile SET region='湖南' WHERE user_id=?", (a['id'],))
+        self._sql("UPDATE community_profile SET region='湖北' WHERE user_id=?", (b['id'],))
+        pa = self.c.post('/api/community/posts', headers=aauth, json={'text': '长沙的粉'}).json()['post']['id']
+        self._sql("UPDATE posts SET region='湖南' WHERE id=?", (pa,))
+        pb = self.c.post('/api/community/posts', headers=bauth, json={'text': '武汉的热干面'}).json()['post']['id']
+        self._sql("UPDATE posts SET region='湖北' WHERE id=?", (pb,))
+        seen = [x['id'] for x in self.c.get('/api/community/feed?tab=city', headers=aauth).json()['items']]
+        self.assertEqual(seen, [pa], '同城把别的省的帖子也放进来了')
+        self.assertEqual(self.c.get('/api/community/feed?tab=magic', headers=aauth).status_code, 400)
+
+    def test_login_and_register_record_region_once(self):
+        """属地以前要等到发帖才认，新登录的人主页一直挂着"属地未知"。"""
+        real = self.m.region_for
+        self.m.region_for = lambda ip: u'湖南'
+        try:
+            user, auth = self._member('geo_login')
+            self.assertEqual(self.c.get('/api/community/stats', headers=auth).json()['region'], u'湖南',
+                             '注册那一次没落属地')
+            self._sql("UPDATE community_profile SET region='' WHERE user_id=?", (user['id'],))
+            self.c.post('/api/login', json={'username': 'geo_login', 'password': self.body['password']})
+            self.assertEqual(self.c.get('/api/community/stats', headers=auth).json()['region'], u'湖南',
+                             '登录这一次没落属地')
+            # 解析不出来的那一次（换网络、走代理）不能把已有属地洗掉
+            self.m.region_for = lambda ip: ''
+            self.c.post('/api/login', json={'username': 'geo_login', 'password': self.body['password']})
+            self.assertEqual(self.c.get('/api/community/stats', headers=auth).json()['region'], u'湖南',
+                             '一次解析失败就把已有属地洗掉了')
+            # 评论也算"活动"：界面写的是"发一次帖子或评论就会带上"，两条都得真落库
+            other, oauth = self._member('geo_comment')
+            pid = self.c.post('/api/community/posts', headers=auth, json={'text': '来评论'}).json()['post']['id']
+            self._sql("UPDATE community_profile SET region='' WHERE user_id=?", (other['id'],))
+            self.m.region_for = lambda ip: u'广东'
+            self.c.post('/api/community/posts/%d/comments' % pid, headers=oauth, json={'text': '来了'})
+            self.assertEqual(self.c.get('/api/community/stats', headers=oauth).json()['region'], u'广东',
+                             '评论没把属地带上，跟界面上那句话对不上')
+        finally:
+            self.m.region_for = real
+
+    def test_bubble_theme_round_trip_and_rejects_junk(self):
+        a, aauth = self._member('theme_a')
+        self.assertEqual(self.c.get('/api/community/stats', headers=aauth).json()['bubble_theme'], 'green')
+        r = self.c.post('/api/community/profile', headers=aauth, json={'bubble_theme': 'rose'})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()['bubble_theme'], 'rose')
+        self.assertEqual(self.c.get('/api/community/stats', headers=aauth).json()['bubble_theme'], 'rose')
+        self.assertEqual(self.c.post('/api/community/profile', headers=aauth,
+                                     json={'bubble_theme': '<img onerror=1>'}).status_code, 400,
+                         '脏值没被白名单拦住')
+
+    def test_new_community_endpoints_all_require_login(self):
+        for path in ('/api/community/connections?user_id=2&kind=followers',
+                     '/api/community/posts-of?user_id=2',
+                     '/api/chat/recall', '/api/notifications/read'):
+            code = (self.c.get(path).status_code if path.startswith('/api/community/connections')
+                    or path.startswith('/api/community/posts-of')
+                    else self.c.post(path, json={}).status_code)
+            self.assertIn(code, (401, 403), path + ' 不该免登录')
+
+
 if __name__=='__main__':unittest.main(verbosity=2)

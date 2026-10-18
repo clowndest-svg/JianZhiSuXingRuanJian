@@ -1665,6 +1665,75 @@ try {
 } catch (e) {
   check("r149 社区判据块本身跑通了", false, String(e && e.message));
 }
+
+try {
+  const F150_REL = "app/src/main/assets/features.js";
+  const feat150 = MUTANT ? execFileSync("git", ["show", MUT_REF + ":" + F150_REL],
+      { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+    : fs.readFileSync(path.join(ROOT, F150_REL), "utf8");
+  const h150 = makeCtx();
+  loadJs(h150.context);
+  const clean150 = feat150.replace(/^\s*let localGuidanceRows\s*=\s*\[\s*\]\s*;\s*$/m, "/* 由 app.js 声明 */");
+  const errs150 = [];
+  try { run(h150.context, clean150); } catch (e) { errs150.push(String(e && e.message)); }
+  check("r150 这块能真的把 features.js 跑起来", errs150.length === 0, errs150.join(" / "));
+  const r150 = code => run(h150.context, code);
+
+  check("四个整页都注册了（主页/帖子/私信/统计）",
+        r150('Object.keys(QS_PAGE_DEF).sort().join(",")') === "dm,member,post,stats",
+        r150('Object.keys(QS_PAGE_DEF).sort().join(",")'));
+  check("未知页名不会把栈弄脏",
+        r150('(function(){openPage("magic",1);return QS_PAGES.length+":"+qsPageOpen();})()') === "0:false", "");
+  check("栈空时返回 false（硬件返回键据此决定要不要吞掉）",
+        r150('closePage()') === false, "");
+  check("同城页签被认下来",
+        r150('(function(){setCommunityTab("city");const f=cm.feed;setCommunityTab("magic");return f+"/"+cm.feed;})()')
+          === "city/city", "脏值把已选的同城也清掉了");
+  r150('setCommunityTab("latest")');
+
+  // 撤回：气泡要变成一句说明，且不再显示原话
+  const recalled = String(r150('cmBubbleHTML({id:7,from_id:1,body:"原话",created_at:"2026-10-18 10:00:00",recalled_at:"2026-10-18 10:01:00"},1)'));
+  check("撤回的气泡只说撤回，不印原话",
+        recalled.indexOf("你撤回了一条消息") >= 0 && recalled.indexOf("原话") < 0, recalled.slice(0, 80));
+  const them = String(r150('cmBubbleHTML({id:8,from_id:2,body:"对方撤的",created_at:"2026-10-18 10:00:00",recalled_at:"x"},1)'));
+  check("对方撤回时文案是对方那句", them.indexOf("对方撤回了一条消息") >= 0, them.slice(0, 60));
+  const live = String(r150('cmBubbleHTML({id:9,from_id:1,body:"在呢",created_at:"2026-10-18 10:00:00"},1)'));
+  check("正常气泡带得上右键与长按入口",
+        live.indexOf("oncontextmenu=") >= 0 && live.indexOf("ontouchstart=") >= 0
+        && live.indexOf('data-mid="9"') >= 0, live.slice(0, 120));
+  check("装扮只改自己一侧",
+        r150('cmBubbleHTML({id:1,from_id:2,body:"对方",created_at:"x"},1)').indexOf("data-t=") < 0, "");
+
+  // 撤回窗口：4 分钟给撤、6 分钟不给（服务端还有一道，这里是按钮该不该出现）。
+  // 注意要用本地时间串——服务端 _now() 写的就是本地时间，toISOString 是 UTC，差 8 小时。
+  const win = String(r150('(function(){function f(d){var p=function(n){return String(n).length<2?"0"+n:""+n};'
+    + 'return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());}'
+    + 'return qsWithin(f(new Date(Date.now()-4*60000)),300)+"/"+qsWithin(f(new Date(Date.now()-6*60000)),300)'
+    + '+"/"+qsWithin("",300)+"/"+qsWithin("不是时间",300);})()'));
+  check("撤回窗口按 5 分钟判，读不懂的时间不给撤",
+        win === "true/false/false/false", win);
+
+  // 复制：值走 data 属性。上一版把内容拼进 onclick 的转义里，直接写出过一个语法错的按钮
+  run(h150.context, 'window.__copied=null; qsCopy=function(t,l){window.__copied=t+"|"+l;return true;}');
+  run(h150.context, 'qsCopyFrom({getAttribute:function(k){return k==="data-copy"?"34003457":"轻塑号";}})');
+  check("复制按钮交出去的是 data-copy 里的真值",
+        String(r150('window.__copied')) === "34003457|轻塑号", String(r150('window.__copied')));
+  check("资料页的复制按钮用 data-copy，不把值拼进 onclick",
+        feat150.indexOf('data-copy="') >= 0 && /onclick="qsCopyFrom\(this\)"/.test(feat150), "");
+
+  // 会话列表要就地顶上最新消息（机主："要刷新才会展示最新消息"）
+  r150('cm.convs=[{with:{id:55},last_body:"上一句",last_at:"2026-10-18 10:00:00",unread:0}];'
+       + 'cm.msgTab="notices";cm.thread=null;');
+  r150('bumpConversation(55,"新的一句","me")');
+  check("自己发出去之后会话摘要立刻更新",
+        String(r150('cm.convs[0].last_body')) === "新的一句", String(r150('cm.convs[0].last_body')));
+  check("自己发的不算未读", String(r150('cm.convs[0].unread')) === "0", String(r150('cm.convs[0].unread')));
+  r150('bumpConversation(55,"对方来的","them")');
+  check("对方来的算一条未读", String(r150('cm.convs[0].unread')) === "1", String(r150('cm.convs[0].unread')));
+  r150('cm.convs=[];cm.msgTab="notices";');
+} catch (e) {
+  check("r150 判据块本身跑通了", false, String(e && e.message));
+}
 }
 
 const bad = R.filter(x => !x[1]);

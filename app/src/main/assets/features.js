@@ -590,7 +590,8 @@ const cm = {
     msgTab: "chats", convs: [], notices: [], loadingMsg: false,
     thread: null, bubbles: [], pending: {},
     ws: null, wsState: "idle", wsRetry: 0, wsTimer: null,
-    stats: null, feedbackKind: "bug", images: []
+    stats: null, feedbackKind: "bug", images: [],
+    myTheme: "green", unreadTotal: 0, postId: 0
 };
 
 /* 换账号必须把社区与私信的内存状态一起清掉：
@@ -602,12 +603,101 @@ function resetCommunity() {
     cm.feed = "latest"; cm.items = []; cm.cursor = 0; cm.more = false;
     cm.loading = false; cm.loaded = false; cm.loadingMsg = false;
     cm.convs = []; cm.notices = []; cm.thread = null; cm.bubbles = [];
-    cm.pending = {}; cm.stats = null; cm.images = [];
+    cm.pending = {}; cm.stats = null; cm.images = []; cm.myTheme = "green";
+    cm.unreadTotal = 0; cm.postId = 0;
+    qsCloseAllPages();
     paintNavBadge();
 }
 
 function cmEl(id) { return document.getElementById(id); }
 function cmText(id, text) { const el = cmEl(id); if (el) el.textContent = text || ""; }
+
+/* ── 整页跳转层 ─────────────────────────────────────────────
+   机主要求：看内容一律整页（带返回），弹窗只留给"确认一件小事"。
+   栈里只存"这一页怎么渲染"，不存渲染结果——返回时重新拉一遍，
+   省得拿到一份过期的 DOM（上一版私信线程就是靠重渲染保持一致的）。 */
+const QS_PAGES = [];
+const QS_PAGE_DEF = {};
+
+function qsRenderTop() {
+    const top = QS_PAGES[QS_PAGES.length - 1];
+    const layer = cmEl("page-layer");
+    if (!top || !layer) return;
+    layer.hidden = false;
+    document.body.classList.add("qs-page-open");
+    // 聊天页会把正文区改成弹性布局，每页开头统一复位，免得串页
+    const bodyEl = cmEl("pl-body");
+    if (bodyEl) bodyEl.className = "pl-body";
+    cmText("pl-title", typeof top.title === "function" ? top.title() : top.title);
+    top.render(top.arg);
+}
+
+function openPage(name, arg) {
+    const def = QS_PAGE_DEF[name];
+    if (!def) return;
+    QS_PAGES.push({ name: name, arg: arg, title: def.title, render: def.render });
+    qsRenderTop();
+}
+
+/** 关掉最上面一页；栈空时整层收起。返回 true 表示这一层还开着（给硬件返回键判断用）。 */
+function closePage() {
+    if (!QS_PAGES.length) return false;
+    QS_PAGES.pop();
+    if (QS_PAGES.length) { qsRenderTop(); return true; }
+    const layer = cmEl("page-layer");
+    if (layer) { layer.hidden = true; cmEl("pl-body").innerHTML = ""; cmEl("pl-foot").innerHTML = ""; }
+    document.body.classList.remove("qs-page-open");
+    return false;
+}
+
+/** 真在页面里（不是被压在栈底下）才算"当前页"，切 tab 时要先把栈清空。 */
+function qsPageOpen() { return QS_PAGES.length > 0; }
+function qsCloseAllPages() { while (QS_PAGES.length) { QS_PAGES.pop(); }
+    const layer = cmEl("page-layer");
+    if (layer) layer.hidden = true;
+    document.body.classList.remove("qs-page-open");
+}
+
+function qsSetFoot(html) {
+    const foot = cmEl("pl-foot");
+    if (!foot) return;
+    foot.innerHTML = html || "";
+    foot.hidden = !html;
+}
+
+/** 复制按钮的通用出口：值放在 data-copy 里，避免把内容拼进 onclick 时踩引号转义。 */
+function qsCopyFrom(btn) {
+    qsCopy(btn.getAttribute("data-copy") || "", btn.getAttribute("data-label") || "内容");
+}
+
+/** 复制一段文本。剪贴板 API 在非安全上下文或被拒时会退回 execCommand，
+ *  两条路都没走通就明说没成功并让人照着抄——不许"没复制上还说已复制"。 */
+async function qsCopy(text, label) {
+    const s = String(text == null ? "" : text);
+    if (!s) { callNativeToast((label || "内容") + "是空的，没什么可复制"); return false; }
+    let done = false;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(s);
+            done = true;
+        }
+    } catch (e) { done = false; }
+    if (!done) {
+        try {
+            const ta = document.createElement("textarea");
+            ta.value = s;
+            ta.setAttribute("readonly", "");
+            ta.style.position = "fixed";
+            ta.style.top = "-1000px";
+            document.body.appendChild(ta);
+            ta.select();
+            done = document.execCommand("copy");
+            document.body.removeChild(ta);
+        } catch (e) { done = false; }
+    }
+    callNativeToast(done ? ((label || "内容") + "已复制") : ("复制没成功，可以照着抄：" + s));
+    return done;
+}
 
 function cmTime(stamp) {
     const s = String(stamp || "");
@@ -642,6 +732,8 @@ function cmRegionTag(region) { return region ? "属地 " + escapeHtml(region) : 
 function cmState(id, text) { cmText(id, text || ""); }
 
 function cmRoute(tab) {
+    // 切 tab 时先把整页层收掉：从帖子页里点底部导航，不该还盖着一层页
+    if (qsPageOpen()) qsCloseAllPages();
     if (tab === "community" && !cm.loaded && !cm.loading) loadCommunity(false);
     if (tab === "messages") { loadMessages(); connectChat(); }
     if (tab === "me") loadMe();
@@ -650,7 +742,7 @@ function cmRoute(tab) {
 
 /* ── 社区列表 ───────────────────────────────────────────────── */
 function setCommunityTab(which) {
-    if (!["latest", "follow", "mine"].includes(which)) return;
+    if (!["latest", "follow", "mine", "city"].includes(which)) return;
     cm.feed = which;
     document.querySelectorAll("#panel-community .td-seg-btn").forEach(b =>
         b.setAttribute("aria-selected", b.getAttribute("data-feed") === which ? "true" : "false"));
@@ -706,6 +798,7 @@ function renderFeed() {
     if (cmState("cm-feed-state", ""), !cm.items.length) {
         cmState("cm-feed-state", cm.feed === "mine" ? "你还没有发过帖子，上面那条就是入口。"
             : cm.feed === "follow" ? "关注的人发的帖子会出现在这里。现在还没有。"
+            : cm.feed === "city" ? "同城还没有帖子。属地是发帖子或评论时按 IP 认出来的，只到省一级。"
             : "广场还空着，第一条可以你来发。");
     }
 }
@@ -854,62 +947,121 @@ async function deletePost(id) {
     }
 }
 
-async function openPostDetail(id) {
+/* 帖子详情：整页跳转（机主："帖子不要做成弹窗，跳转页面，参考微博"）。
+   正文大一号、配图单独一块、时间退到分割线下面，评论区铺满，输入框固定在底部。 */
+async function qsRenderPost(id) {
+    const body = cmEl("pl-body");
+    if (!body) return;
+    qsSetFoot("");
+    body.innerHTML = '<p class="cm-state">在读…</p>';
+    let r;
     try {
-        const r = await getJson("/api/community/posts/" + id);
-        const p = r.post;
-        const comments = (r.comments || []).map(c =>
-            '<li class="td-item"><span class="cm-avatar sm">' + cmAvatarInner(c.author) + "</span>"
-            + '<span class="td-item-main"><span class="td-item-title">' + escapeHtml(cmName(c.author)) +
-            '</span><span class="td-item-meta">' + escapeHtml(c.body) + "</span>"
-            + '<span class="td-item-meta">' + cmRegionTag(c.region) + " · " + escapeHtml(cmAgo(c.created_at)) + "</span></span>"
-            + '<span class="td-item-acts"><button type="button" class="td-btn td-btn-quiet" onclick="setReplyTarget(' +
-            c.id + ",'" + escapeHtml(cmName(c.author)).replace(/'/g, "%27") + "')\">回复</button></span></li>").join("");
-        toolDialog("帖子详情", '<div class="td-body">'
-            + '<div class="td-item"><span class="cm-avatar sm">' + cmAvatarInner(p.author) + "</span>"
-            + '<span class="td-item-main"><span class="td-item-title">' + escapeHtml(cmName(p.author)) + "</span>"
-            + '<span class="td-item-meta">' + cmRegionTag(p.region) + " · " + escapeHtml(cmAgo(p.created_at)) + "</span></span></div>"
-            + '<p class="td-lead" style="white-space:pre-wrap">' + escapeHtml(p.body) + "</p>"
-            + ((p.images || []).length ? '<div class="cm-grid">' + p.images.map(u =>
-                '<img src="' + escapeHtml(API_BASE + u) + '" alt="帖子配图">').join("") + "</div>" : "")
-            + '<div class="td-group"><div class="td-group-label">评论 ' + Number(p.comment_count) + " 条</div>"
-            + '<ul class="td-items">' + (comments || '<li class="td-empty">还没有人评论。</li>') + "</ul></div>"
-            + '<label class="td-field-row"><span class="td-field-label" id="cm-reply-label">说两句</span>'
-            + '<input id="cm-comment-text" type="text" maxlength="' + CM_LIMITS.comment + '" placeholder="友善一点，别报体重之外的数字">'
-            + '<span class="td-field-hint" id="cm-comment-err" role="status"></span></label>'
-            + '<div class="td-actions"><button type="button" class="td-btn" onclick="submitComment(' + id +
-            ')">发送评论</button><button type="button" class="td-btn td-btn-quiet" onclick="openDM(' + (p.author ? p.author.id : 0) +
-            ')">私信 TA</button></div></div>');
+        r = await getJson("/api/community/posts/" + id);
     } catch (e) {
-        callNativeToast("打不开这条帖子：" + (e.message || "网络不通"));
+        body.innerHTML = '<p class="cm-state">这条帖子打不开：' + escapeHtml(e.message || "网络不通") + "</p>";
+        return;
     }
+    const p = r.post;
+    if (!p) { body.innerHTML = '<p class="cm-state">这条帖子已经不在了。</p>'; return; }
+    cm.postId = Number(id);
+    cmText("pl-title", cmName(p.author) + " 的帖子");
+    const mine = p.author && state.user && p.author.id === state.user.id;
+    const imgs = (p.images || []).length
+        ? '<div class="pd-imgs' + (p.images.length === 1 ? " one" : "") + '">' + p.images.map(u =>
+            '<img src="' + escapeHtml(API_BASE + u) + '" alt="帖子配图" onclick="viewPostImage(\'' +
+            escapeHtml(API_BASE + u).replace(/'/g, "%27") + '\')">').join("") + "</div>"
+        : "";
+    const comments = (r.comments || []).map(c => '<div class="pd-cmt">'
+        + '<span class="cm-avatar sm">' + cmAvatarInner(c.author) + "</span>"
+        + '<div class="pd-cmt-main"><div class="pd-cmt-name">' + escapeHtml(cmName(c.author)) + "</div>"
+        + '<div class="pd-cmt-text">' + escapeHtml(c.body) + "</div>"
+        + '<div class="pd-cmt-sub"><span>' + cmRegionTag(c.region) + " · " + escapeHtml(cmAgo(c.created_at)) + "</span>"
+        + '<button type="button" class="pd-reply" onclick="setReplyTarget(' + c.id + ",'" +
+          escapeHtml(cmName(c.author)).replace(/'/g, "%27") + '\')">回复</button>'
+        + (c.deletable ? '<button type="button" class="pd-reply" onclick="removeComment(' + c.id + ',' + p.id + ')">删除</button>' : "")
+        + "</div></div></div>").join("");
+    body.innerHTML = '<article class="pd-post">'
+        + '<div class="pd-who"><button type="button" class="cm-who-btn" onclick="openPage(\'member\',' + (p.author ? p.author.id : 0) + ')">'
+        + '<span class="cm-avatar">' + cmAvatarInner(p.author) + "</span>"
+        + '<span class="cm-who"><span class="cm-name">' + escapeHtml(cmName(p.author)) + "</span>"
+        + '<span class="cm-sub">' + cmRegionTag(p.region) + "</span></span></button>"
+        + (mine ? "" : '<button type="button" class="cm-follow" aria-pressed="' + (p.followed_by_me ? "true" : "false") +
+            '" onclick="toggleFollow(' + (p.author ? p.author.id : 0) + ',this)">' +
+            (p.followed_by_me ? "已关注" : "关注") + "</button>")
+        + "</div>"
+        + '<div class="pd-text">' + escapeHtml(p.body) + "</div>" + imgs
+        + '<div class="pd-meta">' + escapeHtml(cmTime(p.created_at)) + " · " + cmRegionTag(p.region) + "</div>"
+        + '<div class="pd-acts">'
+        + '<button type="button" class="td-mini" aria-pressed="' + (p.liked_by_me ? "true" : "false") + '" '
+        + 'onclick="toggleLike(' + p.id + ',this)">❤ 赞 ' + Number(p.like_count) + "</button>"
+        + '<button type="button" class="td-mini" onclick="focusCommentInput()">💬 评论 ' + Number(p.comment_count) + "</button>"
+        + (p.author && !mine ? '<button type="button" class="td-mini" onclick="openDM(' + p.author.id + ')">私信 TA</button>' : "")
+        + (mine ? '<button type="button" class="td-mini" style="margin-left:auto" onclick="deletePostFromDetail(' + p.id + ')">删除</button>' : "")
+        + "</div></article>"
+        + '<h3 class="pd-sec">评论 ' + Number(p.comment_count) + "</h3>"
+        + (comments || '<p class="td-empty">还没有人评论，说第一句。</p>');
+    qsSetFoot('<input id="cm-comment-text" type="text" maxlength="' + CM_LIMITS.comment +
+        '" placeholder="' + (cmReplyTo ? "回复 @" + escapeHtml(cmReplyTo.name) : "友善一点，别报体重之外的数字") +
+        '" aria-label="评论内容" onkeydown="if(event.key===\'Enter\'){event.preventDefault();submitComment(' + p.id + ');}">'
+        + '<button type="button" class="td-btn" onclick="submitComment(' + p.id + ')">发送</button>');
 }
+
+function focusCommentInput() {
+    const input = cmEl("cm-comment-text");
+    if (input) input.focus();
+}
+
+async function deletePostFromDetail(id) {
+    if (!confirm("删掉这条帖子？删了就找不回来了。")) return;
+    try {
+        await deleteJson("/api/community/posts/" + id);
+        cm.items = cm.items.filter(x => x.id !== id);
+        renderFeed();
+        qsCloseAllPages();
+        callNativeToast("已删除");
+    } catch (e) { callNativeToast("没删掉：" + (e.message || "网络不通")); }
+}
+
+async function removeComment(id, postId) {
+    if (!confirm("删掉这条评论？")) return;
+    try {
+        await deleteJson("/api/community/comments/" + id);
+        qsRenderPost(postId);
+        syncCardCounts(postId);
+        callNativeToast("评论已删除");
+    } catch (e) { callNativeToast("没删掉：" + (e.message || "网络不通")); }
+}
+
+QS_PAGE_DEF.post = { title: "帖子详情", render: qsRenderPost };
+
+/* 旧入口保留成一行跳转，别的地方还在按老名字调它们 */
+function openPostDetail(id) { if (id) openPage("post", id); }
+function openThread(uid) { if (uid) openPage("dm", uid); }
 
 let cmReplyTo = null;
 function setReplyTo(id) { cmReplyTo = id; }
 function setReplyTarget(id, name) {
-    cmReplyTo = id;
-    const label = cmEl("cm-reply-label");
-    if (label) label.textContent = "回复 " + name;
+    cmReplyTo = { id: id, name: name };
     const input = cmEl("cm-comment-text");
-    if (input) input.focus();
+    if (input) { input.placeholder = "回复 @" + name; input.focus(); }
 }
 
 async function submitComment(postId) {
     const input = cmEl("cm-comment-text");
     const text = (input && input.value || "").trim();
-    if (!text) { cmText("cm-comment-err", "评论不能为空"); return; }
-    cmText("cm-comment-err", "");
+    if (!text) { callNativeToast("评论不能为空"); if (input) input.focus(); return; }
     try {
-        await postApi("/api/community/posts/" + postId + "/comments", { text, reply_to: cmReplyTo });
+        await postApi("/api/community/posts/" + postId + "/comments",
+            { text, reply_to: cmReplyTo ? cmReplyTo.id : null });
         cmReplyTo = null;
         callNativeToast("评论发出去了");
-        openPostDetail(postId);
+        if (input) input.value = "";
+        qsRenderPost(postId);
         const item = cm.items.find(x => x.id === Number(postId));
         if (item) item.comment_count = Number(item.comment_count || 0) + 1;
         syncCardCounts(postId);
     } catch (e) {
-        cmText("cm-comment-err", e.message || "评论没成功");
+        callNativeToast(e.message || "评论没成功");
     }
 }
 
@@ -947,30 +1099,47 @@ async function searchMembers() {
     }
 }
 
-async function openMemberHome(ident) {
-    if (!ident) return;
+async function qsRenderMember(ident) {
+    const body = cmEl("pl-body");
+    if (!body) return;
+    qsSetFoot("");
+    body.innerHTML = '<p class="cm-state">在读…</p>';
+    let r;
     try {
-        const r = await getJson("/api/community/users/" + ident);
-        const u = r.user;
-        const stats = [["帖子", u.posts], ["粉丝", u.followers], ["关注", u.following], ["获赞", u.likes_received]];
-        toolDialog(cmName(u) + " 的主页", '<div class="td-body">'
-            + '<div class="me-hero"><span class="me-avatar">' + cmAvatarInner(u) + "</span>"
-            + '<div class="me-hero-main"><div class="me-name">' + escapeHtml(cmName(u)) + "</div>"
-            + '<div class="me-line">轻塑号 <b>' + escapeHtml(u.public_id || "—") + "</b></div>"
-            + '<div class="me-line">' + cmRegionTag(u.region) + (u.is_me ? " · 这是你自己" : "") + "</div>"
-            + '<div class="me-bio">' + escapeHtml(u.bio || "还没有签名") + "</div></div></div>"
-            + '<div class="me-stats">' + stats.map(s =>
-                '<div class="me-stat"><b>' + Number(s[1]) + "</b><span>" + s[0] + "</span></div>").join("") + "</div>"
-            + (u.is_me ? "" : '<div class="td-actions">'
-                + '<button type="button" class="td-btn" aria-pressed="' + (u.followed ? "true" : "false") + '" onclick="toggleFollow(' + u.id + ',this)">' +
-                (u.followed ? "已关注" : "关注") + '</button><button type="button" class="td-btn td-btn-quiet" onclick="openDM(' + u.id + ')">私信</button></div>')
-            + '<div class="td-group"><div class="td-group-label">TA 的帖子</div><div class="cm-feed">'
-            + ((r.items || []).length ? r.items.map(function (x) { return cmCardHTML(x, false); }).join("") : '<p class="td-empty">还没有公开的帖子。</p>')
-            + "</div></div></div>");
+        r = await getJson("/api/community/users/" + ident);
     } catch (e) {
-        callNativeToast("主页打不开：" + (e.message || "网络不通"));
+        body.innerHTML = '<p class="cm-state">主页打不开：' + escapeHtml(e.message || "网络不通") + "</p>";
+        return;
     }
+    const u = r.user;
+    if (!u) { body.innerHTML = '<p class="cm-state">看不了这个主页（对方可能关掉了「允许别人搜到我」）。</p>'; return; }
+    cmText("pl-title", cmName(u));
+    cmEl("pl-slot").innerHTML = u.is_me ? "" :
+        '<button type="button" class="td-mini" onclick="openDM(' + u.id + ')">私信</button>';
+    const stats = [["posts", "帖子", u.posts], ["followers", "粉丝", u.followers],
+                   ["following", "关注", u.following], ["likes", "获赞", u.likes_received]];
+    body.innerHTML = '<div class="card me-hero"><span class="me-avatar">' + cmAvatarInner(u) + "</span>"
+        + '<div class="me-hero-main"><div class="me-name">' + escapeHtml(cmName(u)) + "</div>"
+        + '<div class="me-line">轻塑号 <b>' + escapeHtml(u.public_id || "—") + "</b>"
+        + '<button type="button" class="me-copy" data-copy="' + escapeHtml(String(u.public_id || "")) + '" data-label="轻塑号" onclick="qsCopyFrom(this)">复制</button></div>'
+        + '<div class="me-line">' + cmRegionTag(u.region) + (u.is_me ? " · 这是你自己" : "") + "</div>"
+        + '<div class="me-bio">' + escapeHtml(u.bio || "还没有签名") + "</div></div></div>"
+        + '<div class="card me-stats">' + stats.map(s =>
+            '<button type="button" class="me-stat" onclick="openStats(\'' + s[0] + "'," + u.id + ')">'
+            + '<b>' + Number(s[1]) + "</b><span>" + s[2] + "</span></button>").join("") + "</div>"
+        + (u.is_me ? "" : '<div class="td-actions">'
+            + '<button type="button" class="td-btn" aria-pressed="' + (u.followed ? "true" : "false") + '" onclick="toggleFollow(' + u.id + ',this)">' +
+            (u.followed ? "已关注" : "关注") + '</button><button type="button" class="td-btn td-btn-quiet" onclick="openDM(' + u.id + ')">私信</button></div>')
+        + '<h3 class="pd-sec">' + (u.is_me ? "我的帖子" : "TA 的帖子") + "</h3>"
+        + '<div class="cm-feed">'
+        + ((r.items || []).length ? r.items.map(function (x) { return cmCardHTML(x, false); }).join("")
+            : '<p class="td-empty">还没有公开的帖子。</p>') + "</div>";
 }
+
+QS_PAGE_DEF.member = { title: "主页", render: qsRenderMember };
+
+/* 旧入口保留：点名字、点头像统一走整页（带返回），不再弹窗 */
+function openMemberHome(ident) { if (ident) openPage("member", ident); }
 
 /* ── 消息：私信 + 互动通知 ─────────────────────────────────── */
 function setMessageTab(which) {
@@ -1017,7 +1186,6 @@ async function loadMessages() {
 function renderMessages() {
     const host = cmEl("msg-list");
     if (!host) return;
-    if (cm.thread) { cmState("msg-state", ""); host.innerHTML = ""; return; }
     if (cm.msgTab === "chats") {
         host.innerHTML = cm.convs.map(c =>
             '<button type="button" class="cm-row" onclick="openThread(' + c.with.id + ')">'
@@ -1048,32 +1216,101 @@ function renderMessages() {
     }
 }
 
-/* ── 聊天窗 ─────────────────────────────────────────────────── */
-async function openDM(uid) {
+/* 全部标为已读。上一版这个按钮绑了一个根本不存在的函数，
+   于是未读红点永远消不掉——这条是那份清单里的 P0 第 1 项。 */
+async function markNoticesRead() {
     if (!state.token) { openAuthModal(); return; }
-    const dlg = cmEl("account-tools-dialog");
-    if (dlg && dlg.open) dlg.close();
-    switchTab("messages");
-    setMessageTab("chats");
-    await openThread(uid);
+    try {
+        const r = await postApi("/api/notifications/read", { all: true });
+        cm.notices = cm.notices.map(n => Object.assign({}, n, { read_at: n.read_at || "just now" }));
+        cm.unreadTotal = 0;
+        if (cm.stats) cm.stats.notices_unread = 0;
+        paintNavBadge();
+        renderMessages();
+        callNativeToast("都标成已读了（" + Number((r && r.changed) || 0) + " 条）");
+    } catch (e) {
+        callNativeToast("没标上：" + (e.message || "网络不通"));
+    }
 }
 
-async function openThread(uid) {
-    if (!uid) return;
-    cm.thread = { partner: { id: uid }, page: 0, more: false, cursor: 0 };
-    cm.bubbles = [];
-    const thread = cmEl("msg-thread");
-    if (thread) thread.hidden = false;
-    cmText("thread-name", "对方");
-    cmText("thread-sub", "在读…");
-    await refreshThread();
+/* ── 统计格点进去：粉丝 / 关注 / 获赞 / 帖子 ─────────────────── */
+const QS_STAT_TITLES = { followers: "粉丝", following: "关注", likes: "收到的赞", posts: "全部帖子" };
+
+function openStats(kind, uid) {
+    if (!QS_STAT_TITLES[kind]) return;
+    openPage("stats", { kind: kind, uid: uid });
 }
+
+async function qsRenderStats(arg) {
+    const body = cmEl("pl-body");
+    if (!body) return;
+    qsSetFoot("");
+    const kind = arg.kind, uid = arg.uid || (state.user && state.user.id);
+    cmText("pl-title", QS_STAT_TITLES[kind] || "列表");
+    body.innerHTML = '<p class="cm-state">在读…</p>';
+    try {
+        if (kind === "followers" || kind === "following") {
+            const r = await getJson("/api/community/connections?user_id=" + uid + "&kind=" + kind + "&limit=30");
+            const items = r.items || [];
+            cmText("pl-title", (QS_STAT_TITLES[kind]) + " " + Number(r.total != null ? r.total : items.length));
+            body.innerHTML = items.length ? '<div class="cm-list">' + items.map(u =>
+                '<button type="button" class="cm-row" onclick="openPage(\'member\',' + u.id + ')">'
+                + '<span class="cm-avatar">' + cmAvatarInner(u) + "</span>"
+                + '<span class="cm-row-main"><span class="cm-row-title">' + escapeHtml(cmName(u)) + "</span>"
+                + '<span class="cm-row-meta">轻塑号 ' + escapeHtml(u.public_id || "—")
+                + (u.region ? " · 属地 " + escapeHtml(u.region) : "") + "</span></span>"
+                + '<span class="cm-row-side">' + (u.followed_by_me ? "已互相关注" : "") + "</span></button>").join("")
+                + "</div>"
+                : '<p class="td-empty">' + (kind === "followers" ? "还没有粉丝。" : "还没关注任何人。") + "</p>";
+            return;
+        }
+        const sort = kind === "likes" ? "likes" : "recent";
+        const r = await getJson("/api/community/posts-of?user_id=" + uid + "&sort=" + sort + "&limit=30");
+        const items = r.items || [];
+        cmText("pl-title", QS_STAT_TITLES[kind] + " " + Number(items.length));
+        body.innerHTML = items.length ? '<div class="cm-feed">'
+            + items.map(function (x) { return cmCardHTML(x, false); }).join("") + "</div>"
+            : '<p class="td-empty">' + (kind === "likes" ? "还没有人给你点赞。" : "还没有发过帖子。") + "</p>";
+    } catch (e) {
+        body.innerHTML = '<p class="cm-state">读不到：' + escapeHtml(e.message || "网络不通") + "</p>";
+    }
+}
+
+QS_PAGE_DEF.stats = { title: "列表", render: qsRenderStats };
+
+async function openDM(uid) {
+    if (!state.token) { openAuthModal(); return; }
+    if (!uid) return;
+    const dlg = cmEl("account-tools-dialog");
+    if (dlg && dlg.open) dlg.close();
+    // 以前是从「消息」tab 里点开的，连接由那次 switchTab 顺手拉起；
+    // 现在私信是整页，从主页直接进来，连接得在这里自己发起。
+    connectChat();
+    openPage("dm", uid);
+}
+
+async function qsRenderDm(uid) {
+    const body = cmEl("pl-body");
+    if (!body) return;
+    body.className = "pl-body chat";
+    if (!cm.thread || cm.thread.partner.id !== Number(uid)) {
+        cm.thread = { partner: { id: Number(uid) }, more: false, cursor: 0 };
+        cm.bubbles = [];
+        body.innerHTML = '<div class="cm-bubbles page" id="thread-bubbles"><p class="cm-state">在读…</p></div>';
+        qsSetFoot("");
+        await refreshThread();
+        return;
+    }
+    body.innerHTML = '<div class="cm-bubbles page" id="thread-bubbles"></div>';
+    paintThread();
+}
+
+QS_PAGE_DEF.dm = { title: "私信", render: qsRenderDm };
 
 function closeThread() {
     cm.thread = null;
-    const thread = cmEl("msg-thread");
-    if (thread) thread.hidden = true;
-    renderMessages();
+    qsCloseAllPages();
+    loadMessages();
 }
 
 async function refreshThread() {
@@ -1087,24 +1324,29 @@ async function refreshThread() {
         cm.thread.cursor = r.next_cursor || 0;
         paintThread();
         await postApi("/api/chat/read", { with_user: uid });
+        // 读完要把未读徽标一起结掉，否则红点会一直挂着（上一版就是这么坏的）
+        const conv = cm.convs.find(c => c.with && c.with.id === Number(uid));
+        if (conv) conv.unread = 0;
+        if (cm.stats) cm.stats.dm_unread = 0;
+        paintNavBadge();
     } catch (e) {
-        cmText("thread-sub", "记录没读到：" + (e.message || "网络不通"));
+        const host = cmEl("thread-bubbles");
+        if (host) host.innerHTML = '<p class="cm-state">记录没读到：' + escapeHtml(e.message || "网络不通") + "</p>";
     }
 }
 
 function paintThread() {
     if (!cm.thread) return;
     const me = state.user && state.user.id;
-    cmText("thread-name", cmName(cm.thread.partner));
-    const blockBtn = cmEl("thread-block-btn");
-    if (blockBtn) {
-        const blocked = !!cm.thread.partner.blocked;
-        blockBtn.textContent = blocked ? "取消拉黑" : "拉黑";
-        blockBtn.setAttribute("aria-pressed", blocked ? "true" : "false");
+    const p = cm.thread.partner;
+    cmText("pl-title", cmName(p));
+    const slot = cmEl("pl-slot");
+    if (slot) {
+        const blocked = !!(p && p.blocked);
+        slot.innerHTML = '<button type="button" class="td-mini" id="thread-block-btn" aria-pressed="' +
+            (blocked ? "true" : "false") + '" onclick="toggleBlock()">' + (blocked ? "取消拉黑" : "拉黑") + "</button>"
+            + '<button type="button" class="td-mini" onclick="openBubbleTheme()">气泡</button>';
     }
-    const sub = cmEl("thread-sub");
-    if (sub) sub.textContent = "轻塑号 " + (cm.thread.partner.public_id || "—") +
-        (cm.thread.partner.region ? " · 属地 " + cm.thread.partner.region : "");
     const host = cmEl("thread-bubbles");
     if (!host) return;
     const rows = [];
@@ -1113,11 +1355,99 @@ function paintThread() {
     Object.keys(cm.pending).forEach(rid => rows.push(cmBubbleHTML(cm.pending[rid].msg, me, true)));
     host.innerHTML = rows.join("");
     host.scrollTop = host.scrollHeight;
+    qsSetFoot('<input id="dm-input" type="text" maxlength="' + CM_LIMITS.dm +
+        '" placeholder="说点什么…" aria-label="私信内容" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendDM();}">'
+        + '<button type="button" class="td-btn" onclick="sendDM()">发送</button>');
 }
 
 function cmBubbleHTML(m, me, pending) {
-    return '<div class="cm-bubble ' + (m.from_id === me ? "me" : "them") + (pending ? " pending" : "") + '">'
+    const mine = m.from_id === me;
+    if (m.recalled_at) {
+        return '<div class="cm-bubble recalled">' + (mine ? "你撤回了一条消息" : "对方撤回了一条消息") + "</div>";
+    }
+    const mid = Number(m.id || 0);
+    return '<div class="cm-bubble ' + (mine ? "me" : "them") + (pending ? " pending" : "") + '"'
+        + (mine && cm.myTheme && cm.myTheme !== "green" ? ' data-t="' + escapeHtml(cm.myTheme) + '"' : "")
+        + ' data-mid="' + mid + '" data-mine="' + (mine ? 1 : 0) + '"'
+        + ' oncontextmenu="return qsBubbleMenu(event,' + mid + ')"'
+        + ' ontouchstart="qsBubbleHold(event,' + mid + ')" ontouchend="qsBubbleCancel()" ontouchmove="qsBubbleCancel()">'
         + escapeHtml(m.body) + "<time>" + escapeHtml(pending ? "发送中" : cmAgo(m.created_at)) + "</time></div>";
+}
+
+/* 气泡菜单：右击（桌面）或长按（手机）都能出，给"复制"和"撤回"。
+   机主原话："对话框不能鼠标复制文本也不能右击删除修改"。 */
+let qsHoldTimer = null;
+function qsFindBubble(mid) { return cm.bubbles.find(b => Number(b.id) === Number(mid)); }
+function qsHideMenu() { const m = cmEl("bubble-menu"); if (m) m.remove(); }
+function qsBubbleHold(ev, mid) {
+    const t = ev.currentTarget;
+    qsHoldTimer = setTimeout(() => qsShowMenu(t, mid), 480);
+}
+function qsBubbleCancel() { if (qsHoldTimer) { clearTimeout(qsHoldTimer); qsHoldTimer = null; } }
+function qsBubbleMenu(ev, mid) {
+    ev.preventDefault();
+    qsShowMenu(ev.currentTarget, mid, ev.clientX, ev.clientY);
+    return false;
+}
+function qsShowMenu(anchor, mid, x, y) {
+    qsHideMenu();
+    const m = qsFindBubble(mid);
+    if (!m || !anchor) return;
+    const me = state.user && state.user.id;
+    const mine = m.from_id === me;
+    const menu = document.createElement("div");
+    menu.id = "bubble-menu";
+    menu.className = "bubble-menu";
+    const canRecall = mine && !m.recalled_at && qsWithin(m.created_at, 300);
+    menu.innerHTML = '<button type="button" onclick="qsCopyBubble(' + Number(mid) + ')">复制</button>'
+        + (canRecall ? '<button type="button" onclick="recallDM(' + Number(mid) + ')">撤回</button>' : "");
+    document.body.appendChild(menu);
+    const r = anchor.getBoundingClientRect();
+    const px = x == null ? (r.left + r.width / 2) : x;
+    const py = y == null ? r.top : y;
+    const w = menu.offsetWidth || 140;
+    menu.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, px - w / 2)) + "px";
+    menu.style.top = Math.max(8, py - (menu.offsetHeight || 42) - 8) + "px";
+    setTimeout(() => document.addEventListener("click", qsHideMenu, { once: true }), 0);
+}
+function qsCopyBubble(mid) {
+    const m = qsFindBubble(mid);
+    qsHideMenu();
+    if (m) qsCopy(m.body, "消息");
+}
+function qsWithin(stamp, seconds) {
+    const t = Date.parse(String(stamp || "").replace(" ", "T"));
+    return isFinite(t) && (Date.now() - t) <= seconds * 1000;
+}
+async function recallDM(mid) {
+    qsHideMenu();
+    try {
+        await postApi("/api/chat/recall", { message_id: mid });
+        const m = qsFindBubble(mid);
+        if (m) m.recalled_at = new Date().toISOString();
+        paintThread();
+        callNativeToast("已撤回");
+    } catch (e) { callNativeToast("撤回没成功：" + (e.message || "网络不通")); }
+}
+
+/* 气泡装扮：只改自己这一侧，存进 community_profile.bubble_theme */
+const QS_THEMES = [["green", "墨绿"], ["blue", "蓝"], ["rose", "玫红"], ["ink", "黑"], ["amber", "琥珀"]];
+function openBubbleTheme() {
+    toolDialog("气泡装扮", '<div class="td-body"><p class="td-lead">只有你自己看到的气泡颜色，对方那边不变。</p>'
+        + '<div class="theme-dots">' + QS_THEMES.map(t =>
+            '<button type="button" class="theme-dot" data-t="' + t[0] + '" aria-label="' + t[1] + '气泡"'
+            + ' aria-pressed="' + ((cm.myTheme || "green") === t[0] ? "true" : "false") + '" onclick="pickBubbleTheme(\'' + t[0] + '\')"></button>').join("")
+        + "</div></div>");
+}
+async function pickBubbleTheme(t) {
+    try {
+        await postApi("/api/community/profile", { bubble_theme: t });
+        cm.myTheme = t;
+        const dlg = cmEl("account-tools-dialog");
+        if (dlg && dlg.open) dlg.close();
+        paintThread();
+        callNativeToast("气泡换好了");
+    } catch (e) { callNativeToast("没换成：" + (e.message || "网络不通")); }
 }
 
 async function loadOlderMessages() {
@@ -1142,6 +1472,8 @@ async function sendDM() {
     cm.pending[rid] = { rid, msg: { from_id: state.user && state.user.id, to_id: uid, body: text, created_at: "" } };
     input.value = "";
     paintThread();
+    // 会话列表先就地顶上这一条：不然发完回到列表还是上一句，得像机主说的那样"刷新才更新"
+    bumpConversation(uid, text, "me");
     wsSend({ t: "send", to: uid, text, request_id: rid });
     // 6 秒没等到回执就退回 HTTP 重发：request_id 一样，服务端只会把原来那条还回来，
     // 不会出现"看着丢了、其实发了两条"。
@@ -1151,10 +1483,24 @@ async function sendDM() {
         postApi("/api/chat/send", { to: uid, text, request_id: rid })
             .then(r => dmAck(rid, r.message))
             .catch(e => {
-                cmText("cm-ws-state", "这条没发出去：" + (e.message || "网络不通"));
+                callNativeToast("这条没发出去：" + (e.message || "网络不通"));
                 paintThread();
             });
     }, 6000);
+}
+
+/** 本地顶一条会话摘要。列表和聊天窗共用这一份 cm.convs，
+ *  所以发出去、收到、撤回三处都走它，不会再出现"要刷新才更新"。 */
+function bumpConversation(uid, body, side) {
+    const nowIso = new Date().toISOString().replace("T", " ").slice(0, 19);
+    let conv = cm.convs.find(c => c.with && Number(c.with.id) === Number(uid));
+    if (!conv) { loadMessages(); return; }
+    conv.last_body = body;
+    conv.last_at = nowIso;
+    conv.last_from = side === "me" ? (state.user && state.user.id) : Number(uid);
+    if (side !== "me") conv.unread = Number(conv.unread || 0) + 1;
+    cm.convs.sort((a, b) => String(b.last_at || "").localeCompare(String(a.last_at || "")));
+    if (cm.msgTab === "chats" && !cm.thread) renderMessages();
 }
 
 function dmAck(rid, message) {
@@ -1163,6 +1509,8 @@ function dmAck(rid, message) {
         if (cm.thread && (message.from_id === cm.thread.partner.id || message.to_id === cm.thread.partner.id)) {
             if (!cm.bubbles.some(b => b.id === message.id)) cm.bubbles.push(message);
         }
+        bumpConversation(message.from_id === (state.user && state.user.id) ? message.to_id : message.from_id,
+            message.body, message.from_id === (state.user && state.user.id) ? "me" : "them");
     }
     paintThread();
 }
@@ -1234,6 +1582,11 @@ function handleWsEvent(ev) {
         if (cm.thread && data.by === cm.thread.partner.id) {
             cm.bubbles = cm.bubbles.map(b => Object.assign({}, b, { read_at: b.read_at || new Date().toISOString() }));
         }
+    } else if (data.t === "recall") {
+        // 对方撤回了：气泡要就地变成"对方撤回了一条消息"，不能等他重进会话才变
+        cm.bubbles = cm.bubbles.map(b => Number(b.id) === Number(data.message_id)
+            ? Object.assign({}, b, { recalled_at: data.recalled_at || "just now" }) : b);
+        if (cm.thread) paintThread();
     }
 }
 
@@ -1261,8 +1614,8 @@ async function loadMe() {
         cmText("me-public-id", s.public_id || u.public_id || "—");
         const bio = acc && acc.profile && acc.profile.bio;
         cmText("me-bio", (acc && acc.bio) || bio || "还没有签名，点下面的「编辑签名」写一句");
-        const region = (acc && acc.region) || "";
-        cmText("me-region", region ? "属地 " + region : "属地未知（发一次帖子或评论就会带上）");
+        const region = s.region || (acc && acc.region) || "";
+        cmText("me-region", region ? "属地 " + region : "属地未知（登录时按 IP 认，换网络后会自动跟上）");
         const disc = acc && typeof acc.discoverable !== "undefined" ? acc.discoverable : 1;
         const badge = cmEl("me-discoverable-badge");
         if (badge) badge.textContent = disc ? "已开启" : "已关闭";
@@ -1274,10 +1627,14 @@ async function loadMe() {
                 : cmAvatarInner({ name: u.nickname || u.username });
         }
         paintMeAvatars();
-        const stats = [["帖子", s.posts], ["粉丝", s.followers], ["关注", s.following], ["获赞", s.likes_received]];
+        cm.myTheme = s.bubble_theme || "green";
+        const meId = (state.user && state.user.id) || 0;
+        const stats = [["posts", "帖子", s.posts], ["followers", "粉丝", s.followers],
+                       ["following", "关注", s.following], ["likes", "获赞", s.likes_received]];
         const host = cmEl("me-stats");
         if (host) host.innerHTML = stats.map(x =>
-            '<div class="me-stat"><b>' + Number(x[1]) + "</b><span>" + x[0] + "</span></div>").join("");
+            '<button type="button" class="me-stat" onclick="openStats(\'' + x[0] + "'," + meId + ')">'
+            + '<b>' + Number(x[1]) + "</b><span>" + x[2] + "</span></button>").join("");
         paintNavBadge();
         syncFeedbackHints();
         const feed = await getJson("/api/community/feed?tab=mine&limit=6");

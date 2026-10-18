@@ -231,6 +231,15 @@ public class DeviceSmokeTest {
                     +"&&rect.left>=0&&rect.right<=innerWidth&&rect.bottom<=innerHeight+1"
                     +"&&btns.length===2&&new Set(btns.map(b=>getComputedStyle(b).backgroundImage)).size===2;})()"));
             screenshot("dialog-sharing");
+            // 机主："本软件所有弹窗全部居中展示不要放左上角"。
+            // 根因是全局 `* { margin:0 }` 打掉了 <dialog> 自带的 margin-inline:auto，
+            // 所以这里量的是"真的居中了没有"，不是 CSS 里写没写。
+            assertEquals("弹窗没居中（左右留白应大致相等且上下都留了空）", "true", js(
+                    "(()=>{const d=document.getElementById('account-tools-dialog');"
+                    +"const r=d.getBoundingClientRect();"
+                    +"const dl=Math.round(r.left),dr=Math.round(innerWidth-r.right);"
+                    +"return Math.abs(dl-dr)<=4&&dl>=0&&r.top>=8&&r.bottom<=innerHeight-8;})()"));
+            screenshot("dialog-centered");
             js("document.getElementById('account-tools-dialog').close()");
 
             js("openRecordManager('food')");
@@ -932,16 +941,21 @@ public class DeviceSmokeTest {
         assertEquals("点赞之后 aria-pressed 没跟上", "true", js(
                 myCard + ".querySelector('.cm-act').getAttribute('aria-pressed')==='true'"));
         js(myCard + ".querySelectorAll('.cm-act')[1].click()");
-        waitFor("!!document.getElementById('cm-comment-text')");
+        // 帖子详情现在是整页：正文在 #pl-body，评论输入框固定在底部 #pl-foot
+        waitFor("qsPageOpen()===true && !!document.getElementById('cm-comment-text')");
+        assertEquals("详情页没显示这条帖子的正文", "true", js(
+                "document.getElementById('pl-body').textContent.indexOf("
+                + JSONObject.quote(postText) + ")>=0"));
         String commentText = "自己记一句：练后吃的 " + base;
         js("document.getElementById('cm-comment-text').value=" + JSONObject.quote(commentText)
                 + ";submitComment(" + mine + ");");
-        waitFor("document.querySelector('.td-items').textContent.indexOf("
+        waitFor("document.getElementById('pl-body').textContent.indexOf("
                 + JSONObject.quote(commentText) + ")>=0");
         assertEquals("评论数要跟着涨", "1", probeStr(
                 myCard + ".querySelectorAll('.cm-act b')[1].textContent"));
         screenshot("post-detail");
-        js("document.getElementById('account-tools-dialog').close()");
+        js("qsCloseAllPages()");
+        waitFor("qsPageOpen()===false");
 
         // 搜索：按昵称找人 → 点进主页 → 从主页发私信，全程真点击
         js("document.getElementById('cm-search-input').value=" + JSONObject.quote("阿毛") + ";searchMembers();");
@@ -950,13 +964,22 @@ public class DeviceSmokeTest {
         assertEquals("搜索结果里要带轻塑号", "true", js(
                 "document.getElementById('cm-search-results').textContent.indexOf('轻塑号')>=0"));
         js("document.querySelector('#cm-search-results .cm-row').click()");
-        waitFor("document.getElementById('account-tools-dialog').textContent.indexOf('关注')>=0");
+        // 机主："用户主页直接跳转页面不要弹窗了，加一个返回按钮"——所以这里查的是页面层不是 dialog
+        waitFor("qsPageOpen()===true && document.querySelector('.pl-title').textContent.indexOf("
+                + JSONObject.quote("阿毛") + ")>=0");
+        assertEquals("整页层没有返回按钮", "true", js(
+                "!!document.querySelector('.pl-back') && typeof closePage==='function'"));
         assertEquals("别人的主页不该写成自己", "true", js(
-                "document.getElementById('account-tools-dialog').textContent.indexOf('这是你自己')<0"));
+                "document.getElementById('pl-body').textContent.indexOf('这是你自己')<0"));
+        assertEquals("主页上的复制按钮要带着真实轻塑号（值放 data-copy，不拼进 onclick）", "true",
+                probeStr("(function(){var b=document.querySelector('#pl-body .me-copy');"
+                        + "if(!b)return false;"
+                        + "var v=b.getAttribute('data-copy')||'';"
+                        + "return String(v.length===8 && parseInt(v,10)>0);})()"));
         screenshot("member-home");
-        js("[].slice.call(document.querySelectorAll('#account-tools-dialog .td-btn'))"
+        js("[].slice.call(document.querySelectorAll('#pl-slot .td-mini, #pl-body .td-btn'))"
                 + ".filter(function(b){return b.textContent.indexOf('私信')>=0;})[0].click()");
-        waitFor("!!document.getElementById('msg-thread')&&!document.getElementById('msg-thread').hidden");
+        waitFor("qsPageOpen()===true && !!document.getElementById('thread-bubbles')");
         waitFor("cm.wsState==='connected'||cm.wsRetry>4");
         assertEquals("WebSocket 没连上（nginx 的 Upgrade 透传或票据有问题）", "connected", probeStr("cm.wsState"));
         assertEquals("实时连接状态要在界面上看得见", "true", js(
@@ -965,8 +988,44 @@ public class DeviceSmokeTest {
         js("document.getElementById('dm-input').value=" + JSONObject.quote(dmText) + ";sendDM();");
         waitFor("document.getElementById('thread-bubbles').textContent.indexOf("
                 + JSONObject.quote(dmText) + ")>=0");
+        // 机主："我发消息了上面列表那展示的还是我上一条消息，要刷新才会展示"
+        waitFor("cm.convs.length>0 && String(cm.convs[0].last_body).indexOf("
+                + JSONObject.quote(dmText) + ")>=0");
+        assertEquals("发出去之后会话摘要没立刻跟上", "true", js(
+                "String(cm.convs[0].last_body).indexOf(" + JSONObject.quote(dmText) + ")>=0"));
+        assertEquals("气泡要能右键/长按出菜单", "true", js(
+                "[].slice.call(document.querySelectorAll('.cm-bubble')).length>0"
+                + "&&[].slice.call(document.querySelectorAll('.cm-bubble'))"
+                + ".every(function(b){return b.getAttribute('oncontextmenu')!==null;})"));
         screenshot("dm-thread");
-        js("closeThread()");
+        // 撤回：走真实端点，撤完气泡改口、正文不再显示
+        String recallId = probeStr("(function(){var a=document.querySelectorAll('.cm-bubble.me');"
+                + "return a.length?String(a[a.length-1].getAttribute('data-mid')):'0';})()");
+        if (!"0".equals(recallId)) {
+            js("recallDM(" + recallId + ")");
+            waitFor("document.getElementById('thread-bubbles').textContent.indexOf('你撤回了一条消息')>=0");
+            assertEquals("撤回之后原话还印在屏上", "false", js(
+                    "document.getElementById('thread-bubbles').textContent.indexOf("
+                    + JSONObject.quote(dmText) + ")>=0"));
+            screenshot("dm-recalled");
+        }
+        js("document.querySelector('.pl-back').click()");
+        waitFor("qsPageOpen()===false");
+        assertEquals("返回按钮没把页面层收掉", "true", js("document.getElementById('page-layer').hidden"));
+
+        // 同城页签 + 统计可点：都是这轮新加的入口，点了必须有反应
+        js("setCommunityTab('city')");
+        waitFor("cm.feed==='city'");
+        js("switchTab('me')");
+        waitFor("document.querySelectorAll('#me-stats .me-stat').length===4");
+        assertEquals("统计格必须是能点的按钮", "true", js(
+                "document.querySelector('#me-stats .me-stat').tagName==='BUTTON'"));
+        js("document.querySelectorAll('#me-stats .me-stat')[2].click()");
+        waitFor("qsPageOpen()===true");
+        assertEquals("关注列表页没打开", "true", js(
+                "document.getElementById('pl-title').textContent.indexOf('关注')>=0"));
+        screenshot("stats-following");
+        js("qsCloseAllPages()");
 
         // 杀掉重进：消息必须在，说明它是存下来的而不是内存里的。
         // 先退出再重进：留着本机会话的话，自动恢复会和这次登录抢 sessionGeneration。

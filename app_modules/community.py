@@ -19,6 +19,9 @@ DEFAULT_PAGE = 12
 # 私信不在这张表里——未读以 messages.read_at 为准，再存一份计数就会出现两边对不上。
 NOTICE_KINDS = ("like", "comment", "reply", "follow")
 
+# 气泡装扮的可选值。只影响自己这一侧的显示，所以不需要对方配合，也不需要新表。
+BUBBLE_THEMES = ("green", "blue", "rose", "ink", "amber")
+
 # 轻塑号：8 位数字，注册时随机生成，唯一且永不复用；搜索按它精确匹配
 PUBLIC_ID_DIGITS = 8
 

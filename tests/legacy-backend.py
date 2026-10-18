@@ -107,12 +107,21 @@ def main():
         c.close()
         return rows
 
+    def fake_request(host="203.0.113.9"):
+        """register/login 现在都要读 request 拿 IP（登录就要落属地）。
+        夹具给一个带 client.host 的假请求，走的是 _ip() 真实那条路。"""
+        class _R:
+            client = type("C", (), {"host": host})()
+            method = "POST"
+            headers = {}
+        return _R()
+
     def mkuser(name, **kw):
         d = dict(username=name, password="pw123", gender="female", age=28, height=165.0,
                  weight_jin=140.0, target_weight_jin=120.0, goal_type="female_hourglass",
                  dining_mode="takeout")
         d.update(kw)
-        m.register(m.RegisterReq(**d))
+        m.register(m.RegisterReq(**d), fake_request())
         return dict(q("SELECT * FROM users WHERE username=?", (name,))[0])
 
     def get_secret(name):
@@ -426,8 +435,8 @@ def main():
 
     # aria-pressed 只该出现在可切换控件上；瞬时动作按钮挂 pressed 会念成"已按下"
     pressed = re.findall(r'<(?:div|button|span)[^>]*aria-pressed[^>]*>', html_txt)
-    check("pressed 只用在可切换项（餐别胶囊、拉黑开关）",
-          len(pressed) == 5 and all(("meal-slot-chip" in t or 'id="thread-block-btn"' in t) for t in pressed),
+    check("pressed 只用在餐别这类可切换项",
+          len(pressed) == 4 and all("meal-slot-chip" in t for t in pressed),
           "%d 处: %s" % (len(pressed), [t[:44] for t in pressed if "meal-slot" not in t][:2]))
     check("切换餐别会同步 pressed",
           "setAttribute(\"aria-pressed\", \"true\")" in js_txt
@@ -1001,7 +1010,7 @@ def main():
                  goal_type="tone", dining_mode="takeout")
         d.update(kw)
         try:
-            m.register(m.RegisterReq(**d))
+            m.register(m.RegisterReq(**d), fake_request())
             return ("ok", None, "")
         except Exception as e:
             # 只认状态码不够：必须认文案说的是哪一项，"该用户名已存在"也是 400
@@ -1737,9 +1746,12 @@ def main():
               'aria-selected="true"' in feat_css and "aria-selected" in feat_js, "")
         # 拉黑是个持久状态，不是瞬时动作：按钮必须跟着服务端的 partner.blocked 走，
         # 否则重开会话时写着"拉黑"，实际早就拉黑了
+        _pt = (feat_js.split("function paintThread()")[1].split("function cmBubbleHTML")[0]
+               if "function paintThread()" in feat_js else "")
         check("拉黑按钮的按下态由服务端回执决定",
-              "partner.blocked" in feat_js and 'blockBtn.setAttribute("aria-pressed"' in feat_js
-              and 'partner["blocked"]' in srv_src, "")
+              "cm.thread.partner" in _pt and ".blocked" in _pt
+              and 'id="thread-block-btn" aria-pressed="' in _pt
+              and 'partner["blocked"]' in srv_src, {"paintThread 长度": len(_pt)})
         # 作者行没有 flex 容器时，"关注"按钮会掉到下一行；名字与属地是 inline span 时
         # 会连成"小田属地 湖南"——这两条都是截图里量出来的，不是猜的
         check("帖子卡片作者行有 flex 容器包住关注按钮",
@@ -1761,8 +1773,8 @@ def main():
               all("border-radius:50%" in a for a in _av) and len(_av[0]) > 10 and len(_av[2]) > 10,
               [a[:34] for a in _av])
         # cmAvatarInner 返回的是 HTML，再套一层 escapeHtml 会把 <img> 当字面量印到屏上
-        _pd = (feat_js.split("async function openPostDetail")[1].split("let cmReplyTo")[0]
-               if "async function openPostDetail" in feat_js else "")
+        _pd = (feat_js.split("async function qsRenderPost")[1].split("function focusCommentInput")[0]
+               if "async function qsRenderPost" in feat_js else "")
         check("帖子详情里的人用圆形头像，不用功能图标方块",
               "cm-avatar sm" in _pd and "td-glyph" not in _pd, _pd[:60])
         check("头像片段不再被二次转义",
@@ -2145,6 +2157,105 @@ def main():
           and "结束" not in [k for ks, _t in m.SCENE_RULES for k in ks],
           [k for ks, _t in m.SCENE_RULES for k in ks if len(k) <= 2 and k in ("维持", "结束", "糖", "饿")])
     q("DELETE FROM kb_entries")
+
+    # ============ r150：整页跳转、按钮统一、撤回/统计/同城 ============
+    _html = read_asset("index.html")
+    _fjs = read_asset("features.js")
+    _fcss = read_asset("features.css")
+    _ajs = read_asset("app.js")
+    _all_js = _ajs + "\n" + _fjs
+
+    # 机主清单里的 P0 第 1 条：一个绑了不存在函数的按钮，四套判据全绿地漏了过去。
+    # 这道门是整套体系最便宜的补强——静态就能判，不需要跑起来。
+    _defined = set(re.findall(r'function\s+([A-Za-z_$][\w$]*)\s*\(', _all_js))
+    _defined |= set(re.findall(r'(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:function|\()', _all_js))
+    _bound = set(re.findall(r'on(?:click|change|input|submit|keydown|contextmenu|touchstart)="([A-Za-z_$][\w$]*)\s*\(',
+                            _html + _fjs + _ajs))
+    _dangling = sorted(b for b in _bound if b not in _defined and b != "if")
+    check("界面绑的处理函数都能解析到已定义函数（防死按钮）",
+          not _dangling and len(_bound) >= 100, {"悬空": _dangling, "绑定数": len(_bound)})
+    check("全部标为已读真的接了后端",
+          "async function markNoticesRead" in _fjs and '"/api/notifications/read"' in _fjs, "")
+
+    # 弹窗居中：`* { margin:0 }` 会打掉 <dialog> 的 UA 居中，必须显式写回来
+    check("弹窗居中而不是贴左上角",
+          ".tool-dialog{position:fixed;inset:0;margin:auto;" in _fcss, "")
+    check("全局 reset 确实会动 margin（这条红了说明根因变了，要重看居中方案）",
+          re.search(r'\*\s*\{\s*\n?\s*margin:\s*0', io.open(os.path.join(ROOT, "app", "src", "main",
+                  "assets", "style.css"), encoding="utf-8").read()) is not None, "")
+
+    # 页面层：看内容走整页，返回按钮要在
+    check("整页跳转层已挂进页面",
+          'id="page-layer"' in _html and 'class="pl-back" onclick="closePage()"' in _html
+          and "QS_PAGE_DEF.member" in _fjs and "QS_PAGE_DEF.post" in _fjs
+          and "QS_PAGE_DEF.dm" in _fjs and "QS_PAGE_DEF.stats" in _fjs, "")
+    check("用户主页与帖子详情不再走弹窗",
+          "toolDialog(" not in _fjs.split("async function qsRenderMember")[1][:1600]
+          if "async function qsRenderMember" in _fjs else False, "")
+    check("切 tab 会收起页面层，不会留一层盖在上面",
+          "if (qsPageOpen()) qsCloseAllPages();" in _fjs, "")
+    # 私信改成整页之后，连接不能再靠"顺手路过消息 tab"拉起，否则从主页点进来就是哑的
+    _dm = _fjs.split("async function openDM(uid)")[1].split("async function qsRenderDm")[0] \
+        if "async function openDM(uid)" in _fjs else ""
+    check("打开私信页会自己发起 WebSocket 连接",
+          "connectChat()" in _dm and 'openPage("dm"' in _dm, _dm[:80])
+
+    # 按钮统一：次按钮浅绿底、hover 深绿底、胶囊圆角覆盖到旧类
+    _sec = _fcss.split(".td-btn-quiet,.td-mini,.btn-secondary,.btn-outline,.me-copy{")[1].split("}")[0] \
+        if ".td-btn-quiet,.td-mini,.btn-secondary,.btn-outline,.me-copy{" in _fcss else ""
+    check("次按钮统一浅绿底（原来一半是白板）", "#ECFDF5" in _sec and "#047857" in _sec, _sec[:60])
+    def _css_rule(css, selector):
+        """把样式表拆成 (选择器, 规则体)，找选择器里含 selector 的那一条。
+        多选择器分组、跨行写法都能吃到——用 split("hover{...") 那种字符串截法会漏。"""
+        for sel, body in re.findall(r'([^{}]+)\{([^{}]*)\}', css):
+            if selector in " ".join(sel.split()):
+                return body.strip()
+        return ""
+    _hov = _css_rule(_fcss, ".btn-secondary:hover")
+    check("悬停统一给深绿反馈", "background:#059669" in _hov, _hov[:70])
+    check("动作按钮一律胶囊圆角",
+          ".btn-secondary,.btn-outline" in _fcss and "border-radius:999px" in _fcss, "")
+    check("主按钮仍是渐变（保住主次权重）",
+          ".td-btn,.btn-primary" in _fcss and "linear-gradient" in
+          _fcss.split(".td-btn,.btn-primary,.btn-log-meal")[1].split("}")[0], "")
+
+    # 文本要能选中复制（机主："对话框不能鼠标复制文本"）
+    check("气泡与正文允许选中复制，脱敏自全局 user-select:none",
+          ".cm-bubble,.cm-body" in _fcss and "user-select:text" in _fcss, "")
+
+    # 撤回：只有本人、限时、撤完正文不再外发
+    check("撤回端点要登录且限时",
+          '@app.post("/api/chat/recall")' in srv_txt
+          and "只能撤回自己发出的消息" in srv_txt and "RECALL_WINDOW_SEC = 300" in srv_txt, "")
+    check("撤回是打标记不是删行，且撤回后不回正文",
+          "UPDATE messages SET recalled_at=?" in srv_txt and '"body": "" if recalled else row["body"]' in srv_txt, "")
+    check("会话摘要跟着撤回改口",
+          "（已撤回）" in srv_txt and "UPDATE conversations SET last_body=?" in srv_txt, "")
+
+    # 统计可点：两个新列表端点 + 同城
+    check("粉丝/关注与帖子列表端点在且带总数",
+          '@app.get("/api/community/connections")' in srv_txt and '"total": total' in srv_txt
+          and '@app.get("/api/community/posts-of")' in srv_txt, "")
+    check("同城页签：没有属地时给空而不是给全部",
+          '"latest", "follow", "mine", "city"' in srv_txt
+          and "还没有你的属地" in srv_txt and 'return {"code": 0, "items": [], "next_cursor": 0, "more": False' in srv_txt, "")
+    check("前端也认同城", "latest\", \"follow\", \"mine\", \"city\"" in _fjs.replace("'", '"')
+          and 'data-feed="city"' in _html, "")
+
+    # 属地：登录/注册就认，不等发帖
+    check("登录与注册都会落一次属地",
+          srv_txt.count("touch_region(") >= 3 and "region_touch_failed" in srv_txt, srv_txt.count("touch_region("))
+    check("解析不出属地时保留原值，不掉回未知",
+          "if not region:" in srv_txt.split("def touch_region")[1][:400], "")
+
+    # 气泡装扮：白名单校验，脏值要拒
+    check("气泡颜色走白名单",
+          'BUBBLE_THEMES = ("green", "blue", "rose", "ink", "amber")' in
+          io.open(os.path.join(ROOT, "app_modules", "community.py"), encoding="utf-8").read()
+          and "没有这种气泡颜色" in srv_txt, "")
+    check("气泡只改自己一侧，不写进消息本体",
+          "recalled_at" in srv_txt and "bubble_theme" in srv_txt
+          and 'data-t="' in _fjs and "cm.myTheme" in _fjs, "")
 
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (
