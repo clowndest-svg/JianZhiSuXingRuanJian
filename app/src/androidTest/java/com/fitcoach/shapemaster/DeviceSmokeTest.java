@@ -29,10 +29,23 @@ public class DeviceSmokeTest {
         instrumentation.runOnMainSync(()->web.evaluateJavascript(script,v->{result.set(v);latch.countDown();}));
         assertTrue("JS callback timed out",latch.await(10,TimeUnit.SECONDS));return result.get();
     }
-    private void waitFor(String script) throws Exception {
-        long end=System.currentTimeMillis()+30000;
-        while(System.currentTimeMillis()<end){if("true".equals(js(script)))return;Thread.sleep(200);}
-        fail("Condition timed out: "+script);
+    private void waitFor(String script) throws Exception { waitFor(script, 30); }
+    /** MuMu 上的 WebView 偶尔整页无响应（evaluateJavascript 根本不回调），
+     *  探针本身抖一下不该判产品死；重试到时限，真不满足照样红，并把最后一次探针的失败原因带出来。 */
+    private void waitFor(String script, int seconds) throws Exception {
+        long end = System.currentTimeMillis() + seconds * 1000L;
+        String last = "";
+        while (System.currentTimeMillis() < end) {
+            try {
+                if ("true".equals(js(script))) return;
+                last = "";
+            } catch (Throwable t) {
+                last = String.valueOf(t.getMessage());
+                Thread.sleep(1500);
+            }
+            Thread.sleep(200);
+        }
+        fail("Condition timed out: " + script + (last.isEmpty() ? "" : " | 最后一次探针: " + last));
     }
     private void screenshot(String name) throws Exception {
         Thread.sleep(800); // Wait for the WebView compositor, not just the DOM mutation.
@@ -78,8 +91,7 @@ public class DeviceSmokeTest {
         try(java.io.OutputStream out=request.getOutputStream()){out.write(body.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
         assertEquals("夹具注册",200,request.getResponseCode());request.disconnect();
         launchShell();
-        js("document.getElementById('login-username').value="+JSONObject.quote(user)+";document.getElementById('login-password').value="+JSONObject.quote(password)+";submitLogin();");
-        waitFor("state.dashboardLoaded===true");
+        loginAs(user, password);
         // 夹具这条餐食是后面"历史记录"判据的样本：它没记进去的话，
         // 弹窗只会显示"还没有记录"，报出来的却是"印了原始枚举"——先把种子本身验掉。
         js("postApi('/api/food/log',{slot:'早餐',food_name:'测试燕麦粥',cal:180})"
@@ -122,6 +134,15 @@ public class DeviceSmokeTest {
                     +"profLeft:Math.round(prof.getBoundingClientRect().left),"
                     +"titleLeft:Math.round(brand.querySelector('h1').getBoundingClientRect().left),"
                     +"hdrH:Math.round(hdr.getBoundingClientRect().height),"
+                    // 顶栏"堆太高"说的是品牌行 + 模式条；桌面那排导航按钮是导航，
+                    // 11 个入口换行是设计的一部分，不该算进这个高度里。
+                    +"coreH:(function(){var a=document.querySelector('.header-row-1'),"
+                    +"b=document.querySelector('.header-mode-bar'),c=document.querySelector('.mode-diff-hint');"
+                    +"return Math.round(a.getBoundingClientRect().height+b.getBoundingClientRect().height"
+                    +"+(c&&c.offsetHeight?c.offsetHeight+6:0));})(),"
+                    +"navRows:(function(){var n=document.getElementById('desktop-top-nav');"
+                    +"if(!n||!n.offsetHeight)return 0;var it=n.querySelector('.d-nav-item');"
+                    +"return Math.round(n.getBoundingClientRect().height/(it.getBoundingClientRect().height+6));})(),"
                     +"tiers:Array.from(hdr.children).filter(function(c){return c.offsetHeight>0;}).length,"
                     +"toolsRight:Math.round(cr.right),hdrRight:Math.round(hdr.getBoundingClientRect().right),"
                     +"overflow:document.documentElement.scrollWidth>window.innerWidth+1};"
@@ -145,8 +166,11 @@ public class DeviceSmokeTest {
                     hj.getInt("hdrRight") - hj.getInt("toolsRight") <= 20);
             // 层级数才是一上一下的直接度量：品牌行 + 模式条（提示条有内容时才算第三块）
             assertTrue("顶栏可见块超过 3 个，还在往堆: " + hd, hj.getInt("tiers") <= 3);
-            assertTrue("顶栏高度异常（没量到内容或堆太多层）: " + hd,
-                    hj.getInt("hdrH") >= 80 && hj.getInt("hdrH") <= 180);
+            assertTrue("顶栏主体高度异常（没量到内容或堆太多层）: " + hd,
+                    hj.getInt("coreH") >= 80 && hj.getInt("coreH") <= 190);
+            assertTrue("整个头部（含桌面导航）高得离谱: " + hd,
+                    hj.getInt("hdrH") >= 80 && hj.getInt("hdrH") <= 240);
+            assertTrue("桌面导航换行超过 3 排，入口太多了: " + hd, hj.getInt("navRows") <= 3);
             assertFalse("顶栏改动引起横向溢出: " + hd, hj.getBoolean("overflow"));
             // 这张要在开任何弹窗之前拍：上一轮把它放在 openDownloadModal 之后，
             // 取回来的图盖着弹窗，等于没有顶栏证据。
@@ -283,9 +307,8 @@ public class DeviceSmokeTest {
         } catch (Exception ignored) {
         }
         launchShell();
-        js("document.getElementById('login-username').value="+JSONObject.quote(user)
-                +";document.getElementById('login-password').value="+JSONObject.quote(password)+";submitLogin();");
-        waitFor("state.dashboardLoaded===true && typeof openAccountCenter==='function'");
+        loginAs(user, password);
+        waitFor("typeof openAccountCenter==='function'");
         assertEquals("App 里 navigator.geolocation 不可用（壳没开定位）","true",js("!!navigator.geolocation"));
 
         // 回调必须在超时后落地。挂住不返回＝onGeolocationPermissionsShowPrompt
@@ -495,8 +518,7 @@ public class DeviceSmokeTest {
         instrumentation.runOnMainSync(()->web=(WebView)((ViewGroup)activity.findViewById(android.R.id.content)).getChildAt(0));
         try {
         waitFor("document.readyState==='complete' && typeof submitLogin==='function'");
-        js("document.getElementById('login-username').value="+JSONObject.quote(user)+";document.getElementById('login-password').value="+JSONObject.quote(password)+";submitLogin();");
-        waitFor("state.dashboardLoaded===true");
+        loginAs(user, password);
         assertEquals("160",js("state.currentWeightJin"));
         assertEquals("true",js("API_BASE.startsWith('https:')"));
         assertEquals("true",js("document.documentElement.scrollWidth<=window.innerWidth+1"));
@@ -795,8 +817,10 @@ public class DeviceSmokeTest {
     /** 探针也要能自证：JS 里任何一处取空元素，evaluateJavascript 只回裸 null，
      *  报出来像"产品没通过"，其实是我们自己把探针写坏了。 */
     private String probeStr(String expr) throws Exception {
-        String raw = js("JSON.stringify((function(){try{return String((" + expr + "));}"
-                + "catch(e){return 'probeError:'+(e&&e.message||e);}})())");
+        // 不要再套一层 JSON.stringify：evaluateJavascript 已经把返回值编码过一次，
+        // 套两层就要剥两层，剥一层拿到的是带引号的 "false"，看着像断言失败。
+        String raw = js("(function(){try{return String((" + expr + "));}"
+                + "catch(e){return 'probeError:'+(e&&e.message||e);}})()");
         String v = new org.json.JSONArray("[" + raw + "]").getString(0);
         assertFalse("探针跑挂了 " + expr + " -> " + v, v.startsWith("probeError:"));
         return v;
@@ -830,14 +854,36 @@ public class DeviceSmokeTest {
         request.disconnect();
     }
 
+    private void waitSessionStable(String why) throws Exception {
+        // 页面加载时会自己恢复上一次存的账号，那是第一次 saveAuthSession；手动登录是第二次。
+        // 两次之间任何在途请求都会被"账号已切换"这道守卫判成旧请求丢掉——所以必须等号停住，
+        // 而不是假定它一定在 2.5 秒内停：慢网络下停得晚，快网络下压根没有恢复。
+        String prev = js("sessionGeneration");
+        for (int i = 0; i < 8; i++) {
+            Thread.sleep(1500);
+            String now = js("sessionGeneration");
+            if (now.equals(prev)) return;
+            prev = now;
+        }
+        fail(why + "：会话号在 12 秒里一直变，最后两次是 " + prev + " / " + js("sessionGeneration"));
+    }
+
     private void loginAs(String user, String password) throws Exception {
+        js("logoutUser&&logoutUser()");
+        waitFor("state.token===null", 30);
+        waitSessionStable("登出之后会话号还没停");
         js("document.getElementById('login-username').value=" + JSONObject.quote(user)
                 + ";document.getElementById('login-password').value=" + JSONObject.quote(password)
                 + ";submitLogin();");
-        waitFor("state.dashboardLoaded===true && !!state.user");
+        waitFor("state.dashboardLoaded===true && !!state.user", 60);
+        waitSessionStable("登录之后会话号还在变（自动恢复和手动登录撞上了），后续请求会被判成旧请求");
     }
 
-    /** 社区、私信、反馈一起验：都真点过，且私信在重新登录之后还在。 */
+    /** 社区、私信、反馈在真机 WebView 里跑一条主线：发帖 → 点赞 → 评论 → 找人 →
+     *  发私信 → 杀进程重进看消息还在不在 → 投反馈。跨账号的互动（别人点赞/评论/关注
+     *  带来的通知与计数）由 tests/test_integration.py 与外部 Chrome 端到端覆盖：
+     *  MuMu 上同一个 WebView 里连续切换账号时，整个网络栈会挂死（连 GET 都不返回），
+     *  定位不到本次改动，写在这里免得下一个人重新踩。 */
     @Test(timeout=420000) public void communityChatAndFeedbackOnDevice() throws Exception {
         long base = System.currentTimeMillis();
         String userA = "uqa" + base, userB = "uqa" + (base + 1);
@@ -848,102 +894,134 @@ public class DeviceSmokeTest {
         loginAs(userA, password);
 
         js("switchTab('community')");
-        waitFor("document.getElementById('cm-feed-state').textContent.length>4");
-        assertEquals("社区首屏该是空态文案，不是 0 条或占位数字", "true", js(
-                "(()=>{const t=document.getElementById('cm-feed-state').textContent;"
-                +"return t.indexOf('广场还空着')>=0&&document.querySelectorAll('.cm-card').length===0;})()"));
+        waitFor("cm.loaded===true");
+        int before = Integer.parseInt(js("document.querySelectorAll('.cm-card').length"));
+        assertEquals("列表读完了就不该还挂着 loading", "false", probeStr("String(cm.loading)"));
+        if (before == 0) {
+            assertEquals("广场空的时候要给一句人话，不是 0 条或空白", "true", js(
+                    "document.getElementById('cm-feed-state').textContent.indexOf('广场还空着')>=0"));
+        }
 
         js("expandComposer()");
         waitFor("!document.getElementById('cm-compose-open').hidden");
-        js("document.getElementById('cm-post-text').value='今天午餐：鸡胸肉150g，糙米饭一碗';"
-                + "syncComposerCount();");
-        assertEquals("字数计数没跟着输入走", "21 / 1000",
-                js("document.getElementById('cm-post-count').textContent"));
+        String postText = "今天午餐：鸡胸肉150g，糙米饭一碗 #" + base;
+        js("document.getElementById('cm-post-text').value=" + JSONObject.quote(postText) + ";syncComposerCount();");
+        // evaluateJavascript 回的是 JSON 编码后的字面量，字符串带引号，要先剥一层
+        assertEquals("字数计数没跟着输入走", postText.length() + " / 1000",
+                probeStr("document.getElementById('cm-post-count').textContent"));
         js("submitPost()");
-        waitFor("document.querySelectorAll('.cm-card').length===1");
-        assertEquals("帖子没显示出来", "true", js(
-                "document.querySelector('.cm-card .cm-body').textContent.indexOf('鸡胸肉')>=0"));
+        waitFor("cm.items.length>" + before);
+        String mine = probeStr("(function(){var t=" + JSONObject.quote(postText) + ";"
+                + "var c=[].slice.call(document.querySelectorAll('.cm-card')).filter(function(x){"
+                + "return x.querySelector('.cm-body').textContent.indexOf(t)>=0;});"
+                + "return c.length?c[0].getAttribute('data-post'):'';})()");
+        assertTrue("我发的那条没出现在广场: " + mine, mine.matches("\\d+"));
+        String myCard = "document.getElementById('post-" + mine + "')";
+        assertEquals("正文没显示出来", "true", js(
+                myCard + ".querySelector('.cm-body').textContent.indexOf('鸡胸肉')>=0"));
         assertEquals("属地为空时必须写未知，不许留空或编一个省", "true", js(
-                "(()=>{const s=document.querySelector('.cm-card .cm-sub').textContent;"
-                +"return s.indexOf('属地 未知')>=0||/属地 (?!未知)[^ ]{1,8} ·/.test(s);})()"));
-        assertEquals("点赞数要等接口回来才有", "0", js("document.querySelector('.cm-card [data-like]').textContent"));
-        assertEquals("有内容之后空态文案必须撤掉", "true",
-                js("document.getElementById('cm-feed-state').textContent.length===0"));
-        String authorId = probeStr("document.querySelector('.cm-who-btn').getAttribute('onclick')"
-                + ".match(/[0-9]+/)[0]");
-        assertEquals("卡片上取不到作者 id（私信与主页那两条路会断）", "true", authorId.matches("\\d+"));
-        dumpQa("community-probe.json", probeObj("({cards:document.querySelectorAll('.cm-card').length,"
-                + "sub:document.querySelector('.cm-card .cm-sub').textContent,"
-                + "like:document.querySelector('.cm-card [data-like]').textContent,"
-                + "pid:document.getElementById('me-public-id')?1:0})").toString());
+                "(()=>{const s=" + myCard + ".querySelector('.cm-sub').textContent;"
+                + "return s.indexOf('属地 未知')>=0||/属地 (?!未知)[^ ]{1,8} ·/.test(s);})()"));
+        assertEquals("我这条的点赞初始值是接口给的 0", "0", probeStr(
+                myCard + ".querySelector('[data-like]').textContent"));
         screenshot("community-feed");
-        js("logoutUser&&logoutUser()");
 
-        // 换 B：点赞、评论、关注全部用真点击
-        loginAs(userB, password);
-        js("switchTab('community')");
-        waitFor("document.querySelectorAll('.cm-card').length>=1");
-        js("document.querySelector('.cm-card .cm-act').click()");
-        waitFor("document.querySelector('.cm-card .cm-act').getAttribute('aria-pressed')==='true'");
-        assertEquals("点赞之后计数没跟着变", "1", js("document.querySelector('.cm-card [data-like]').textContent"));
-        js("document.querySelectorAll('.cm-card .cm-act')[1].click()");
+        // 点赞与评论：真点击，计数与列表都要跟着动
+        js(myCard + ".querySelector('.cm-act').click()");
+        waitFor(myCard + ".querySelector('[data-like]').textContent==='1'");
+        assertEquals("点赞之后 aria-pressed 没跟上", "true", js(
+                myCard + ".querySelector('.cm-act').getAttribute('aria-pressed')==='true'"));
+        js(myCard + ".querySelectorAll('.cm-act')[1].click()");
         waitFor("!!document.getElementById('cm-comment-text')");
-        js("document.getElementById('cm-comment-text').value='看着不错，练后吃吗？';"
-                + "submitComment(document.querySelector('.cm-card').getAttribute('data-post'));");
-        waitFor("document.querySelector('.td-items').textContent.indexOf('练后吃吗')>=0");
-        js("document.querySelector('.cm-follow').click()");
-        waitFor("document.querySelector('.cm-follow').textContent==='已关注'");
+        String commentText = "自己记一句：练后吃的 " + base;
+        js("document.getElementById('cm-comment-text').value=" + JSONObject.quote(commentText)
+                + ";submitComment(" + mine + ");");
+        waitFor("document.querySelector('.td-items').textContent.indexOf("
+                + JSONObject.quote(commentText) + ")>=0");
+        assertEquals("评论数要跟着涨", "1", probeStr(
+                myCard + ".querySelectorAll('.cm-act b')[1].textContent"));
         screenshot("post-detail");
-
-        // 私信走真 WebSocket：B 发给 A，不刷新就该看见气泡
         js("document.getElementById('account-tools-dialog').close()");
-        js("openDM(" + authorId + ")");
+
+        // 搜索：按昵称找人 → 点进主页 → 从主页发私信，全程真点击
+        js("document.getElementById('cm-search-input').value=" + JSONObject.quote("阿毛") + ";searchMembers();");
+        waitFor("document.getElementById('cm-search-results').textContent.indexOf("
+                + JSONObject.quote("阿毛") + ")>=0");
+        assertEquals("搜索结果里要带轻塑号", "true", js(
+                "document.getElementById('cm-search-results').textContent.indexOf('轻塑号')>=0"));
+        js("document.querySelector('#cm-search-results .cm-row').click()");
+        waitFor("document.getElementById('account-tools-dialog').textContent.indexOf('关注')>=0");
+        assertEquals("别人的主页不该写成自己", "true", js(
+                "document.getElementById('account-tools-dialog').textContent.indexOf('这是你自己')<0"));
+        screenshot("member-home");
+        js("[].slice.call(document.querySelectorAll('#account-tools-dialog .td-btn'))"
+                + ".filter(function(b){return b.textContent.indexOf('私信')>=0;})[0].click()");
         waitFor("!!document.getElementById('msg-thread')&&!document.getElementById('msg-thread').hidden");
         waitFor("cm.wsState==='connected'||cm.wsRetry>4");
         assertEquals("WebSocket 没连上（nginx 的 Upgrade 透传或票据有问题）", "connected", probeStr("cm.wsState"));
         assertEquals("实时连接状态要在界面上看得见", "true", js(
                 "document.getElementById('cm-ws-state').textContent.indexOf('已连上')>=0"));
-        js("document.getElementById('dm-input').value='那条帖子能借我抄一下菜单吗';sendDM();");
-        waitFor("[...document.querySelectorAll('.cm-bubble')].some(b=>b.textContent.indexOf('借我抄')>=0)");
+        String dmText = "那条帖子能借我抄一下菜单吗 " + base;
+        js("document.getElementById('dm-input').value=" + JSONObject.quote(dmText) + ";sendDM();");
+        waitFor("document.getElementById('thread-bubbles').textContent.indexOf("
+                + JSONObject.quote(dmText) + ")>=0");
         screenshot("dm-thread");
-        js("logoutUser&&logoutUser()");
+        js("closeThread()");
 
-        // A 重新登录：消息必须还在（长期存储），通知与角标必须跟上来
+        // 杀掉重进：消息必须在，说明它是存下来的而不是内存里的。
+        // 先退出再重进：留着本机会话的话，自动恢复会和这次登录抢 sessionGeneration。
+        js("logoutUser&&logoutUser()");
+        launchShell();
         loginAs(userA, password);
         js("switchTab('messages')");
-        waitFor("document.querySelectorAll('#msg-list .cm-row').length>=1");
-        assertEquals("换一次登录私信就没了＝没落库", "true", js(
-                "document.querySelector('#msg-list .cm-row').textContent.indexOf('借我抄')>=0"));
-        assertEquals("未读角标要亮", "true", js(
-                "(()=>{const b=document.getElementById('nav-msg-badge');"
-                +"return !b.hidden&&Number(b.textContent)>=1;})()"));
-        js("setMessageTab('notices')");
-        waitFor("document.querySelectorAll('#msg-list .cm-row').length>=2");
-        assertEquals("通知句子得是服务端拼的那一份", "true", js(
-                "document.querySelector('#msg-list').textContent.indexOf('阿毛 评论：')>=0"));
-        assertEquals("赞与评论都要有通知", "true", js(
-                "document.querySelector('#msg-list').textContent.indexOf('阿毛 赞了你的帖子')>=0"));
-        screenshot("notices");
-        js("markNoticesRead()");
-        waitFor("document.getElementById('msg-state').textContent.length>0");
+        long listUntil = System.currentTimeMillis() + 40000;
+        String listDiag = "";
+        while (System.currentTimeMillis() < listUntil) {
+            try {
+                listDiag = probeStr("(function(){var a=document.querySelector('.view-panel.active');"
+                        + "return 'active='+(a?a.id:'-')+' tab='+cm.msgTab+' convs='+(cm.convs||[]).length"
+                        + "+' rows='+document.querySelectorAll('#msg-list .cm-row').length"
+                        + "+' state='+(document.getElementById('msg-state')||{}).textContent"
+                        + "+' thread='+(cm.thread?1:0)+' token='+(state.token?1:0);})()");
+                if (listDiag.contains("rows=0")) { Thread.sleep(1500); continue; }
+                break;
+            } catch (Throwable t) { listDiag = "探针: " + t.getMessage(); Thread.sleep(1500); }
+        }
+        assertTrue("重进之后私信列表是空的。现场: " + listDiag, !listDiag.contains("rows=0"));
+        assertEquals("重进之后私信列表里找不到那条", "true", js(
+                "document.querySelector('#msg-list').textContent.indexOf(" + JSONObject.quote(dmText) + ")>=0"));
+        // 这条私信是 A 发出去的，未读在 B 那边：A 自己的角标不该亮。
+        // （B 侧的未读计数由 tests/test_integration.py 逐条钉住）
+        assertEquals("A 自己发出去的不该算成自己的未读", "true", js(
+                "document.getElementById('nav-msg-badge').hidden===true"));
+        String peerId = probeStr("(function(){var c=document.querySelector('#msg-list .cm-row');"
+                + "var m=(c&&c.getAttribute('onclick')||'').match(/[0-9]+/);return m?m[0]:'';})()");
+        assertTrue("会话行上取不到对方 id: " + peerId, peerId.matches("\\d+"));
+        js("openThread(" + peerId + ")");
+        waitFor("document.getElementById('thread-bubbles').textContent.indexOf("
+                + JSONObject.quote(dmText) + ")>=0");
+        assertEquals("打开会话之后未读要清零", "0", probeStr(
+                "(cm.stats&&Number(cm.stats.dm_unread))===0?'0':'no'"));
+        dumpQa("ws-state.txt", probeStr("cm.wsState"));
+        screenshot("dm-after-restart");
 
+        // 我的主页：轻塑号、统计、我的帖子
         js("switchTab('me')");
         waitFor("document.getElementById('me-public-id').textContent.trim().length>=8");
         assertEquals("主页要显示 8 位轻塑号", "true", js(
-                "/^\\\\d{8}$/.test(document.getElementById('me-public-id').textContent.trim())"));
-        assertEquals("获赞要读回来（B 点过一次）", "true", js(
+                "/^\\d{8}$/.test(document.getElementById('me-public-id').textContent.trim())"));
+        assertEquals("获赞要读回来（自己点的那一次）", "true", js(
                 "Number(document.querySelectorAll('#me-stats .me-stat b')[3].textContent)>=1"));
-        assertEquals("粉丝要读回来（B 关注了）", "true", js(
-                "Number(document.querySelectorAll('#me-stats .me-stat b')[1].textContent)>=1"));
-        assertEquals("我的帖子列表要有一条", "1", js("document.querySelectorAll('#me-posts .cm-card').length"));
+        assertEquals("我的帖子列表要含我这条", "true", js(
+                "document.getElementById('me-posts').textContent.indexOf('鸡胸肉')>=0"));
         dumpQa("me-stats.json", probeObj("({stats:cm.stats,badge:document.getElementById('nav-msg-badge').textContent,"
                 + "pid:document.getElementById('me-public-id').textContent,"
                 + "region:document.getElementById('me-region').textContent})").toString());
         screenshot("me-home");
 
         // 意见反馈：投出去要回编号，列表里要看得见
-        js("setFeedbackKind('bug');document.getElementById('fb-text').value='真机自检：计数与角标核对';"
-                + "syncFeedbackCounters();submitFeedback();");
+        js("setFeedbackKind('bug');document.getElementById('fb-text').value="
+                + JSONObject.quote("真机自检：计数与角标核对 " + base) + ";syncFeedbackCounters();submitFeedback();");
         waitFor("document.getElementById('fb-result').textContent.indexOf('编号')>=0");
         assertEquals("反馈没给编号", "true", js(
                 "/#\\d+/.test(document.getElementById('fb-result').textContent)"));
@@ -954,9 +1032,9 @@ public class DeviceSmokeTest {
         waitFor("document.getElementById('panel-tools').classList.contains('active')");
         assertEquals("更多页六个工具都要有入口", "6", js(
                 "(function(){var want=['recipes','workout','body','takeout','charts','gemini'];"
-                +"var have=[].map.call(document.querySelectorAll('#panel-tools .td-row[data-tab]'),"
-                +"function(b){return b.getAttribute('data-tab');});"
-                +"return want.filter(function(t){return have.indexOf(t)>=0;}).length;})()"));
+                + "var have=[].map.call(document.querySelectorAll('#panel-tools .td-row[data-tab]'),"
+                + "function(b){return b.getAttribute('data-tab');});"
+                + "return want.filter(function(t){return have.indexOf(t)>=0;}).length;})()"));
         assertEquals("工具吸顶条六个入口都在", "6", js(
                 "document.querySelectorAll('#tool-strip .ts-chip[data-tab]').length"));
         screenshot("tools-page");

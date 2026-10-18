@@ -3528,6 +3528,8 @@ def _post_card(conn, row, me):
     pid = int(row["id"])
     liked = bool(conn.execute("SELECT 1 FROM post_likes WHERE post_id = ? AND user_id = ?",
                               (pid, me["id"])).fetchone()) if me else False
+    followed = bool(conn.execute("SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?",
+                                 (me["id"], row["user_id"])).fetchone()) if me else False
     return {"id": pid,
             "body": row["body"],
             "images": [signed_photo("/uploads/" + n) for n in community.read_images(row["images"])],
@@ -3537,6 +3539,7 @@ def _post_card(conn, row, me):
             "like_count": int(row["like_count"]),
             "comment_count": int(row["comment_count"]),
             "liked_by_me": liked,
+            "followed_by_me": followed,
             "mine": bool(me and int(row["user_id"]) == int(me["id"]))}
 
 
@@ -4163,7 +4166,11 @@ def chat_messages(with_user: int, cursor: int = 0, limit: int = 30,
                             "ORDER BY id DESC LIMIT ?", (ck, after, after or 0, size + 1)).fetchall()
         items = [_message_dict(r) for r in rows[:size]]
         items.reverse()
-        return {"code": 0, "items": items, "partner": _user_brief(conn, with_user, True),
+        partner = _user_brief(conn, with_user, True)
+        if partner:
+            partner["blocked"] = bool(conn.execute(
+                "SELECT 1 FROM user_blocks WHERE blocker=? AND blocked=?", (user["id"], with_user)).fetchone())
+        return {"code": 0, "items": items, "partner": partner,
                 "next_cursor": items[0]["id"] if len(rows) > size else 0,
                 "more": len(rows) > size}
     finally:

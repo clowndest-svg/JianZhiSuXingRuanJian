@@ -426,9 +426,9 @@ def main():
 
     # aria-pressed 只该出现在可切换控件上；瞬时动作按钮挂 pressed 会念成"已按下"
     pressed = re.findall(r'<(?:div|button|span)[^>]*aria-pressed[^>]*>', html_txt)
-    check("pressed 只用在餐别这类可切换项",
-          len(pressed) == 4 and all("meal-slot-chip" in t for t in pressed),
-          "%d 处: %s" % (len(pressed), [t[:40] for t in pressed if "meal-slot" not in t][:2]))
+    check("pressed 只用在可切换项（餐别胶囊、拉黑开关）",
+          len(pressed) == 5 and all(("meal-slot-chip" in t or 'id="thread-block-btn"' in t) for t in pressed),
+          "%d 处: %s" % (len(pressed), [t[:44] for t in pressed if "meal-slot" not in t][:2]))
     check("切换餐别会同步 pressed",
           "setAttribute(\"aria-pressed\", \"true\")" in js_txt
           and "setAttribute(\"aria-pressed\", \"false\")" in js_txt, "")
@@ -1706,6 +1706,15 @@ def main():
         check("帖子卡片与私信气泡都走转义，不拼裸 HTML",
               "escapeHtml(p.body)" in feat_js and "escapeHtml(m.body)" in feat_js
               and "escapeHtml(cmName(" in feat_js, "")
+        # uvicorn 光装自己不会说 WebSocket：没有实现库时它把升级请求当普通 HTTP 转给应用，
+        # 现场表现是"路由 404"，而路由明明注册着——这条判据钉的是那个隐形依赖。
+        _req = io.open(os.path.join(ROOT, "requirements.txt"), encoding="utf-8").read()
+        _lock = io.open(os.path.join(ROOT, "requirements.lock"), encoding="utf-8").read()
+        check("WebSocket 实现库进了依赖清单", "websockets" in _req and "websockets" in _lock,
+              {"txt": "websockets" in _req, "lock": "websockets" in _lock})
+        _ops = io.open(os.path.join(ROOT, "docs/operations.md"), encoding="utf-8").read()
+        check("运维手册写了 uvicorn 要显式选 ws 后端与 nginx 的 Upgrade 透传",
+              "websockets-sansio" in _ops and "proxy_http_version" in _ops, _ops[:40])
         check("私信在没有 WebSocket 时退回 HTTP 发送",
               'postApi("/api/chat/send"' in feat_js and "function wsOpen" in feat_js, "")
         check("复制轻塑号不许不管结果就说已复制",
@@ -1714,6 +1723,38 @@ def main():
               ".td-switch:checked" in feat_css and 'type="checkbox"' in feat_js, "")
         check("分段控件靠 aria-selected 区分当前项，不是再画一颗胶囊",
               'aria-selected="true"' in feat_css and "aria-selected" in feat_js, "")
+        # 拉黑是个持久状态，不是瞬时动作：按钮必须跟着服务端的 partner.blocked 走，
+        # 否则重开会话时写着"拉黑"，实际早就拉黑了
+        check("拉黑按钮的按下态由服务端回执决定",
+              "partner.blocked" in feat_js and 'blockBtn.setAttribute("aria-pressed"' in feat_js
+              and 'partner["blocked"]' in srv_src, "")
+        # 作者行没有 flex 容器时，"关注"按钮会掉到下一行；名字与属地是 inline span 时
+        # 会连成"小田属地 湖南"——这两条都是截图里量出来的，不是猜的
+        check("帖子卡片作者行有 flex 容器包住关注按钮",
+              '<div class="cm-card-head">' in feat_js and ".cm-card-head{display:flex" in feat_css, "")
+        check("名字、属地、摘要各自成行，不连成一串",
+              all((".%s{" % k) in feat_css and (".%s{display:block" % k) in feat_css
+                  for k in ("cm-name", "cm-sub", "cm-row-title", "cm-row-meta",
+                            "td-item-title", "td-item-meta")),
+              [k for k in ("cm-name", "cm-sub", "cm-row-title", "cm-row-meta",
+                           "td-item-title", "td-item-meta")
+               if (".%s{display:block" % k) not in feat_css])
+        check("关注按钮的初始态来自服务端而不是写死",
+              "p.followed_by_me" in feat_js and '"followed_by_me": followed' in srv_src, "")
+        # 头像在这个版本里只有一种形状：圆形。方角 16px 的 me-avatar 曾和 34px 圆头像并存
+        _av = [feat_css.split(".cm-avatar{")[1].split("}")[0] if ".cm-avatar{" in feat_css else "",
+               feat_css.split(".me-avatar{")[1].split("}")[0] if ".me-avatar{" in feat_css else "",
+               feat_css.split(".nav-avatar,.dnav-avatar{")[1].split("}")[0] if ".nav-avatar,.dnav-avatar{" in feat_css else ""]
+        check("三种尺寸的头像是同一种形状（圆）",
+              all("border-radius:50%" in a for a in _av) and len(_av[0]) > 10 and len(_av[2]) > 10,
+              [a[:34] for a in _av])
+        # cmAvatarInner 返回的是 HTML，再套一层 escapeHtml 会把 <img> 当字面量印到屏上
+        _pd = (feat_js.split("async function openPostDetail")[1].split("let cmReplyTo")[0]
+               if "async function openPostDetail" in feat_js else "")
+        check("帖子详情里的人用圆形头像，不用功能图标方块",
+              "cm-avatar sm" in _pd and "td-glyph" not in _pd, _pd[:60])
+        check("头像片段不再被二次转义",
+              "escapeHtml(cmAvatarInner" not in feat_js, "")
         _primary = feat_css.split(".td-btn{")[1].split("}")[0] if ".td-btn{" in feat_css else ""
         _quiet = feat_css.split(".td-btn-quiet{")[1].split("}")[0] if ".td-btn-quiet{" in feat_css else ""
         check("主按钮与次按钮必须不同权重（原来五颗绿描边胶囊长得一模一样）",

@@ -642,7 +642,7 @@ function cmRegionTag(region) { return region ? "属地 " + escapeHtml(region) : 
 function cmState(id, text) { cmText(id, text || ""); }
 
 function cmRoute(tab) {
-    if (tab === "community" && !cm.loaded) { cm.loaded = true; loadCommunity(false); }
+    if (tab === "community" && !cm.loaded && !cm.loading) loadCommunity(false);
     if (tab === "messages") { loadMessages(); connectChat(); }
     if (tab === "me") loadMe();
     if (tab === "tools") syncFeedbackHints();
@@ -658,20 +658,36 @@ function setCommunityTab(which) {
     loadCommunity(false);
 }
 
-function cmCardHTML(p) {
+/* 广场卡片上的两个数字都从 cm.items 现写：点赞/评论之后只改内存不改 DOM，
+   界面就会一直停在旧值，用户以为没生效又点一次。 */
+function syncCardCounts(postId) {
+    const item = cm.items.find(x => x.id === Number(postId));
+    const card = document.getElementById("post-" + postId);
+    if (!item || !card) return;
+    const nums = card.querySelectorAll(".cm-act b");
+    if (nums[0]) nums[0].textContent = String(Number(item.like_count));
+    if (nums[1]) nums[1].textContent = String(Number(item.comment_count));
+    const like = card.querySelector(".cm-act");
+    if (like) like.setAttribute("aria-pressed", item.liked_by_me ? "true" : "false");
+}
+
+function cmCardHTML(p, withId) {
     const imgs = (p.images || []).length
         ? '<div class="cm-grid">' + p.images.map(u =>
             '<img src="' + escapeHtml(API_BASE + u) + '" alt="帖子配图" loading="lazy" onclick="viewPostImage(\'' +
             escapeHtml(API_BASE + u).replace(/'/g, "%27") + '\')">').join("") + "</div>"
         : "";
     const mine = p.author && p.author.id === (state.user && state.user.id);
-    return '<article class="cm-card" data-post="' + p.id + '">'
+    return '<article class="cm-card"' + (withId ? ' id="post-' + p.id + '"' : '') + ' data-post="' + p.id + '">'
+        + '<div class="cm-card-head">'
         + '<button type="button" class="cm-who-btn" onclick="openMemberHome(' + (p.author ? p.author.id : 0) + ')">'
         + '<span class="cm-avatar">' + cmAvatarInner(p.author) + "</span>"
         + '<span class="cm-who"><span class="cm-name">' + escapeHtml(cmName(p.author)) + "</span>"
         + '<span class="cm-sub">' + cmRegionTag(p.region) + " · " + escapeHtml(cmAgo(p.created_at)) + "</span></span></button>"
-        + (mine ? "" : '<button type="button" class="cm-follow" aria-pressed="false" onclick="toggleFollow(' +
-            (p.author ? p.author.id : 0) + ',this)">关注</button>')
+        + (mine ? "" : '<button type="button" class="cm-follow" aria-pressed="' + (p.followed_by_me ? "true" : "false") +
+            '" onclick="toggleFollow(' + (p.author ? p.author.id : 0) + ',this)">' +
+            (p.followed_by_me ? "已关注" : "关注") + "</button>")
+        + "</div>"
         + '<div class="cm-body">' + escapeHtml(p.body) + "</div>" + imgs
         + '<div class="cm-acts">'
         + '<button type="button" class="cm-act" aria-pressed="' + (p.liked_by_me ? "true" : "false") + '" '
@@ -684,7 +700,7 @@ function cmCardHTML(p) {
 function renderFeed() {
     const host = cmEl("cm-feed");
     if (!host) return;
-    host.innerHTML = cm.items.map(cmCardHTML).join("");
+    host.innerHTML = cm.items.map(function (p) { return cmCardHTML(p, true); }).join("");
     const more = cmEl("cm-more");
     if (more) more.hidden = !cm.more;
     if (cmState("cm-feed-state", ""), !cm.items.length) {
@@ -705,6 +721,7 @@ async function loadCommunity(append) {
         cm.items = append ? cm.items.concat(r.items || []) : (r.items || []);
         cm.cursor = r.next_cursor || 0;
         cm.more = !!r.more;
+        cm.loaded = true;   // 读完一次才算 loaded；失败时留着 false，切回来会自己重试
         renderFeed();
     } catch (e) {
         cmState("cm-feed-state", "列表没读到：" + (e.message || "网络不通") + "，点上面任意一处重试。");
@@ -804,6 +821,7 @@ async function toggleLike(id, btn) {
         if (b) b.textContent = Number(r.like_count);
         const item = cm.items.find(x => x.id === id);
         if (item) { item.like_count = r.like_count; item.liked_by_me = r.liked; }
+        syncCardCounts(id);
     } catch (e) {
         btn.setAttribute("aria-pressed", cur ? "true" : "false");
         callNativeToast("点赞没生效：" + (e.message || "网络不通"));
@@ -841,14 +859,14 @@ async function openPostDetail(id) {
         const r = await getJson("/api/community/posts/" + id);
         const p = r.post;
         const comments = (r.comments || []).map(c =>
-            '<li class="td-item"><span class="td-glyph">' + escapeHtml(cmAvatarInner(c.author)) + "</span>"
+            '<li class="td-item"><span class="cm-avatar sm">' + cmAvatarInner(c.author) + "</span>"
             + '<span class="td-item-main"><span class="td-item-title">' + escapeHtml(cmName(c.author)) +
             '</span><span class="td-item-meta">' + escapeHtml(c.body) + "</span>"
             + '<span class="td-item-meta">' + cmRegionTag(c.region) + " · " + escapeHtml(cmAgo(c.created_at)) + "</span></span>"
             + '<span class="td-item-acts"><button type="button" class="td-btn td-btn-quiet" onclick="setReplyTarget(' +
             c.id + ",'" + escapeHtml(cmName(c.author)).replace(/'/g, "%27") + "')\">回复</button></span></li>").join("");
         toolDialog("帖子详情", '<div class="td-body">'
-            + '<div class="td-item"><span class="td-glyph">' + escapeHtml(cmAvatarInner(p.author)) + "</span>"
+            + '<div class="td-item"><span class="cm-avatar sm">' + cmAvatarInner(p.author) + "</span>"
             + '<span class="td-item-main"><span class="td-item-title">' + escapeHtml(cmName(p.author)) + "</span>"
             + '<span class="td-item-meta">' + cmRegionTag(p.region) + " · " + escapeHtml(cmAgo(p.created_at)) + "</span></span></div>"
             + '<p class="td-lead" style="white-space:pre-wrap">' + escapeHtml(p.body) + "</p>"
@@ -860,7 +878,7 @@ async function openPostDetail(id) {
             + '<input id="cm-comment-text" type="text" maxlength="' + CM_LIMITS.comment + '" placeholder="友善一点，别报体重之外的数字">'
             + '<span class="td-field-hint" id="cm-comment-err" role="status"></span></label>'
             + '<div class="td-actions"><button type="button" class="td-btn" onclick="submitComment(' + id +
-            ')">发送评论</button><button type="button" class="td-btn" onclick="openDM(' + (p.author ? p.author.id : 0) +
+            ')">发送评论</button><button type="button" class="td-btn td-btn-quiet" onclick="openDM(' + (p.author ? p.author.id : 0) +
             ')">私信 TA</button></div></div>');
     } catch (e) {
         callNativeToast("打不开这条帖子：" + (e.message || "网络不通"));
@@ -887,8 +905,9 @@ async function submitComment(postId) {
         cmReplyTo = null;
         callNativeToast("评论发出去了");
         openPostDetail(postId);
-        const item = cm.items.find(x => x.id === postId);
+        const item = cm.items.find(x => x.id === Number(postId));
         if (item) item.comment_count = Number(item.comment_count || 0) + 1;
+        syncCardCounts(postId);
     } catch (e) {
         cmText("cm-comment-err", e.message || "评论没成功");
     }
@@ -946,7 +965,7 @@ async function openMemberHome(ident) {
                 + '<button type="button" class="td-btn" aria-pressed="' + (u.followed ? "true" : "false") + '" onclick="toggleFollow(' + u.id + ',this)">' +
                 (u.followed ? "已关注" : "关注") + '</button><button type="button" class="td-btn td-btn-quiet" onclick="openDM(' + u.id + ')">私信</button></div>')
             + '<div class="td-group"><div class="td-group-label">TA 的帖子</div><div class="cm-feed">'
-            + ((r.items || []).length ? r.items.map(cmCardHTML).join("") : '<p class="td-empty">还没有公开的帖子。</p>')
+            + ((r.items || []).length ? r.items.map(function (x) { return cmCardHTML(x, false); }).join("") : '<p class="td-empty">还没有公开的帖子。</p>')
             + "</div></div></div>");
     } catch (e) {
         callNativeToast("主页打不开：" + (e.message || "网络不通"));
@@ -1077,6 +1096,12 @@ function paintThread() {
     if (!cm.thread) return;
     const me = state.user && state.user.id;
     cmText("thread-name", cmName(cm.thread.partner));
+    const blockBtn = cmEl("thread-block-btn");
+    if (blockBtn) {
+        const blocked = !!cm.thread.partner.blocked;
+        blockBtn.textContent = blocked ? "取消拉黑" : "拉黑";
+        blockBtn.setAttribute("aria-pressed", blocked ? "true" : "false");
+    }
     const sub = cmEl("thread-sub");
     if (sub) sub.textContent = "轻塑号 " + (cm.thread.partner.public_id || "—") +
         (cm.thread.partner.region ? " · 属地 " + cm.thread.partner.region : "");
@@ -1216,10 +1241,10 @@ async function toggleBlock() {
     if (!cm.thread) return;
     const uid = cm.thread.partner.id;
     const btn = cmEl("thread-block-btn");
-    const on = btn && btn.textContent === "取消拉黑";
+    const on = !!(btn && btn.getAttribute("aria-pressed") === "true");
     try {
         await postApi("/api/chat/block", { with_user: uid, on: !on });
-        if (btn) btn.textContent = on ? "拉黑" : "取消拉黑";
+        if (btn) { btn.textContent = on ? "拉黑" : "取消拉黑"; btn.setAttribute("aria-pressed", on ? "false" : "true"); }
         callNativeToast(on ? "已经取消拉黑" : "已拉黑，对方不能再私信你");
     } catch (e) { callNativeToast("操作没生效：" + (e.message || "网络不通")); }
 }
@@ -1257,7 +1282,7 @@ async function loadMe() {
         syncFeedbackHints();
         const feed = await getJson("/api/community/feed?tab=mine&limit=6");
         const posts = cmEl("me-posts");
-        if (posts) posts.innerHTML = (feed.items || []).map(cmCardHTML).join("");
+        if (posts) posts.innerHTML = (feed.items || []).map(function (x) { return cmCardHTML(x, false); }).join("");
         cmText("me-posts-state", (feed.items || []).length ? "" : "还没有发过帖子。");
     } catch (e) {
         cmText("me-name", "读不到：" + (e.message || "网络不通"));

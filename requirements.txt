@@ -4,3 +4,4 @@ uvicorn==0.54.0
 python-multipart==0.0.32
 Pillow==12.3.0
 redis==5.2.1
+websockets==17.2

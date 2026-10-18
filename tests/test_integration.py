@@ -619,6 +619,12 @@ class Integration(unittest.TestCase):
         self.c.post('/api/community/users/%d/follow' % target['id'], headers=self.auth, json={'on': True})
         stats = self.c.get('/api/community/stats', headers=tauth).json()
         self.assertEqual(stats['followers'], 1)
+        # 卡片上的关注按钮要有初始态：刚关注的人，帖子卡片该显示"已关注"
+        self.c.post('/api/community/posts', headers=tauth, json={'text': '关注态要跟着卡片'})
+        def _card():
+            return [x for x in self.c.get('/api/community/feed?tab=latest', headers=self.auth).json()['items']
+                    if '关注态要跟着卡片' in x['body']][0]
+        self.assertTrue(_card()['followed_by_me'], '已经关注了，卡片还说没关注')
         # 关注流 = 我关注的人发的帖子。所以要让 target 反过来关注 owner，
         # 再由 target 读——方向写反的判据会把功能说反。
         self.c.post('/api/community/users/%d/follow' % self.signup['id'], headers=tauth, json={'on': True})
@@ -629,6 +635,7 @@ class Integration(unittest.TestCase):
         self.assertEqual(outsider, [], '没关注任何人的人不该看到别人的帖子')
         self.c.post('/api/community/users/%d/follow' % target['id'], headers=self.auth, json={'on': False})
         self.assertEqual(self.c.get('/api/community/stats', headers=tauth).json()['followers'], 0)
+        self.assertFalse(_card()['followed_by_me'], '取关之后卡片还是"已关注"')
         notices = self.c.get('/api/notifications', headers=tauth).json()['items']
         self.assertEqual([n for n in notices if n['kind'] == 'follow'], [],
                          '取关之后那条"某人关注了你"该一起收掉')
@@ -688,6 +695,17 @@ class Integration(unittest.TestCase):
         blocked = self.c.post('/api/chat/send', headers=self.auth,
                               json={'to': peer['id'], 'text': '被拉黑之后'})
         self.assertEqual(blocked.status_code, 403, '对方拉黑了我还能发私信')
+        # 拉黑是持久状态：我拉黑对方后重开会话，按钮必须显示"取消拉黑"（上面那条是对方拉黑我，方向不同）
+        self.c.post('/api/chat/block', headers=self.auth,
+                    json={'with_user': peer['id'], 'on': True})
+        self.assertTrue(self.c.get('/api/chat/messages?with_user=%d' % peer['id'],
+                                   headers=self.auth).json()['partner']['blocked'],
+                        '已经拉黑了，会话回执却说没拉黑')
+        self.c.post('/api/chat/block', headers=self.auth,
+                    json={'with_user': peer['id'], 'on': False})
+        self.assertFalse(self.c.get('/api/chat/messages?with_user=%d' % peer['id'],
+                                    headers=self.auth).json()['partner']['blocked'],
+                         '取消拉黑之后回执还是拉黑态')
 
     def test_ws_ticket_is_one_time_and_chat_round_trips(self):
         peer, pauth = self._member('wsparty')

@@ -11,6 +11,23 @@
 5. 执行 `python3 scripts/verify_live.py`；只使用随机命名的临时账号，结束时按该账号ID清理。检查公网回读脚本/APK的 SHA-256、证书验证、HTTP重定向与版本清单一致性。
 6. 移除临时 QA 路由、停用 QA service，保留正式回退快照。不得删除 `data/`、`uploads/`、受保护的密钥或有效恢复备份。
 
+
+## WebSocket 与 nginx（r149 起）
+
+- 私聊走 `/ws/chat`。两件事缺一不可，缺任何一条现场都只表现为「实时连接用不了」，
+  而发消息照样能成功（前端会退回 HTTP），所以坏在暗处：
+  1. `uvicorn` 必须显式 `--ws websockets-sansio`。装了 `websockets` 但版本是 15+（旧版
+     legacy 实现被删）时，`--ws auto` 会退化到不支持升级，把握手当普通 HTTP 转给应用，
+     现场看到 `/ws/chat` 404 —— 而路由其实注册着。现役 unit 里已写死该参数，
+     正本备份在 `backups/qingsu.service.before-ws`。
+  2. nginx 要有 `location /ws/` 并带 `proxy_http_version 1.1` + `Upgrade`/`Connection` 两颗头。
+     配置正本在仓库 `scripts/qingsu-tls.conf`，落盘到 `/opt/qingsu/tls/default.conf`。
+- **改这个文件必须用 `cat 新内容 > 目标`，不能用 `install`/`cp` 换 inode**：容器把该文件
+  按路径绑成只读挂载，绑的是当时那个 inode；换 inode 之后 `nginx -s reload` 读到的还是旧内容
+  （实测 `nginx -T` 里查不到新 location）。改完要 `docker restart qingsu-tls` 才会重新解析。
+- 自检：`curl -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13'`
+  打 `https://…/ws/chat?ticket=bad`，**403 才是对的**（票据被应用拒），404 说明中间某层没透传。
+
 ## 正式服务
 
 - `systemctl status qingsu`：专用账号运行，只读代码，数据与媒体目录可写。

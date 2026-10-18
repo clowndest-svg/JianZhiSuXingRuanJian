@@ -7,6 +7,23 @@ username='releasecheck_'+secrets.token_hex(5)
 with opener.open(base+'/version.json',timeout=15) as response:
     build=str(json.load(response).get('version_code') or 0)
 assert build!='0','线上清单没有 version_code，自检无法冒充现行客户端'
+def _user_refs(conn):
+    """所有指向 users 的 (表, 列)。社区那批表里 follows/messages/user_blocks 的列名
+    都不叫 user_id，写死一张旧清单就会"删不掉"或者留孤儿行——改成从外键定义现读。"""
+    out = []
+    names = [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()]
+    for table in names:
+        cols = {c[1] for c in conn.execute("PRAGMA table_info(%s)" % table).fetchall()}
+        fks = {fk[3] for fk in conn.execute("PRAGMA foreign_key_list(%s)" % table).fetchall()
+               if fk[2] == "users"}
+        wanted = fks | {c for c in cols if c in (
+            "user_id", "follower_id", "followee_id", "from_id", "to_id", "blocker",
+            "blocked", "reporter", "actor_id", "a_id", "b_id", "last_from")}
+        out += [(table, c) for c in sorted(wanted)]
+    return out
+
+
 def api(path,body=None,token=None):
     req=urllib.request.Request(base+path,data=None if body is None else json.dumps(body).encode(),headers={'Content-Type':'application/json','X-App-Build':build,**({'Authorization':'Bearer '+token} if token else {})})
     try:
@@ -42,7 +59,12 @@ finally:
     db=sqlite3.connect(os.environ.get('QINGSU_VERIFY_DB','/opt/qingsu/data/qingsu.db'));db.execute('PRAGMA foreign_keys=ON')
     ids=[r[0] for r in db.execute('SELECT id FROM users WHERE username=?',(username,))]
     for uid in ids:
-        for table in ('sessions','profiles','food_logs','weight_logs','workout_logs','water_logs','body_cycles','takeout_events','checklist_state','ai_memory','cheers','private_ai_answers','daily_modes','request_receipts','daily_metrics','record_changes','share_settings','daily_reviews'):
-            db.execute('DELETE FROM '+table+' WHERE user_id=?',(uid,))
+        # 表清单不能写死：社区那批表里 follows/messages/user_blocks 用的列名都不是 user_id，
+        # 漏一张就是"删不掉"或者留孤儿行。改成从外键定义现读。
+        for table, col in _user_refs(db):
+            try:
+                db.execute('DELETE FROM %s WHERE %s=?' % (table, col), (uid,))
+            except sqlite3.OperationalError:
+                pass
         db.execute('DELETE FROM users WHERE id=?',(uid,))
     db.commit();print('remaining_users='+str(db.execute('SELECT COUNT(*) FROM users').fetchone()[0]));db.close()
