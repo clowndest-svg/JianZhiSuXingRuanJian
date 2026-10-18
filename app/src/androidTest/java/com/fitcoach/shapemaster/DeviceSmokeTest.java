@@ -843,7 +843,7 @@ public class DeviceSmokeTest {
         return out;
     }
 
-    private void registerFixture(String user, String nickname, String password) throws Exception {
+    private org.json.JSONObject registerFixture(String user, String nickname, String password) throws Exception {
         org.json.JSONObject body = new org.json.JSONObject().put("username", user).put("password", password)
                 .put("nickname", nickname).put("age", 30).put("height", 170)
                 .put("weight_jin", 160).put("target_weight_jin", 140);
@@ -860,7 +860,14 @@ public class DeviceSmokeTest {
             out.write(body.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
         assertEquals("夹具注册 " + user, 200, request.getResponseCode());
+        java.io.InputStream src = request.getInputStream();
+        java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+        byte[] chunk = new byte[4096];
+        int got;
+        while ((got = src.read(chunk)) > 0) { buf.write(chunk, 0, got); }
+        String text = new String(buf.toByteArray(), "UTF-8");
         request.disconnect();
+        return new org.json.JSONObject(text);
     }
 
     private void waitSessionStable(String why) throws Exception {
@@ -898,7 +905,7 @@ public class DeviceSmokeTest {
         String userA = "uqa" + base, userB = "uqa" + (base + 1);
         String password = "UsbQaOnly!123";
         registerFixture(userA, "小田", password);
-        registerFixture(userB, "阿毛", password);
+        String peerPid = registerFixture(userB, "阿毛", password).getString("public_id");
         launchShell();
         loginAs(userA, password);
 
@@ -958,9 +965,11 @@ public class DeviceSmokeTest {
         waitFor("qsPageOpen()===false");
 
         // 搜索：按昵称找人 → 点进主页 → 从主页发私信，全程真点击
-        js("document.getElementById('cm-search-input').value=" + JSONObject.quote("阿毛") + ";searchMembers();");
+        // 按这一轮那位的轻塑号精确找：昵称"阿毛"在库里已经有一堆历史夹具，
+        // 按昵称点开的可能是上一轮那个还没属地的账号，测出来的东西对不上号。
+        js("document.getElementById('cm-search-input').value=" + JSONObject.quote(peerPid) + ";searchMembers();");
         waitFor("document.getElementById('cm-search-results').textContent.indexOf("
-                + JSONObject.quote("阿毛") + ")>=0");
+                + JSONObject.quote(peerPid) + ")>=0");
         assertEquals("搜索结果里要带轻塑号", "true", js(
                 "document.getElementById('cm-search-results').textContent.indexOf('轻塑号')>=0"));
         js("document.querySelector('#cm-search-results .cm-row').click()");
@@ -1009,6 +1018,17 @@ public class DeviceSmokeTest {
                     + JSONObject.quote(dmText) + ")>=0"));
             screenshot("dm-recalled");
         }
+        // 撤回会把会话摘要改成"已撤回"，所以"消息是存下来的"这件事要用一条没被撤的来验
+        String keepText = "这条不撤，留着验它是存下来的 " + base;
+        js("document.getElementById('dm-input').value=" + JSONObject.quote(keepText) + ";sendDM();");
+        waitFor("document.getElementById('thread-bubbles').textContent.indexOf("
+                + JSONObject.quote(keepText) + ")>=0");
+        // 返回要一级一级退：私信是从主页点进去的，所以第一下回到主页，第二下才收起整层
+        js("document.querySelector('.pl-back').click()");
+        waitFor("qsPageOpen()===true && document.querySelector('.pl-title').textContent.indexOf("
+                + JSONObject.quote("阿毛") + ")>=0");
+        assertEquals("第一下返回应该退回主页，不该把整层收掉", "true", js(
+                "!document.getElementById('page-layer').hidden"));
         js("document.querySelector('.pl-back').click()");
         waitFor("qsPageOpen()===false");
         assertEquals("返回按钮没把页面层收掉", "true", js("document.getElementById('page-layer').hidden"));
@@ -1048,7 +1068,7 @@ public class DeviceSmokeTest {
         }
         assertTrue("重进之后私信列表是空的。现场: " + listDiag, !listDiag.contains("rows=0"));
         assertEquals("重进之后私信列表里找不到那条", "true", js(
-                "document.querySelector('#msg-list').textContent.indexOf(" + JSONObject.quote(dmText) + ")>=0"));
+                "document.querySelector('#msg-list').textContent.indexOf(" + JSONObject.quote(keepText) + ")>=0"));
         // 这条私信是 A 发出去的，未读在 B 那边：A 自己的角标不该亮。
         // （B 侧的未读计数由 tests/test_integration.py 逐条钉住）
         assertEquals("A 自己发出去的不该算成自己的未读", "true", js(
@@ -1057,8 +1077,12 @@ public class DeviceSmokeTest {
                 + "var m=(c&&c.getAttribute('onclick')||'').match(/[0-9]+/);return m?m[0]:'';})()");
         assertTrue("会话行上取不到对方 id: " + peerId, peerId.matches("\\d+"));
         js("openThread(" + peerId + ")");
+        // 验的是"消息存在服务端"：用那条没被撤回的（原来那条已经撤了，正文本来就不该再出现）
         waitFor("document.getElementById('thread-bubbles').textContent.indexOf("
-                + JSONObject.quote(dmText) + ")>=0");
+                + JSONObject.quote(keepText) + ")>=0");
+        assertEquals("撤回的那条重进之后又把正文显示出来了", "false", js(
+                "document.getElementById('thread-bubbles').textContent.indexOf("
+                + JSONObject.quote(dmText) + ")>=0"));
         assertEquals("打开会话之后未读要清零", "0", probeStr(
                 "(cm.stats&&Number(cm.stats.dm_unread))===0?'0':'no'"));
         dumpQa("ws-state.txt", probeStr("cm.wsState"));
@@ -1069,8 +1093,16 @@ public class DeviceSmokeTest {
         waitFor("document.getElementById('me-public-id').textContent.trim().length>=8");
         assertEquals("主页要显示 8 位轻塑号", "true", js(
                 "/^\\d{8}$/.test(document.getElementById('me-public-id').textContent.trim())"));
-        assertEquals("获赞要读回来（自己点的那一次）", "true", js(
+        String seenStats = probeStr("(function(){var a=document.querySelectorAll('#me-stats .me-stat b');"
+                + "var out=[];for(var i=0;i<a.length;i++)out.push(a[i].textContent);return out.join('/')+"
+                + "'|api='+(cm.stats?JSON.stringify(cm.stats):'null');})()");
+        assertEquals("获赞要读回来（自己点的那一次）。现场: " + seenStats, "true", js(
                 "Number(document.querySelectorAll('#me-stats .me-stat b')[3].textContent)>=1"));
+        // 属地：屏上那句必须和接口给的一致（不写死"湖南"，那是环境相关；一致才是要钉的东西）
+        assertEquals("主页的属地与接口给的对不上", "true", js(
+                "(function(){var r=(cm.stats&&cm.stats.region)||'';"
+                + "var t=document.getElementById('me-region').textContent;"
+                + "return r? t.indexOf(r)>=0 : t.indexOf('属地未知')>=0;})()"));
         assertEquals("我的帖子列表要含我这条", "true", js(
                 "document.getElementById('me-posts').textContent.indexOf('鸡胸肉')>=0"));
         dumpQa("me-stats.json", probeObj("({stats:cm.stats,badge:document.getElementById('nav-msg-badge').textContent,"

@@ -2194,6 +2194,11 @@ def main():
           if "async function qsRenderMember" in _fjs else False, "")
     check("切 tab 会收起页面层，不会留一层盖在上面",
           "if (qsPageOpen()) qsCloseAllPages();" in _fjs, "")
+    # 换页必须清顶栏槽位：真机截图上出现过"关注列表页头上挂着一颗上一页的私信按钮"
+    _top = _fjs.split("function qsRenderTop()")[1].split("function openPage(")[0] \
+        if "function qsRenderTop()" in _fjs else ""
+    check("换页时清空顶栏右侧槽位与底栏",
+          'cmEl("pl-slot")' in _top and "innerHTML = \"\"" in _top, _top[:100])
     # 私信改成整页之后，连接不能再靠"顺手路过消息 tab"拉起，否则从主页点进来就是哑的
     _dm = _fjs.split("async function openDM(uid)")[1].split("async function qsRenderDm")[0] \
         if "async function openDM(uid)" in _fjs else ""

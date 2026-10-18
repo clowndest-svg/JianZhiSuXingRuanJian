@@ -1731,6 +1731,19 @@ try {
   r150('bumpConversation(55,"对方来的","them")');
   check("对方来的算一条未读", String(r150('cm.convs[0].unread')) === "1", String(r150('cm.convs[0].unread')));
   r150('cm.convs=[];cm.msgTab="notices";');
+  // 统计格：接口给的是对的数，渲染层把三元组的下标写串过——屏上四个数全是 NaN。
+  // 这条不依赖 DOM，直接跑纯函数，钉"数字位上是数字、标签位上是标签"。
+  const statsHtml = String(r150('qsStatsHTML([["posts","帖子",3],["followers","粉丝",0],'
+    + '["following","关注",12],["likes","获赞",1]], 7)'));
+  check("统计格渲染的是数字不是标签（防下标写串成 NaN）",
+        statsHtml.indexOf("<b>3</b><span>帖子</span>") >= 0
+        && statsHtml.indexOf("<b>12</b><span>关注</span>") >= 0
+        && statsHtml.indexOf("NaN") < 0, statsHtml.slice(0, 120));
+  check("统计格每个都能点进明细",
+        (statsHtml.match(/onclick="openStats\('/g) || []).length === 4
+        && statsHtml.indexOf("openStats('likes',7)") >= 0, statsHtml.slice(-140));
+  check("脏数字落成 0 而不是 NaN",
+        r150('qsStatsHTML([["posts","帖子","不是数"]],7)').indexOf("NaN") < 0, "");
 } catch (e) {
   check("r150 判据块本身跑通了", false, String(e && e.message));
 }

@@ -628,6 +628,10 @@ function qsRenderTop() {
     // 聊天页会把正文区改成弹性布局，每页开头统一复位，免得串页
     const bodyEl = cmEl("pl-body");
     if (bodyEl) bodyEl.className = "pl-body";
+    // 顶栏右侧槽位与底栏都归每一页自己管：不清的话，上一页的「私信」会挂在
+    // 统计页头上——按钮还在，点了却没有上下文。
+    const slotEl = cmEl("pl-slot");
+    if (slotEl) slotEl.innerHTML = "";
     cmText("pl-title", typeof top.title === "function" ? top.title() : top.title);
     top.render(top.arg);
 }
@@ -666,6 +670,17 @@ function qsSetFoot(html) {
 }
 
 /** 复制按钮的通用出口：值放在 data-copy 里，避免把内容拼进 onclick 时踩引号转义。 */
+
+/** 统计格（帖子/粉丝/关注/获赞）。抽成一个纯函数：两处各写一遍时，
+ *  下标写串会同时坏两遍，而接口是对的——只有渲染层能看出来。 */
+function qsStatsHTML(rows, uid) {
+    return rows.map(function (r) {
+        var v = Number(r[2]);
+        return '<button type="button" class="me-stat" onclick="openStats(\'' + r[0] + "'," + Number(uid) + ')">'
+            + '<b>' + (isFinite(v) ? v : 0) + "</b><span>" + escapeHtml(String(r[1])) + "</span></button>";
+    }).join("");
+}
+
 function qsCopyFrom(btn) {
     qsCopy(btn.getAttribute("data-copy") || "", btn.getAttribute("data-label") || "内容");
 }
@@ -996,7 +1011,7 @@ async function qsRenderPost(id) {
         + 'onclick="toggleLike(' + p.id + ',this)">❤ 赞 ' + Number(p.like_count) + "</button>"
         + '<button type="button" class="td-mini" onclick="focusCommentInput()">💬 评论 ' + Number(p.comment_count) + "</button>"
         + (p.author && !mine ? '<button type="button" class="td-mini" onclick="openDM(' + p.author.id + ')">私信 TA</button>' : "")
-        + (mine ? '<button type="button" class="td-mini" style="margin-left:auto" onclick="deletePostFromDetail(' + p.id + ')">删除</button>' : "")
+        + (mine ? '<button type="button" class="td-mini pd-danger" style="margin-left:auto" onclick="deletePostFromDetail(' + p.id + ')">删除</button>' : "")
         + "</div></article>"
         + '<h3 class="pd-sec">评论 ' + Number(p.comment_count) + "</h3>"
         + (comments || '<p class="td-empty">还没有人评论，说第一句。</p>');
@@ -1124,9 +1139,7 @@ async function qsRenderMember(ident) {
         + '<button type="button" class="me-copy" data-copy="' + escapeHtml(String(u.public_id || "")) + '" data-label="轻塑号" onclick="qsCopyFrom(this)">复制</button></div>'
         + '<div class="me-line">' + cmRegionTag(u.region) + (u.is_me ? " · 这是你自己" : "") + "</div>"
         + '<div class="me-bio">' + escapeHtml(u.bio || "还没有签名") + "</div></div></div>"
-        + '<div class="card me-stats">' + stats.map(s =>
-            '<button type="button" class="me-stat" onclick="openStats(\'' + s[0] + "'," + u.id + ')">'
-            + '<b>' + Number(s[1]) + "</b><span>" + s[2] + "</span></button>").join("") + "</div>"
+        + '<div class="card me-stats">' + qsStatsHTML(stats, u.id) + "</div>"
         + (u.is_me ? "" : '<div class="td-actions">'
             + '<button type="button" class="td-btn" aria-pressed="' + (u.followed ? "true" : "false") + '" onclick="toggleFollow(' + u.id + ',this)">' +
             (u.followed ? "已关注" : "关注") + '</button><button type="button" class="td-btn td-btn-quiet" onclick="openDM(' + u.id + ')">私信</button></div>')
@@ -1632,9 +1645,7 @@ async function loadMe() {
         const stats = [["posts", "帖子", s.posts], ["followers", "粉丝", s.followers],
                        ["following", "关注", s.following], ["likes", "获赞", s.likes_received]];
         const host = cmEl("me-stats");
-        if (host) host.innerHTML = stats.map(x =>
-            '<button type="button" class="me-stat" onclick="openStats(\'' + x[0] + "'," + meId + ')">'
-            + '<b>' + Number(x[1]) + "</b><span>" + x[2] + "</span></button>").join("");
+        if (host) host.innerHTML = qsStatsHTML(stats, meId);
         paintNavBadge();
         syncFeedbackHints();
         const feed = await getJson("/api/community/feed?tab=mine&limit=6");
