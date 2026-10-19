@@ -332,10 +332,9 @@ def admin_smoke(expected_html_hash):
 def deploy_admin(run_id, revision, archive):
     base = ROOT / "admin-console" / "ops"
     targets = {"ops/admin_api.py": base / "admin_api.py", "ops/console.html": base / "console.html"}
-    temp = ROOT / ("admin-ci-" + run_id)
-    backup = BACKUPS / ("admin-console-ci-" + run_id)
-    if backup.exists():
-        raise RuntimeError("admin backup directory already exists")
+    deployment_id = run_id + "-" + os.urandom(6).hex()
+    temp = ROOT / ("admin-ci-" + deployment_id)
+    backup = BACKUPS / ("admin-console-ci-" + deployment_id)
     safe_extract(archive, temp, {"ops"}, exact_files=set(targets))
     backup.mkdir(mode=0o700)
     previous = {}
