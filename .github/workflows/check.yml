@@ -131,8 +131,9 @@ jobs:
             echo 'changed=true' >> "$GITHUB_OUTPUT"
           fi
       - name: Read current public release manifest
-        run: curl --fail --silent --show-error --location --proto '=https' \
-          'https://124.220.54.64/version.json' --output "$RUNNER_TEMP/live-version.json"
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' \
+            'https://124.220.54.64/version.json' --output "$RUNNER_TEMP/live-version.json"
       - name: Require an Android versionCode increase for app source changes
         if: steps.app-changes.outputs.changed == 'true'
         run: |

@@ -317,15 +317,28 @@ def admin_smoke(expected_html_hash):
     auth = "Basic " + base64.b64encode((user + ":" + password).encode()).decode()
     headers = {"Authorization": auth, "X-Qingsu-Token": token}
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    request = urllib.request.Request("http://172.17.0.1:8100/api/health", headers=headers)
-    with opener.open(request, timeout=20) as response:
-        health = json.load(response)
+    def open_after_restart(url, request_headers):
+        deadline = time.monotonic() + 45
+        last_error = None
+        while time.monotonic() < deadline:
+            request = urllib.request.Request(url, headers=request_headers)
+            try:
+                with opener.open(request, timeout=8) as response:
+                    return response.read()
+            except urllib.error.HTTPError as error:
+                if error.code not in (502, 503, 504):
+                    raise
+                last_error = error
+            except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+                last_error = error
+            time.sleep(1)
+        raise RuntimeError("admin service did not become reachable after restart") from last_error
+
+    health = json.loads(open_after_restart("http://172.17.0.1:8100/api/health", headers))
     if not isinstance(health, dict) or "app" not in health or "console_container" not in health:
         raise RuntimeError("admin API health response is incomplete")
-    request = urllib.request.Request(PUBLIC_BASE + "/ops/?ci=" + expected_html_hash[:12],
-                                     headers={"Authorization": auth})
-    with opener.open(request, timeout=20) as response:
-        body = response.read()
+    body = open_after_restart(PUBLIC_BASE + "/ops/?ci=" + expected_html_hash[:12],
+                              {"Authorization": auth})
     if hashlib.sha256(body).hexdigest() != expected_html_hash:
         raise RuntimeError("public admin console HTML does not match the deployed file")
 
