@@ -47,7 +47,9 @@
 .td-btn:active{transform:scale(.99)}
 .td-btn-quiet{flex:1 1 0;min-width:0;padding:11px 16px;border:1px solid #CBD5E1;background:#fff;color:#334155;font-weight:600;font-size:15px;line-height:1.3}
 .td-btn-danger{flex:1 1 0;min-width:0;padding:11px 16px;border:1px solid #FECACA;background:#FEF2F2;color:#B91C1C;font-weight:600;font-size:15px;line-height:1.3}
-.td-actions{display:flex;gap:10px;margin-top:14px}
+.td-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:10px}
+/* 弹窗动作按钮按内容收窄：以前 flex:1 会把"上传头像/保存忌口"拉成整行巨块 */
+.td-actions>.td-btn,.td-actions>.td-btn-quiet,.td-actions>.td-btn-danger{flex:0 1 auto;min-width:88px;min-height:40px;padding:8px 16px;font-size:14px;line-height:1.2;border-radius:999px}
 .td-actions[hidden]{display:none}
 .td-actions .td-btn[aria-pressed="true"]{background:#F1F5F9;color:#475569;font-weight:600;box-shadow:inset 0 0 0 1px #CBD5E1}
 .td-mini{flex:0 0 auto;min-height:36px;padding:6px 12px;border:1px solid #CBD5E1;border-radius:9px;background:#fff;color:#065F46;font-size:13px;font-weight:600}
@@ -334,7 +336,9 @@ body.qs-page-open{overflow:hidden}
 .pd-imgs.one{grid-template-columns:minmax(0,1fr)}
 .pd-imgs.one img{aspect-ratio:auto;max-height:60vh;object-fit:contain;cursor:zoom-in}
 .pd-meta{margin-top:12px;padding-top:10px;border-top:1px solid #EEF2F6;font-size:12.5px;color:#94A3B8}
-.pd-acts{display:flex;align-items:center;gap:8px;margin-top:10px}
+/* 5 颗操作按钮在 393px 下会挤出卡片；允许换行，最后一行自然落在下面 */
+.pd-acts{display:flex;align-items:center;flex-wrap:wrap;gap:7px 8px;margin-top:10px}
+.pd-acts-extra{display:flex;align-items:center;gap:8px;margin-left:auto}
 .pd-sec{margin:16px 0 8px;font-size:12.5px;font-weight:800;letter-spacing:.03em;color:#64748B}
 .pd-cmt{display:flex;gap:10px;align-items:flex-start;padding:12px 0;border-top:1px solid #EEF2F6;background:none;border-left:0;border-right:0;border-bottom:0;width:100%;text-align:left;font:inherit;cursor:pointer}
 .pd-cmt:first-of-type{border-top:0}
@@ -434,6 +438,7 @@ body.qs-page-open{overflow:hidden}
 /* 文件选择：不把浏览器原生控件露给用户 */
 .file-hidden{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 .td-file-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px}
+.td-file-line .td-btn{flex:0 0 auto;min-width:0;min-height:36px;padding:7px 14px;font-size:13.5px;border-radius:999px}
 .td-file-name{font-size:13px;color:#64748B;overflow-wrap:anywhere}
 /* 徽标语义色：已开启是好事，不该用危险红 */
 .td-badge[data-tone="on"]{background:#ECFDF5;color:#047857}

@@ -377,9 +377,9 @@ async function openAccountCenter(){
           <div class="td-field-row"><span class="td-field-label">头像图片（JPEG / PNG / WebP，4MB 内）</span>
             <input type="file" id="avatar-file" accept="image/*" class="file-hidden" onchange="qsPickAvatarName(this)">
             <span class="td-file-line"><button type="button" class="td-btn td-btn-quiet" onclick="document.getElementById('avatar-file').click()">选择图片</button>
-            <span class="td-file-name" id="avatar-file-name">未选择</span></span></div>
+            <span class="td-file-name" id="avatar-file-name">未选择</span>
+            <button type="button" class="td-btn td-file-upload" onclick="uploadAvatar()">上传头像</button></span></div>
         </div>
-        <div class="td-actions"><button type="button" class="td-btn" onclick="uploadAvatar()">上传头像</button></div>
         <p id="avatar-status" class="td-status" role="status"></p>
         <p class="td-note">上传前会去掉照片里的位置等隐藏信息，并压到 512 像素。</p>
       </div>
@@ -1125,15 +1125,17 @@ async function qsRenderPost(id) {
         + '<button type="button" class="td-mini" onclick="focusCommentInput()">💬 评论 ' + Number(p.comment_count) + "</button>"
         + '<button type="button" class="td-mini" aria-pressed="' + (p.favorited_by_me ? "true" : "false") + '" '
         + 'onclick="toggleFavorite(' + p.id + ',this)">★ 收藏 <b data-fav>' + Number(p.favorite_count || 0) + "</b></button>"
-        + (mine ? "" : '<button type="button" class="td-mini pd-report" onclick="openReport(&#39;post&#39;,' + p.id + ')">举报</button>')
-        + (p.author && !mine ? '<button type="button" class="td-mini" onclick="openDM(' + p.author.id + ')">私信 TA</button>' : "")
+        + '<span class="pd-acts-extra">'
         + (mine ? '<button type="button" class="td-mini" onclick="editPostFromDetail(' + p.id + ')">编辑</button>'
-            + '<button type="button" class="td-mini pd-danger" onclick="deletePostFromDetail(' + p.id + ')">删除</button>' : "")
+            + '<button type="button" class="td-mini pd-danger" onclick="deletePostFromDetail(' + p.id + ')">删除</button>'
+            : (p.author ? '<button type="button" class="td-mini pd-report" onclick="openReport(&#39;post&#39;,' + p.id + ')">举报</button>'
+                + '<button type="button" class="td-mini" onclick="openDM(' + p.author.id + ')">私信 TA</button>' : ""))
+        + "</span>"
         + "</div></article>"
         + '<h3 class="pd-sec">评论 ' + Number(p.comment_count) + "</h3>"
         + (comments || '<p class="td-empty">还没有人评论，说第一句。</p>');
     qsSetFoot('<input id="cm-comment-text" type="text" maxlength="' + CM_LIMITS.comment +
-        '" placeholder="' + (cmReplyTo ? "回复 @" + escapeHtml(cmReplyTo.name) : "友善一点，别报体重之外的数字") +
+        '" placeholder="' + (cmReplyTo ? "回复 @" + escapeHtml(cmReplyTo.name) : "友善一点，好好说话") +
         '" aria-label="评论内容" onkeydown="if(event.key===\'Enter\'){event.preventDefault();submitComment(' + p.id + ');}">'
         + '<button type="button" class="td-btn" onclick="submitComment(' + p.id + ')">发送</button>');
 }

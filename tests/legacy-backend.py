@@ -2379,6 +2379,24 @@ def main():
           and "async function submitReport" in _fjs and "/api/community/report" in _fjs, "")
     check("自己的帖子不显示举报按钮（举报自己没有意义）",
           '(mine ? "" : ' in _fjs and "openReport(&#39;post&#39;" in _fjs, "")
+    # ---- r155：帖子操作行与弹窗按钮收口 ----
+    check("帖子操作行允许换行，不再挤出卡片",
+          ".pd-acts{display:flex;align-items:center;flex-wrap:wrap" in _fcss, "")
+    check("编辑/删除等次级动作在 DOM 里收成一组",
+          "pd-acts-extra" in _fjs, "")
+    check("次级动作整组换行后靠右，不单独一颗掉在行首",
+          ".pd-acts-extra{display:flex;align-items:center;gap:8px;margin-left:auto}" in _fcss, "")
+    check("弹窗动作区允许换行并右对齐",
+          ".td-actions{display:flex;flex-wrap:wrap;justify-content:flex-end" in _fcss, "")
+    check("弹窗动作按钮按内容收窄（不再 flex:1 拉成整行巨块）",
+          ".td-actions>.td-btn,.td-actions>.td-btn-quiet,.td-actions>.td-btn-danger{flex:0 1 auto;min-width:88px;min-height:40px" in _fcss, "")
+    check("文件选择行里的按钮也是紧凑尺寸",
+          ".td-file-line .td-btn{flex:0 0 auto;min-width:0;min-height:36px" in _fcss, "")
+    check("上传头像并进文件选择行，不再单独占一整行",
+          "td-file-upload" in _fjs and "td-file-line" in _fjs
+          and '<div class="td-actions"><button type="button" class="td-btn" onclick="uploadAvatar()">上传头像</button></div>' not in _fjs, "")
+    check("窄屏评论占位文案不再被截断",
+          '"友善一点，好好说话"' in _fjs and len("友善一点，好好说话") <= 10, "")
 
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (
