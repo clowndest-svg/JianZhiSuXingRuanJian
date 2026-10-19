@@ -30,7 +30,7 @@ def sync_asset_build(code):
     if int(hit.group(1)) != code:
         io.open(ASSET_JS, "w", encoding="utf-8", newline="").write(
             text.replace(hit.group(0), "const APP_BUILD = %d;" % code))
-    return int(hit.group(1))
+    return code
 
 
 def apk_embedded_build():
@@ -85,6 +85,11 @@ def latest_release_note():
 def main():
     code, name = read_gradle_version()
     sync_asset_build(code)
+    if sys.argv[1:] == ["--sync-asset-build-only"]:
+        print("已将 app.js APP_BUILD 同步为 %d" % code)
+        return 0
+    if sys.argv[1:]:
+        raise SystemExit("用法：python make_version_json.py [--sync-asset-build-only]")
     if not os.path.exists(APK):
         raise SystemExit("找不到 qingsu.apk，先打包再生成清单")
     embedded = apk_embedded_build()

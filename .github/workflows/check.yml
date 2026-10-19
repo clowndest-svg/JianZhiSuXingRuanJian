@@ -1,8 +1,62 @@
-name: Integration checks
-on: [push, pull_request]
+name: CI and production deployment
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qingsu-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+          log-accepted-android-sdk-licenses: false
+      - name: Sync Android and H5 build number
+        run: python make_version_json.py --sync-asset-build-only
+      - name: Build and lint release APK
+        run: bash gradlew assembleRelease lintRelease
+      - name: Prepare unsigned artifact for CI contract checks
+        run: |
+          cp app/build/outputs/apk/release/app-release-unsigned.apk qingsu.apk
+          python make_version_json.py
+          mkdir -p .release-test/app/src/main/assets .release-test/app/src/main
+          cp qingsu.apk .release-test/qingsu.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk .release-test/app-release-unsigned.apk
+          cp app/src/main/assets/app.js .release-test/app/src/main/assets/app.js
+          cp app/src/main/web_version.json .release-test/app/src/main/web_version.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qingsu-unsigned-release
+          path: |
+            .release-test/qingsu.apk
+            .release-test/app-release-unsigned.apk
+            .release-test/app/src/main/assets/app.js
+            .release-test/app/src/main/web_version.json
+          retention-days: 2
+
   integration:
     runs-on: ubuntu-latest
+    needs: android
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -11,6 +65,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: qingsu-unsigned-release
+          path: .release-artifact
+      - name: Use the build-number-aligned artifact for contract checks
+        run: |
+          cp .release-artifact/qingsu.apk qingsu.apk
+          cp .release-artifact/app/src/main/assets/app.js app/src/main/assets/app.js
+          cp .release-artifact/app/src/main/web_version.json app/src/main/web_version.json
+          python scripts/verify-release-artifacts.py \
+            --apk qingsu.apk \
+            --manifest app/src/main/web_version.json \
+            --web-app-js app/src/main/assets/app.js \
+            --gradle app/build.gradle
       - run: python -m pip install -r requirements-dev.txt
       - run: mkdir -p _audit_sandbox
       - run: python tests/test_integration.py
@@ -21,10 +89,22 @@ jobs:
       - run: node --check app/src/main/assets/sw.js
       - run: node tests/legacy-frontend.mjs
       - run: node tests/frontend-integration.mjs
-  android:
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    needs: [android, integration]
+    timeout-minutes: 60
+    environment:
+      name: production
+      url: https://124.220.54.64/
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -33,4 +113,94 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
           log-accepted-android-sdk-licenses: false
-      - run: bash gradlew assembleRelease lintRelease
+      - uses: actions/download-artifact@v4
+        with:
+          name: qingsu-unsigned-release
+          path: .release-artifact
+      - name: Determine whether Android application sources changed
+        id: app-changes
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [[ -z "$PUSH_BEFORE" || "$PUSH_BEFORE" =~ ^0+$ ]]; then
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$PUSH_BEFORE" "$GITHUB_SHA" -- \
+              app/build.gradle app/src/main gradle gradlew gradle.properties build.gradle settings.gradle; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Read current public release manifest
+        run: curl --fail --silent --show-error --location --proto '=https' \
+          'https://124.220.54.64/version.json' --output "$RUNNER_TEMP/live-version.json"
+      - name: Require an Android versionCode increase for app source changes
+        if: steps.app-changes.outputs.changed == 'true'
+        run: |
+          python - <<'PY'
+          import json, re
+          from pathlib import Path
+          gradle = Path('app/build.gradle').read_text(encoding='utf-8')
+          hit = re.search(r'versionCode\s+(\d+)', gradle)
+          live = int(json.loads(Path(__import__('os').environ['RUNNER_TEMP'], 'live-version.json').read_text())['version_code'])
+          current = int(hit.group(1)) if hit else 0
+          if current <= live:
+              raise SystemExit(f'app source changed but versionCode {current} is not newer than live build {live}')
+          print(f'Android release gate: build {current} follows live build {live}')
+          PY
+      - name: Prepare signed APK for an Android release
+        if: steps.app-changes.outputs.changed == 'true'
+        env:
+          ANDROID_SIGNING_BUNDLE_BASE64: ${{ secrets.ANDROID_SIGNING_BUNDLE_BASE64 }}
+          ANDROID_LEGACY_KEYSTORE: ${{ runner.temp }}/qingsu-signing/keys/legacy-debug.keystore
+        run: |
+          cp .release-artifact/app/src/main/assets/app.js app/src/main/assets/app.js
+          mkdir -m 700 "$RUNNER_TEMP/qingsu-signing"
+          printf '%s' "$ANDROID_SIGNING_BUNDLE_BASE64" | base64 --decode | tar -xz -C "$RUNNER_TEMP/qingsu-signing"
+          chmod 600 "$RUNNER_TEMP/qingsu-signing"/*
+          cp .release-artifact/app-release-unsigned.apk "$RUNNER_TEMP/app-release-unsigned.apk"
+          python scripts/sign-release.py \
+            --input "$RUNNER_TEMP/app-release-unsigned.apk" \
+            --output qingsu.apk \
+            --key-dir "$RUNNER_TEMP/qingsu-signing"/keys
+          python make_version_json.py
+      - name: Reuse the current signed Android release for backend and web changes
+        if: steps.app-changes.outputs.changed == 'false'
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' \
+            "https://124.220.54.64/version.json?ci=$GITHUB_RUN_ID" \
+            --output app/src/main/web_version.json
+          curl --fail --silent --show-error --location --proto '=https' \
+            "https://124.220.54.64/qingsu.apk?ci=$GITHUB_RUN_ID" --output qingsu.apk
+          curl --fail --silent --show-error --location --proto '=https' \
+            "https://124.220.54.64/app.js?ci=$GITHUB_RUN_ID" \
+            --output app/src/main/assets/app.js
+      - name: Validate release APK and build metadata
+        run: |
+          python scripts/verify-release-artifacts.py \
+            --apk qingsu.apk \
+            --manifest app/src/main/web_version.json \
+            --web-app-js app/src/main/assets/app.js \
+            --gradle app/build.gradle
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose qingsu.apk
+      - name: Package explicit release files
+        run: python scripts/package-release.py --output "$RUNNER_TEMP/qingsu-release.tar"
+      - name: Upload release and invoke the restricted production deployer
+        env:
+          QINGSU_CI_SSH_KEY: ${{ secrets.QINGSU_CI_SSH_KEY }}
+        run: |
+          install -d -m 700 "$RUNNER_TEMP/qingsu-ssh"
+          printf '%s' "$QINGSU_CI_SSH_KEY" > "$RUNNER_TEMP/qingsu-ssh/id_ed25519"
+          chmod 600 "$RUNNER_TEMP/qingsu-ssh/id_ed25519"
+          install -m 600 .github/deploy_known_hosts "$RUNNER_TEMP/qingsu-ssh/known_hosts"
+          sha256sum "$RUNNER_TEMP/qingsu-release.tar" > "$RUNNER_TEMP/qingsu-release.sha256"
+          read -r ARCHIVE_SHA _ < "$RUNNER_TEMP/qingsu-release.sha256"
+          scp -i "$RUNNER_TEMP/qingsu-ssh/id_ed25519" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/qingsu-ssh/known_hosts" \
+            "$RUNNER_TEMP/qingsu-release.tar" \
+            "qingsu-ci@124.220.54.64:/opt/qingsu/ci-incoming/main-${GITHUB_RUN_ID}.tar"
+          ssh -i "$RUNNER_TEMP/qingsu-ssh/id_ed25519" \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/qingsu-ssh/known_hosts" \
+            qingsu-ci@124.220.54.64 \
+            sudo -n /usr/local/sbin/qingsu-ci-deploy main "$GITHUB_RUN_ID" "$ARCHIVE_SHA" "$GITHUB_SHA"

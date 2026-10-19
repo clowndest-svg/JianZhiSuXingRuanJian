@@ -18,6 +18,8 @@ for name in ('server.py','app_modules','web'):
     if source.is_dir():shutil.copytree(source,backup/name)
     elif source.is_file():shutil.copy2(source,backup/name)
 unit=Path('/etc/systemd/system/qingsu.service');shutil.copy2(unit,backup/'qingsu.service')
+ci_gateway=Path('/usr/local/sbin/qingsu-ci-deploy')
+if ci_gateway.is_file():shutil.copy2(ci_gateway,backup/'qingsu-ci-deploy')
 tls=root/'tls/default.conf';old_tls=tls.read_text();(backup/'nginx-tls.conf').write_text(old_tls)
 old_http=run('docker','exec','xiaoye-release','cat','/etc/nginx/conf.d/default.conf');(backup/'nginx-http.conf').write_text(old_http)
 source=sqlite3.connect(root/'data/qingsu.db');dest=sqlite3.connect(backup/'qingsu.db')
@@ -49,6 +51,15 @@ def protect_code(path):
             protect_code(child)
 def restart():run('systemctl','daemon-reload');run('systemctl','restart','qingsu')
 try:
+    gateway_source=stage/'scripts'/'ci-deploy-server.py'
+    if gateway_source.is_file():
+        # The live SSH entrypoint is root-owned and only replaced by a verified
+        # main release. Compile without importing or executing candidate code.
+        compile(gateway_source.read_text(encoding='utf-8'),str(gateway_source),'exec')
+        shutil.copy2(gateway_source,ci_gateway.with_name('qingsu-ci-deploy.new'))
+        os.chown(ci_gateway.with_name('qingsu-ci-deploy.new'),0,0)
+        ci_gateway.with_name('qingsu-ci-deploy.new').chmod(0o755)
+        os.replace(ci_gateway.with_name('qingsu-ci-deploy.new'),ci_gateway)
     shutil.copy2(stage/'server.py',root/'server.py.new');os.replace(root/'server.py.new',root/'server.py')
     if (root/'app_modules').exists():shutil.rmtree(root/'app_modules')
     shutil.copytree(stage/'app_modules',root/'app_modules');copy_files(stage/'web',root/'web')
@@ -107,6 +118,7 @@ WantedBy=timers.target
     (root/'release.json').write_text(json.dumps({'release':RELEASE,'source_revision':args.revision,'backup':str(backup)}))
     print(json.dumps({'deployed':RELEASE,'backup':str(backup),'source_revision':args.revision}))
 except Exception:
+    if (backup/'qingsu-ci-deploy').is_file():shutil.copy2(backup/'qingsu-ci-deploy',ci_gateway)
     shutil.copy2(backup/'server.py',root/'server.py')
     if (backup/'app_modules').exists():
         shutil.rmtree(root/'app_modules');shutil.copytree(backup/'app_modules',root/'app_modules')
