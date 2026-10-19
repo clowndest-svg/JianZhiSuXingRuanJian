@@ -157,7 +157,9 @@ jobs:
           cp .release-artifact/app/src/main/assets/app.js app/src/main/assets/app.js
           mkdir -m 700 "$RUNNER_TEMP/qingsu-signing"
           printf '%s' "$ANDROID_SIGNING_BUNDLE_BASE64" | base64 --decode | tar -xz -C "$RUNNER_TEMP/qingsu-signing"
-          chmod 600 "$RUNNER_TEMP/qingsu-signing"/*
+          # 只给文件收紧权限；对目录 chmod 600 会去掉执行位，后面连 keys/ 都进不去
+          chmod -R u+rwX "$RUNNER_TEMP/qingsu-signing"
+          find "$RUNNER_TEMP/qingsu-signing" -type f -exec chmod 600 {} +
           cp .release-artifact/app-release-unsigned.apk "$RUNNER_TEMP/app-release-unsigned.apk"
           python scripts/sign-release.py \
             --input "$RUNNER_TEMP/app-release-unsigned.apk" \
