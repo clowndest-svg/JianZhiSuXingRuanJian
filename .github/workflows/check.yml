@@ -130,6 +130,16 @@ jobs:
           else
             echo 'changed=true' >> "$GITHUB_OUTPUT"
           fi
+          # 上一次发版可能在签名/部署中途失败：线上还是旧号而仓库已经升了。
+          # 那种情况下必须重新构建签名包，不能复用线上旧包（否则清单与 gradle 对不上）。
+          LIVE_CODE=$(curl --fail --silent --show-error --location --proto '=https' \
+            'https://124.220.54.64/version.json?ci-check=${GITHUB_RUN_ID}' | \
+            python -c 'import json,sys;print(json.load(sys.stdin)["version_code"])')
+          CURRENT_CODE=$(python -c "import re,pathlib;print(re.search(r'versionCode\s+(\d+)', pathlib.Path('app/build.gradle').read_text(encoding='utf-8')).group(1))")
+          echo "live=$LIVE_CODE repo=$CURRENT_CODE"
+          if [ "$CURRENT_CODE" -gt "$LIVE_CODE" ]; then
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
       - name: Read current public release manifest
         run: |
           curl --fail --silent --show-error --location --proto '=https' \
