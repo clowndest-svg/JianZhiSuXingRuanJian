@@ -145,28 +145,14 @@ def start_qa_config(release, prefix):
     config = RELEASES / "qa-config.json"
     if config.exists():
         raise RuntimeError("an existing QA config needs cleanup before a new deployment")
-    payload = json.dumps({"prefix": prefix, "base": PUBLIC_BASE + "/" + prefix}, separators=(",", ":")).encode()
+    payload = json.dumps({"prefix": prefix, "base": "http://172.17.0.1:18000"}, separators=(",", ":")).encode()
     atomic_write(config, payload, 0o600)
     run("start QA service", "python3", str(RELEASES / release / "scripts" / "start-qa.py"), "--release", release)
 
 
 def cleanup_qa(release, prefix):
     config_path = RELEASES / "qa-config.json"
-    nginx = ROOT / "tls" / "default.conf"
     cleanup_error = None
-    if re.fullmatch(r"qa-[a-f0-9]{16}", prefix or "") and nginx.is_file():
-        content = nginx.read_text(encoding="utf-8")
-        pattern = re.compile(r"(?m)^    location /" + re.escape(prefix) + r"/ \{\n.*?^    \}\n?", re.S)
-        changed, count = pattern.subn("", content, count=1)
-        if count:
-            try:
-                atomic_write(nginx, changed.encode(), stat.S_IMODE(nginx.stat().st_mode), nginx.stat().st_uid, nginx.stat().st_gid)
-                run("validate QA nginx cleanup", "docker", "exec", "qingsu-tls", "nginx", "-t")
-                run("reload QA nginx cleanup", "docker", "exec", "qingsu-tls", "nginx", "-s", "reload")
-            except Exception as error:
-                cleanup_error = error
-                atomic_write(nginx, content.encode(), stat.S_IMODE(nginx.stat().st_mode), nginx.stat().st_uid, nginx.stat().st_gid)
-                run("restore QA nginx config after cleanup error", "docker", "exec", "qingsu-tls", "nginx", "-s", "reload", check=False)
     try:
         run("stop QA service", "systemctl", "stop", "qingsu-qa", check=False)
         unit = Path("/etc/systemd/system/qingsu-qa.service")
@@ -275,7 +261,7 @@ def deploy_main(run_id, expected_hash, revision, archive):
             raise RuntimeError("an existing QA config needs cleanup before a new deployment")
         config_started = True
         start_qa_config(release, prefix)
-        qa_base = PUBLIC_BASE + "/" + prefix
+        qa_base = "http://172.17.0.1:18000"
         env = dict(os.environ, QINGSU_VERIFY_BASE=qa_base,
                    QINGSU_VERIFY_DB=str(stage / "qa-data" / "qingsu.db"), PYTHONDONTWRITEBYTECODE="1")
         run("isolated candidate API smoke test", "python3", str(stage / "scripts" / "verify_live.py"), env=env)
