@@ -326,6 +326,37 @@ body.qs-page-open{overflow:hidden}
 .pl-foot[hidden]{display:none}
 .pl-foot input,.pl-foot textarea{flex:1 1 auto;min-width:0;min-height:44px;padding:10px 12px;border:1px solid #CBD5E1;border-radius:999px;font:inherit;font-size:15px;background:#fff;color:#0F172A}
 .pl-foot .td-btn{flex:0 0 auto;min-height:44px;padding:10px 20px}
+/* r157 私聊输入区：表情与更多面板（照小红书的三段式：工具栏 + 面板 + 输入） */
+.pl-foot.dm-foot{flex-direction:column;align-items:stretch;padding:8px 10px 10px;gap:8px}
+.dm-tools{display:flex;align-items:center;gap:6px}
+.dm-tool{flex:0 0 auto;width:36px;height:36px;min-height:36px;padding:0;border:0;border-radius:50%;background:#F1F5F9;color:#334155;font-size:20px;line-height:1}
+.dm-tool[aria-expanded="true"]{background:#DCFCE7;color:#047857}
+.dm-tools input{flex:1 1 auto;min-width:0}
+.dm-tools .dm-send{min-height:40px;padding:8px 18px;font-size:14px}
+.dm-panel{border-top:1px solid #EEF2F6;padding-top:8px;max-height:220px;overflow-y:auto}
+.dm-panel[hidden]{display:none}
+.dm-emoji-group{margin:0 0 8px}
+.dm-emoji-group h4{margin:0 0 3px;font-size:11px;font-weight:700;color:#94A3B8}
+.dm-emoji-grid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:2px}
+.dm-emoji{min-height:36px;padding:0;border:0;border-radius:9px;background:transparent;font-size:23px;line-height:1}
+.dm-emoji:active{background:#F1F5F9}
+.dm-plus-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.dm-plus-tile{display:flex;flex-direction:column;align-items:center;gap:5px;padding:10px 4px;border:0;border-radius:12px;background:#F8FAFC;color:#475569;font-size:12px;font-weight:600;min-height:64px}
+.dm-plus-tile .ico{font-size:23px;line-height:1.1}
+.dm-plus-tile[disabled]{opacity:.42}
+.dm-lock-hint{margin:8px 0 0;font-size:12px;color:#B45309}
+.dm-phrases{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.dm-phrases[hidden]{display:none}
+.dm-phrases button{padding:6px 11px;border:1px solid #E2E8F0;border-radius:999px;background:#fff;color:#334155;font:inherit;font-size:12.5px;min-height:32px}
+.dm-media-img{display:block;max-width:min(62vw,230px);max-height:300px;border-radius:12px;object-fit:cover;cursor:zoom-in}
+.dm-media-video{display:block;width:min(62vw,240px);max-height:300px;border-radius:12px;background:#000}
+.dm-media-wait{display:inline-block;padding:20px 16px;color:#64748B;font-size:13px}
+.cm-bubble.media,.cm-bubble.media.me,.cm-bubble.media.them{background:transparent;border:0;box-shadow:none;padding:0}
+.cm-bubble.media time{color:#94A3B8;opacity:1}
+.cm-bubble.sticker{background:transparent;border:0;box-shadow:none;padding:0 2px}
+.cm-bubble.sticker.them,.cm-bubble.sticker.me{background:transparent;border:0}
+.cm-bubble .dm-sticker{display:block;font-size:46px;line-height:1.15}
+.cm-bubble.sticker time{color:#94A3B8;opacity:.9}
 
 /* ---------- 帖子详情：照微博的形状（正文大、配图独立一块、时间与操作分开） ---------- */
 .pd-post{background:#fff;border-radius:14px;padding:14px;border:1px solid #E2E8F0}

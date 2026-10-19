@@ -6,6 +6,7 @@ import logging
 from app_modules.features import share_settings, public_projection, DEFAULT_SCOPE
 from app_modules import mailer, geo, geoip, community, chat
 import io
+import mimetypes
 import os
 import sqlite3
 import hashlib
@@ -474,7 +475,16 @@ def _community_schema(c):
     c.execute("CREATE INDEX IF NOT EXISTS idx_messages_unread ON messages(to_id, read_at)")
     # 撤回是"标记"不是"删除"：行留着（对方还要看到"对方撤回了一条消息"），
     # 但 _message_dict 会把正文换成空串，历史接口不再回正文。
-    _ensure_columns(c, "messages", [("recalled_at", "TEXT")])
+    _ensure_columns(c, "messages", [
+        ("recalled_at", "TEXT"),
+        # 私信不再只有文字：媒体消息把文件名与 MIME 存下来，读取时重新签一个短时 URL。
+        ("kind", "TEXT NOT NULL DEFAULT 'text'"),
+        ("media_name", "TEXT NOT NULL DEFAULT ''"),
+        ("media_mime", "TEXT NOT NULL DEFAULT ''"),
+        ("media_size", "INTEGER NOT NULL DEFAULT 0"),
+        ("media_w", "INTEGER NOT NULL DEFAULT 0"),
+        ("media_h", "INTEGER NOT NULL DEFAULT 0"),
+    ])
     c.execute("""
     CREATE TABLE IF NOT EXISTS user_blocks (
         blocker INTEGER NOT NULL, blocked INTEGER NOT NULL, created_at TEXT NOT NULL,
@@ -3355,11 +3365,13 @@ def private_photo(name: str, expires: int=0, signature: str="",audience:int=0):
     expected=hmac.new(media_key(),payload.encode(),hashlib.sha256).hexdigest()
     if expires<int(time.time()) or expires>time.time()+901 or not secrets.compare_digest(signature,expected):
         raise HTTPException(status_code=404,detail="照片不存在或授权已失效")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp)",name,re.I):
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp|mp4|webm)",name,re.I):
         raise HTTPException(status_code=404,detail="照片不存在")
     path=os.path.join(UPLOAD_DIR,name)
     if not os.path.isfile(path):raise HTTPException(status_code=404,detail="照片不存在")
-    return FileResponse(path,headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
+    mime=mimetypes.guess_type(name)[0] or "application/octet-stream"
+    return FileResponse(path,media_type=mime,
+                        headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
 
 @app.post('/api/photo/delete')
 def delete_latest_photo(user:dict=Depends(get_current_user)):
@@ -3509,6 +3521,9 @@ for asset in PUBLIC_ASSETS:
 POST_RATE_LIMIT = 6          # 每人每分钟
 COMMENT_RATE_LIMIT = 12
 DM_RATE_LIMIT = 30
+DM_MEDIA_RATE_LIMIT = 12
+DM_IMAGE_MAX = 8 * 1024 * 1024
+DM_VIDEO_MAX = 30 * 1024 * 1024
 FOLLOW_RATE_LIMIT = 20
 FEEDBACK_RATE_LIMIT = 5
 
@@ -3676,7 +3691,10 @@ class ProfileCommunityReq(ValidatedModel):
 
 class DmSendReq(ValidatedModel):
     to: int
-    text: str
+    text: str = ""
+    # text / sticker / image / video；媒体消息的正文留空，文件名单独给
+    kind: str = "text"
+    media_name: str = ""
     request_id: Optional[str] = None
 
 
@@ -4338,7 +4356,15 @@ def _blocked(conn, a, b):
     return bool(conn.execute("SELECT 1 FROM user_blocks WHERE blocker=? AND blocked=?", (b, a)).fetchone())
 
 
-def _deliver(conn, sender, to_id, body, request_id):
+def mutual_follow(conn, a, b) -> bool:
+    """互关＝两边都关注。图片/视频消息只对互关开放；文字不受影响。"""
+    return bool(conn.execute("SELECT 1 FROM follows WHERE follower_id=? AND followee_id=?",
+                             (a, b)).fetchone()
+                and conn.execute("SELECT 1 FROM follows WHERE follower_id=? AND followee_id=?",
+                                 (b, a)).fetchone())
+
+
+def _deliver(conn, sender, to_id, body, request_id, kind="text", media_name=""):
     """落库 + 更新会话摘要，返回 (message dict, 是否重复)。WS 与 HTTP 兜底共用这一条路，
     两条路各写一份存法就会出现"走 WS 发的重进 App 找不到"。"""
     to = conn.execute("SELECT id FROM users WHERE id=?", (to_id,)).fetchone()
@@ -4348,6 +4374,23 @@ def _deliver(conn, sender, to_id, body, request_id):
         raise HTTPException(status_code=400, detail="不能给自己发私信")
     if _blocked(conn, sender["id"], to_id):
         raise HTTPException(status_code=403, detail="对方不接受你的私信")
+    mime, size, width, height = "", 0, 0, 0
+    if kind in ("image", "video"):
+        if not mutual_follow(conn, sender["id"], int(to_id)):
+            raise HTTPException(status_code=403, detail="互相关注后才能发图片和视频")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp|mp4|webm)", media_name or "", re.I):
+            raise HTTPException(status_code=400, detail="媒体文件名不对")
+        owned = conn.execute("SELECT 1 FROM media_uploads WHERE user_id=? AND name=?",
+                             (sender["id"], media_name)).fetchone()
+        if not owned or not os.path.isfile(os.path.join(UPLOAD_DIR, media_name)):
+            raise HTTPException(status_code=400, detail="这个媒体不是你刚上传的，请重新选择")
+        mime = mimetypes.guess_type(media_name)[0] or (
+            "video/mp4" if media_name.lower().endswith(".mp4") else
+            "video/webm" if media_name.lower().endswith(".webm") else "image/jpeg")
+        try:
+            size = os.path.getsize(os.path.join(UPLOAD_DIR, media_name))
+        except OSError:
+            size = 0
     key = (request_id or "")[:64] or None
     if key:
         hit = conn.execute("SELECT * FROM messages WHERE from_id=? AND request_id=?",
@@ -4356,13 +4399,16 @@ def _deliver(conn, sender, to_id, body, request_id):
             return _message_dict(hit), True
     ck = chat.conv_key(sender["id"], to_id)
     stamp = _now()
-    cur = conn.execute("INSERT INTO messages(conv_key,from_id,to_id,body,request_id,created_at)"
-                       " VALUES (?,?,?,?,?,?)", (ck, sender["id"], to_id, body, key, stamp))
+    cur = conn.execute(
+        "INSERT INTO messages(conv_key,from_id,to_id,body,request_id,created_at,kind,media_name,"
+        "media_mime,media_size,media_w,media_h) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (ck, sender["id"], to_id, body, key, stamp, kind, media_name, mime, size, width, height))
     lo, hi = ck.split(chat.CONV_SEP)
     conn.execute("INSERT OR IGNORE INTO conversations(conv_key,a_id,b_id,created_at) VALUES (?,?,?,?)",
                  (ck, int(lo), int(hi), stamp))
+    preview = {"image": "［图片］", "video": "［视频］"}.get(kind, body[:60])
     conn.execute("UPDATE conversations SET last_body=?, last_at=?, last_from=? WHERE conv_key=?",
-                 (body[:60], stamp, sender["id"], ck))
+                 (preview, stamp, sender["id"], ck))
     conn.commit()
     row = conn.execute("SELECT * FROM messages WHERE id=?", (cur.lastrowid,)).fetchone()
     return _message_dict(row), False
@@ -4371,10 +4417,16 @@ def _deliver(conn, sender, to_id, body, request_id):
 def _message_dict(row):
     names = row.keys()
     recalled = (row["recalled_at"] or "") if "recalled_at" in names else ""
+    kind = (row["kind"] or "text") if "kind" in names else "text"
+    media = (row["media_name"] or "") if "media_name" in names else ""
     return {"id": int(row["id"]), "conv_key": row["conv_key"], "from_id": int(row["from_id"]),
             "to_id": int(row["to_id"]),
-            # 撤回之后正文不再外发，只留一个时间戳让两端都能显示"撤回了一条消息"
+            # 撤回之后正文与媒体都不再外发，只留一个时间戳让两端都能显示"撤回了一条消息"
             "body": "" if recalled else row["body"], "recalled_at": recalled,
+            "kind": kind,
+            "media_url": signed_photo("/uploads/" + media) if (media and not recalled) else "",
+            "media_mime": (row["media_mime"] or "") if "media_mime" in names else "",
+            "media_size": int(row["media_size"] or 0) if "media_size" in names else 0,
             "created_at": row["created_at"],
             "read_at": row["read_at"], "request_id": row["request_id"]}
 
@@ -4401,18 +4453,128 @@ def chat_ticket(request: Request, user: dict = Depends(get_current_user)):
     return {"code": 0, "ticket": token, "expires_in": chat.TICKET_TTL, "ws_path": "/ws/chat"}
 
 
+def _valid_video(path: str) -> str:
+    """只认 MP4 / WebM：容器头对不上的一律拒。MOV 虽然也是 ftyp，
+    但 Android WebView 多半放不了，宁可不收也不给用户一个转圈的黑框。"""
+    with open(path, "rb") as handle:
+        head = handle.read(16)
+    if head.startswith(b"\x1aE\xdf\xa3"):
+        return "video/webm"
+    if len(head) >= 12 and head[4:8] == b"ftyp" and head[8:12] != b"qt  ":
+        return "video/mp4"
+    return ""
+
+
+@app.post("/api/chat/media")
+async def chat_media(to: int = Form(...), file: UploadFile = File(...),
+                     user: dict = Depends(get_current_user)):
+    """私聊图片/视频。和文字不同，这里要求互相关注：陌生人不该直接往你窗口里塞文件。
+    图片沿用发帖配图那套重编码；视频只收 MP4/WebM，最大 30MB，边收边写盘。"""
+    ok, _where, _n = rate_hit("dmmedia:%d" % user["id"], DM_MEDIA_RATE_LIMIT, 60)
+    if not ok:
+        raise HTTPException(status_code=429, detail="发图/视频太频繁了，歇一会儿")
+    conn = get_db()
+    try:
+        target = conn.execute("SELECT id FROM users WHERE id=?", (int(to),)).fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="找不到这个用户")
+        if int(to) == int(user["id"]):
+            raise HTTPException(status_code=400, detail="不能给自己发私信")
+        if _blocked(conn, user["id"], int(to)):
+            raise HTTPException(status_code=403, detail="对方不接受你的私信")
+        if not mutual_follow(conn, user["id"], int(to)):
+            raise HTTPException(status_code=403, detail="互相关注后才能发图片和视频")
+    finally:
+        conn.close()
+
+    content_type = (file.content_type or "").lower()
+    kind = "image" if content_type.startswith("image/") else (
+        "video" if content_type.startswith("video/") else "")
+    if not kind:
+        raise HTTPException(status_code=400, detail="只支持图片或视频")
+
+    if kind == "image":
+        raw = await file.read()
+        if len(raw) > DM_IMAGE_MAX:
+            raise HTTPException(status_code=413, detail="图片不能超过 8MB")
+        try:
+            from PIL import Image, ImageOps
+            with Image.open(io.BytesIO(raw)) as image:
+                if image.format not in ("JPEG", "PNG", "WEBP") or image.width * image.height > 20000000:
+                    raise ValueError("格式或尺寸不支持")
+                image = ImageOps.exif_transpose(image).convert("RGB")
+                image.thumbnail((1600, 1600))
+                width, height = image.size
+                out = io.BytesIO()
+                image.save(out, format="JPEG", quality=85)
+                blob = out.getvalue()
+        except Exception:
+            raise HTTPException(status_code=400, detail="请选择有效的 JPEG、PNG 或 WebP 图片")
+        name = uuid.uuid4().hex + ".jpg"
+        with open(os.path.join(UPLOAD_DIR, name), "wb") as handle:
+            handle.write(blob)
+        mime, size = "image/jpeg", len(blob)
+    else:
+        name = uuid.uuid4().hex + ".video.part"
+        path = os.path.join(UPLOAD_DIR, name)
+        size = 0
+        try:
+            with open(path, "wb") as handle:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > DM_VIDEO_MAX:
+                        raise HTTPException(status_code=413, detail="视频不能超过 30MB")
+                    handle.write(chunk)
+            mime = _valid_video(path)
+            if not mime:
+                raise HTTPException(status_code=400, detail="只支持 MP4 或 WebM 视频")
+            if size <= 0:
+                raise HTTPException(status_code=400, detail="视频是空的")
+        except Exception:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            raise
+        name = name[:-len(".part")] + (".webm" if mime == "video/webm" else ".mp4")
+        os.replace(path, os.path.join(UPLOAD_DIR, name))
+        width = height = 0
+
+    conn = get_db()
+    try:
+        conn.execute("INSERT OR REPLACE INTO media_uploads(name, user_id, created_at) VALUES (?,?,?)",
+                     (name, user["id"], _now()))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"code": 0, "name": name, "kind": kind, "mime": mime, "size": size,
+            "width": width, "height": height, "url": signed_photo("/uploads/" + name)}
+
+
 @app.post("/api/chat/send")
 def chat_send(req: DmSendReq, user: dict = Depends(get_current_user)):
     ok, _where, _n = rate_hit("dm:%d" % user["id"], DM_RATE_LIMIT, 60)
     if not ok:
         raise HTTPException(status_code=429, detail="发送太快了，歇一会儿")
-    try:
-        body = community.clean_body(req.text, 1000, "私信")
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error))
+    kind = (req.kind or "text").strip().lower()
+    if kind not in ("text", "sticker", "image", "video"):
+        raise HTTPException(status_code=400, detail="不认识的消息类型")
+    if kind in ("text", "sticker"):
+        try:
+            body = community.clean_body(req.text, 1000 if kind == "text" else 16, "私信")
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error))
+        if not body.strip():
+            raise HTTPException(status_code=400, detail="消息不能为空")
+    else:
+        body = ""
     conn = get_db()
     try:
-        msg, dup = _deliver(conn, user, int(req.to), body, req.request_id)
+        msg, dup = _deliver(conn, user, int(req.to), body, req.request_id,
+                            kind=kind, media_name=req.media_name)
     finally:
         conn.close()
     if not dup:
@@ -4459,6 +4621,10 @@ def chat_messages(with_user: int, cursor: int = 0, limit: int = 30,
         if partner:
             partner["blocked"] = bool(conn.execute(
                 "SELECT 1 FROM user_blocks WHERE blocker=? AND blocked=?", (user["id"], with_user)).fetchone())
+            partner["followed_by_me"] = bool(conn.execute(
+                "SELECT 1 FROM follows WHERE follower_id=? AND followee_id=?",
+                (user["id"], with_user)).fetchone())
+            partner["mutual_follow"] = mutual_follow(conn, user["id"], with_user)
         return {"code": 0, "items": items, "partner": partner, "me_id": int(user["id"]),
                 "next_cursor": items[0]["id"] if len(rows) > size else 0,
                 "more": len(rows) > size}

@@ -698,6 +698,8 @@ function qsSetFoot(html) {
     if (!foot) return;
     foot.innerHTML = html || "";
     foot.hidden = !html;
+    // 私聊输入区是竖排（工具栏 + 面板 + 输入），别把评论输入框也带成竖排
+    foot.classList.toggle("dm-foot", !!html && html.indexOf("dm-tools") >= 0);
 }
 
 /** 复制按钮的通用出口：值放在 data-copy 里，避免把内容拼进 onclick 时踩引号转义。 */
@@ -1593,9 +1595,156 @@ function paintThread() {
     Object.keys(cm.pending).forEach(rid => rows.push(cmBubbleHTML(cm.pending[rid].msg, me, true)));
     host.innerHTML = rows.join("");
     host.scrollTop = host.scrollHeight;
-    qsSetFoot('<input id="dm-input" type="text" maxlength="' + CM_LIMITS.dm +
+    qsSetFoot(dmFootHTML());
+}
+
+/* 私聊输入区照小红书：表情面板 + 更多面板（相册/拍照/视频/常用语）。
+   图片和视频只对互关开放；文字与表情不受限制。 */
+const DM_EMOJIS = [
+    ["开心", ["😀", "😄", "😁", "😆", "🤣", "😂", "🙂", "😉", "😊", "😍", "🥰", "😘", "😎", "🤔", "😴", "🥳"]],
+    ["手势", ["👍", "👏", "🙌", "🙏", "💪", "🤝", "✌️", "👌", "🤙", "👋", "🫶", "❤️", "💚", "💛", "💙", "💜"]],
+    ["氛围", ["🎉", "🔥", "✨", "⭐", "🌟", "💯", "🍀", "🌈", "☀️", "🌙", "💐", "🎂", "🍰", "🍜", "🧋", "🍉"]],
+    ["小动物", ["🐱", "🐶", "🐼", "🐰", "🦊", "🐻", "🐨", "🐯", "🦁", "🐸", "🐵", "🐔", "🦄", "🐟", "🦋", "🌸"]]
+];
+const DM_PHRASES = ["在呢", "哈哈哈哈", "晚点聊", "收到～", "好滴", "加油！"];
+
+function dmFootHTML() {
+    const canMedia = !!(cm.thread && cm.thread.partner && cm.thread.partner.mutual_follow);
+    const emojiGroups = DM_EMOJIS.map(function (group) {
+        return '<section class="dm-emoji-group"><h4>' + escapeHtml(group[0]) + "</h4>"
+            + '<div class="dm-emoji-grid">' + group[1].map(function (e) {
+                return '<button type="button" class="dm-emoji" aria-label="发送表情 ' + escapeHtml(e) +
+                    '" onclick="sendSticker(\'' + e + '\')">' + e + "</button>";
+            }).join("") + "</div></section>";
+    }).join("");
+    const lockHint = canMedia ? "" : '<p class="dm-lock-hint">互相关注后才能发图片和视频</p>';
+    const tile = function (icon, label, action, disabled) {
+        return '<button type="button" class="dm-plus-tile"' + (disabled ? " disabled" : "") +
+            ' onclick="' + action + '"><span class="ico">' + icon + "</span><span>" + label + "</span></button>";
+    };
+    return '<div class="dm-tools">'
+        + '<button type="button" class="dm-tool" id="dm-emoji-btn" aria-label="表情面板" aria-expanded="false" onclick="toggleDmPanel(\'emoji\')">☺</button>'
+        + '<button type="button" class="dm-tool" id="dm-plus-btn" aria-label="更多功能" aria-expanded="false" onclick="toggleDmPanel(\'plus\')">＋</button>'
+        + '<input id="dm-input" type="text" maxlength="' + CM_LIMITS.dm +
         '" placeholder="说点什么…" aria-label="私信内容" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendDM();}">'
-        + '<button type="button" class="td-btn" onclick="sendDM()">发送</button>');
+        + '<button type="button" class="td-btn dm-send" onclick="sendDM()">发送</button>'
+        + "</div>"
+        + '<div class="dm-panel" id="dm-emoji-panel" hidden>' + emojiGroups + "</div>"
+        + '<div class="dm-panel" id="dm-plus-panel" hidden>'
+        + '<div class="dm-plus-grid">'
+        + tile("🖼", "相册", "document.getElementById('dm-image-file').click()", !canMedia)
+        + tile("📷", "拍照", "document.getElementById('dm-camera-file').click()", !canMedia)
+        + tile("🎬", "视频", "document.getElementById('dm-video-file').click()", !canMedia)
+        + tile("💬", "常用语", "dmShowPhrases()", false)
+        + "</div>" + lockHint
+        + '<div class="dm-phrases" id="dm-phrases" hidden>' + DM_PHRASES.map(function (p) {
+            return '<button type="button" onclick="dmUsePhrase(\'' + escapeHtml(p) + '\')">' + escapeHtml(p) + "</button>";
+        }).join("") + "</div></div>"
+        + '<input type="file" id="dm-image-file" accept="image/*" class="file-hidden" onchange="dmPickMedia(this,\'image\')">'
+        + '<input type="file" id="dm-camera-file" accept="image/*" capture="environment" class="file-hidden" onchange="dmPickMedia(this,\'image\')">'
+        + '<input type="file" id="dm-video-file" accept="video/mp4,video/webm" class="file-hidden" onchange="dmPickMedia(this,\'video\')">';
+}
+
+function toggleDmPanel(which) {
+    const target = cmEl("dm-" + which + "-panel");
+    const wasOpen = !!(target && !target.hidden);
+    ["emoji", "plus"].forEach(function (k) {
+        const panel = cmEl("dm-" + k + "-panel");
+        if (panel) panel.hidden = true;
+        const btn = cmEl("dm-" + k + "-btn");
+        if (btn) btn.setAttribute("aria-expanded", "false");
+    });
+    if (target && !wasOpen) {
+        target.hidden = false;
+        const btn = cmEl("dm-" + which + "-btn");
+        if (btn) btn.setAttribute("aria-expanded", "true");
+        const host = cmEl("thread-bubbles");
+        if (host) host.scrollTop = host.scrollHeight;
+    }
+}
+
+function dmShowPhrases() {
+    const box = cmEl("dm-phrases");
+    if (box) box.hidden = !box.hidden;
+}
+
+function dmUsePhrase(text) {
+    const input = cmEl("dm-input");
+    if (input) { input.value = text; input.focus(); }
+}
+
+async function sendSticker(emoji) {
+    if (!cm.thread) return;
+    if (!state.token) { openAuthModal(); return; }
+    const uid = cm.thread.partner.id;
+    const rid = "dm-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+    cm.pending[rid] = { rid: rid, msg: { from_id: state.user && state.user.id, to_id: uid,
+        body: emoji, kind: "sticker", media_url: "", created_at: "" } };
+    toggleDmPanel("emoji");
+    paintThread();
+    try {
+        const r = await postApi("/api/chat/send", { to: uid, kind: "sticker", text: emoji, request_id: rid });
+        dmAck(rid, r.message);
+    } catch (e) {
+        delete cm.pending[rid];
+        paintThread();
+        callNativeToast("这条没发出去：" + (e.message || "网络不通"));
+    }
+}
+
+async function dmPickMedia(input, kind) {
+    const file = input && input.files && input.files[0];
+    if (input) input.value = "";
+    if (!file || !cm.thread) return;
+    if (!state.token) { openAuthModal(); return; }
+    if (!cm.thread.partner.mutual_follow) {
+        callNativeToast("互相关注后才能发图片和视频");
+        return;
+    }
+    const max = kind === "image" ? 8 * 1024 * 1024 : 30 * 1024 * 1024;
+    if (file.size > max) {
+        callNativeToast(kind === "image" ? "图片不能超过 8MB" : "视频不能超过 30MB");
+        return;
+    }
+    const uid = cm.thread.partner.id;
+    const rid = "dm-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+    cm.pending[rid] = { rid: rid, msg: { from_id: state.user && state.user.id, to_id: uid,
+        body: "", kind: kind, media_url: "", created_at: "" } };
+    toggleDmPanel("plus");
+    paintThread();
+    try {
+        const fd = new FormData();
+        fd.append("to", String(uid));
+        fd.append("file", file);
+        const up = await postApi("/api/chat/media", fd);
+        cm.pending[rid].msg.media_url = up.url;
+        cm.pending[rid].msg.media_mime = up.mime;
+        paintThread();
+        const r = await postApi("/api/chat/send", { to: uid, kind: kind, media_name: up.name, request_id: rid });
+        dmAck(rid, r.message);
+    } catch (e) {
+        delete cm.pending[rid];
+        paintThread();
+        callNativeToast("没发出去：" + (e.message || "网络不通"));
+    }
+}
+
+function dmBubbleInner(m, kind, pending) {
+    if (kind === "sticker") return '<span class="dm-sticker">' + escapeHtml(m.body || "") + "</span>";
+    if (kind === "image" || kind === "video") {
+        if (!m.media_url) {
+            return '<span class="dm-media-wait">' + (pending ? "上传中…" : "这张图已失效") + "</span>";
+        }
+        const src = escapeHtml(API_BASE + m.media_url);
+        const raw = String(API_BASE + m.media_url).replace(/'/g, "%27");
+        if (kind === "image") {
+            return '<img class="dm-media-img" src="' + src + '" alt="图片消息" loading="lazy"'
+                + ' onclick="viewPostImage(\'' + escapeHtml(raw) + '\')">';
+        }
+        return '<video class="dm-media-video" src="' + src + '" controls playsinline preload="metadata"'
+            + ' oncontextmenu="event.stopPropagation(); return true"></video>';
+    }
+    return escapeHtml(m.body);
 }
 
 function cmBubbleHTML(m, me, pending) {
@@ -1608,12 +1757,17 @@ function cmBubbleHTML(m, me, pending) {
     const mid = Number(m.id || 0);
     const who = mine ? (state.user || {}) : ((cm.thread && cm.thread.partner) || {});
     const avatar = '<span class="cm-avatar dm-avatar">' + cmAvatarInner(who) + "</span>";
-    const bubble = '<div class="cm-bubble ' + (mine ? "me" : "them") + (pending ? " pending" : "") + '"'
+    const kind = m.kind || "text";
+    const isMedia = kind === "image" || kind === "video";
+    const bubble = '<div class="cm-bubble ' + (mine ? "me" : "them")
+        + (kind === "sticker" ? " sticker" : "") + (isMedia ? " media" : "")
+        + (pending ? " pending" : "") + '"'
         + (mine && cm.myTheme && cm.myTheme !== "green" ? ' data-t="' + escapeHtml(cm.myTheme) + '"' : "")
         + ' data-mid="' + mid + '" data-mine="' + (mine ? 1 : 0) + '"'
         + ' oncontextmenu="return qsBubbleMenu(event,' + mid + ')"'
         + ' ontouchstart="qsBubbleHold(event,' + mid + ')" ontouchend="qsBubbleCancel()" ontouchmove="qsBubbleCancel()">'
-        + escapeHtml(m.body) + "<time>" + escapeHtml(pending ? "发送中" : cmAgo(m.created_at)) + "</time></div>";
+        + dmBubbleInner(m, kind, pending)
+        + "<time>" + escapeHtml(pending ? (isMedia && !m.media_url ? "上传中…" : "发送中") : cmAgo(m.created_at)) + "</time></div>";
     // 自己发的靠右、对方靠左，各带一个头像——小红书的私信就是这条规矩；
     // 只靠 align-self 时气泡和背景同色，看起来像"没有气泡"（截图里的样子）。
     return '<div class="dm-row ' + (mine ? "me" : "them") + '">'
@@ -1755,8 +1909,10 @@ function dmAck(rid, message) {
         if (cm.thread && (message.from_id === cm.thread.partner.id || message.to_id === cm.thread.partner.id)) {
             if (!cm.bubbles.some(b => b.id === message.id)) cm.bubbles.push(message);
         }
+        const preview = message.kind === "image" ? "［图片］"
+            : (message.kind === "video" ? "［视频］" : message.body);
         bumpConversation(message.from_id === (state.user && state.user.id) ? message.to_id : message.from_id,
-            message.body, message.from_id === (state.user && state.user.id) ? "me" : "them");
+            preview, message.from_id === (state.user && state.user.id) ? "me" : "them");
     }
     paintThread();
 }

@@ -2397,6 +2397,38 @@ def main():
           and '<div class="td-actions"><button type="button" class="td-btn" onclick="uploadAvatar()">上传头像</button></div>' not in _fjs, "")
     check("窄屏评论占位文案不再被截断",
           '"友善一点，好好说话"' in _fjs and len("友善一点，好好说话") <= 10, "")
+    # ---- r157：私聊图片/视频/表情 ----
+    check("私信消息表能区分文字/表情/图片/视频",
+          '("kind", "TEXT NOT NULL DEFAULT \'text\'")' in srv_txt
+          and '("media_name", "TEXT NOT NULL DEFAULT \'\'")' in srv_txt, "")
+    check("图片/视频上传接口只对互关开放",
+          '@app.post("/api/chat/media")' in srv_txt
+          and '互相关注后才能发图片和视频' in srv_txt
+          and 'def mutual_follow(' in srv_txt
+          and "mutual_follow(conn, user[\"id\"], int(to))" in srv_txt, "")
+    check("发送媒体时服务端再查一次互关与文件归属",
+          'if not owned or not os.path.isfile' in srv_txt
+          and '这个媒体不是你刚上传的' in srv_txt, "")
+    check("图片重编码、视频只收 MP4/WebM 且限 30MB",
+          'DM_IMAGE_MAX = 8 * 1024 * 1024' in srv_txt and 'DM_VIDEO_MAX = 30 * 1024 * 1024' in srv_txt
+          and 'head[4:8] == b"ftyp"' in srv_txt and 'head.startswith(b"\\x1aE\\xdf\\xa3")' in srv_txt, "")
+    check("媒体消息读取时重新签短时 URL",
+          '"media_url": signed_photo(' in srv_txt and '"media_mime":' in srv_txt, "")
+    check("上传路由能放行视频并带正确 MIME",
+          'jpg|jpeg|png|webp|mp4|webm' in srv_txt and 'mimetypes.guess_type(name)' in srv_txt, "")
+    check("私信回执带 mutual_follow，前端才知道该不该亮图片按钮",
+          'partner["mutual_follow"] = mutual_follow(' in srv_txt, "")
+    check("前端有表情面板与更多面板（相册/拍照/视频/常用语）",
+          "dm-emoji-panel" in _fjs and "dm-plus-panel" in _fjs and "DM_PHRASES" in _fjs
+          and "dm-image-file" in _fjs and "dm-camera-file" in _fjs and "dm-video-file" in _fjs, "")
+    check("未互关时图片/视频按钮禁用并给文案",
+          '互相关注后才能发图片和视频' in _fjs and '!canMedia' in _fjs, "")
+    check("图片/视频/表情各有自己的气泡样式",
+          "dm-media-img" in _fjs and "dm-media-video" in _fjs and "dm-sticker" in _fjs
+          and ".cm-bubble.media" in _fcss and ".cm-bubble .dm-sticker" in _fcss, "")
+    check("nginx 上传上限容得下 30MB 视频",
+          "client_max_body_size 40m;" in io.open(os.path.join(ROOT, "scripts", "qingsu-tls.conf"),
+                                                   encoding="utf-8").read(), "")
 
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (

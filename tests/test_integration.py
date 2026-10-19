@@ -709,6 +709,86 @@ class Integration(unittest.TestCase):
                                     headers=self.auth).json()['partner']['blocked'],
                          '取消拉黑之后回执还是拉黑态')
 
+    def test_chat_media_needs_mutual_follow_and_survives_reload(self):
+        """图片/视频只对互关开放；上传的文件必须有归属，消息重进还在。"""
+        peer, pauth = self._member('mediapeer')
+        buf = io.BytesIO()
+        Image.new('RGB', (400, 300), (12, 120, 80)).save(buf, 'JPEG')
+        image = buf.getvalue()
+        webm = b'\x1aE\xdf\xa3' + b'\x00' * 4096
+
+        up = self.c.post('/api/chat/media', headers=self.auth, data={'to': peer['id']},
+                         files={'file': ('a.jpg', image, 'image/jpeg')})
+        self.assertEqual(up.status_code, 403, '没互关也能上传图片')
+        self.c.post('/api/community/users/%d/follow' % peer['id'], headers=self.auth, json={'on': True})
+        self.assertEqual(self.c.post('/api/chat/media', headers=self.auth, data={'to': peer['id']},
+                         files={'file': ('a.jpg', image, 'image/jpeg')}).status_code, 403,
+                         '只有我关注对方、对方没回关，也能发图')
+        self.c.post('/api/community/users/%d/follow' % self.signup['id'], headers=pauth, json={'on': True})
+
+        up = self.c.post('/api/chat/media', headers=self.auth, data={'to': peer['id']},
+                         files={'file': ('a.jpg', image, 'image/jpeg')})
+        self.assertEqual(up.status_code, 200, up.text)
+        media = up.json()
+        self.assertEqual(media['kind'], 'image')
+        sent = self.c.post('/api/chat/send', headers=self.auth,
+                           json={'to': peer['id'], 'kind': 'image', 'media_name': media['name'],
+                                 'request_id': 'media-1'}).json()
+        self.assertEqual(sent['message']['kind'], 'image')
+        self.assertTrue(sent['message']['media_url'].startswith('/uploads/'))
+        served = self.c.get(sent['message']['media_url'])
+        self.assertEqual(served.status_code, 200, '签名链接读不到刚发的图片')
+        self.assertTrue(served.headers['content-type'].startswith('image/jpeg'))
+
+        video_up = self.c.post('/api/chat/media', headers=self.auth, data={'to': peer['id']},
+                               files={'file': ('v.webm', webm, 'video/webm')})
+        self.assertEqual(video_up.status_code, 200, video_up.text)
+        vmsg = self.c.post('/api/chat/send', headers=self.auth,
+                           json={'to': peer['id'], 'kind': 'video', 'media_name': video_up.json()['name'],
+                                 'request_id': 'media-2'}).json()['message']
+        self.assertEqual(vmsg['kind'], 'video')
+        self.assertEqual(vmsg['media_mime'], 'video/webm')
+        part = self.c.get(vmsg['media_url'], headers={'Range': 'bytes=0-7'})
+        self.assertEqual(part.status_code, 206, '视频不支持 Range，播放器拖不动进度')
+        self.assertTrue(part.headers.get('content-range', '').startswith('bytes 0-7/'))
+
+        hist = self.c.get('/api/chat/messages?with_user=%d' % peer['id'], headers=self.auth).json()
+        self.assertTrue(hist['partner']['mutual_follow'])
+        self.assertEqual([m['kind'] for m in hist['items']], ['image', 'video'])
+        conv = self.c.get('/api/chat/conversations', headers=pauth).json()['items'][0]
+        self.assertEqual(conv['last_body'], '［视频］', '会话列表没有把视频显示成人话')
+
+        # 别人不能把刚上传的文件拼进自己的消息
+        other, oauth = self._member('mediaother')
+        stolen = self.c.post('/api/chat/send', headers=oauth,
+                             json={'to': peer['id'], 'kind': 'image', 'media_name': media['name']})
+        self.assertIn(stolen.status_code, (400, 403), '别人上传的文件被拿去发消息')
+
+        # 取消关注任何一边，媒体权限立即收回；文字不受影响
+        self.c.post('/api/community/users/%d/follow' % self.signup['id'], headers=pauth, json={'on': False})
+        again = self.c.post('/api/chat/send', headers=self.auth,
+                            json={'to': peer['id'], 'kind': 'image', 'media_name': media['name']})
+        self.assertEqual(again.status_code, 403, '取关之后还能继续发图')
+        self.assertEqual(self.c.post('/api/chat/send', headers=self.auth,
+                                     json={'to': peer['id'], 'text': '文字还能发'}).status_code, 200)
+
+    def test_chat_sticker_and_invalid_kinds(self):
+        peer, pauth = self._member('stickerpeer')
+        ok = self.c.post('/api/chat/send', headers=self.auth,
+                         json={'to': peer['id'], 'kind': 'sticker', 'text': '😀', 'request_id': 'st-1'})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        self.assertEqual(ok.json()['message']['kind'], 'sticker')
+        self.assertEqual(ok.json()['message']['body'], '😀')
+        hist = self.c.get('/api/chat/messages?with_user=%d' % self.signup['id'], headers=pauth).json()
+        self.assertEqual(hist['items'][0]['kind'], 'sticker', '表情消息重进变成了普通文字')
+        self.assertEqual(self.c.post('/api/chat/send', headers=self.auth,
+                         json={'to': peer['id'], 'kind': 'sticker', 'text': ''}).status_code, 400)
+        self.assertEqual(self.c.post('/api/chat/send', headers=self.auth,
+                         json={'to': peer['id'], 'kind': 'magic', 'text': 'x'}).status_code, 400)
+        self.assertEqual(self.c.post('/api/chat/send', headers=self.auth,
+                         json={'to': peer['id'], 'kind': 'image', 'media_name': 'nope.jpg'}).status_code, 403,
+                         '没互关时不该先暴露文件名校验')
+
     def test_ws_ticket_is_one_time_and_chat_round_trips(self):
         peer, pauth = self._member('wsparty')
         ticket = self.c.post('/api/chat/ticket', headers=self.auth).json()
