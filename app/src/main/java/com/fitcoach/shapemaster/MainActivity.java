@@ -164,6 +164,70 @@ public class MainActivity extends Activity {
                 }
                 return true;
             }
+
+            // 网页里的 alert/confirm/prompt 不接管的话，系统会弹它自己那套
+            // 「网址为 https://appassets.androidplatform.net 的网页显示…」——既把内部地址露给用户，
+            // 样式也和应用的卡片脱节。三个回调全部接过来，用自己的对话框呈现。
+            // 注意：每条分支都必须把 JsResult 结掉（confirm 或 cancel），否则网页那头的 JS 会一直卡住。
+            @Override
+            public boolean onJsAlert(WebView view, String url, String message, final android.webkit.JsResult result) {
+                if (isFinishing() || isDestroyed()) { result.cancel(); return true; }
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle("轻塑")
+                        .setMessage(message)
+                        .setPositiveButton("知道了", (dialog, which) -> result.confirm())
+                        .setOnCancelListener(dialog -> result.cancel())
+                        .show();
+                return true;
+            }
+
+            @Override
+            public boolean onJsConfirm(WebView view, String url, String message, final android.webkit.JsResult result) {
+                if (isFinishing() || isDestroyed()) { result.cancel(); return true; }
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle("轻塑")
+                        .setMessage(message)
+                        .setPositiveButton("确定", (dialog, which) -> result.confirm())
+                        .setNegativeButton("取消", (dialog, which) -> result.cancel())
+                        .setOnCancelListener(dialog -> result.cancel())
+                        .show();
+                return true;
+            }
+
+            @Override
+            public boolean onJsPrompt(WebView view, String url, String message, String defaultValue,
+                                      final android.webkit.JsPromptResult result) {
+                if (isFinishing() || isDestroyed()) { result.cancel(); return true; }
+                final float density = getResources().getDisplayMetrics().density;
+                final android.widget.EditText input = new android.widget.EditText(MainActivity.this);
+                input.setText(defaultValue == null ? "" : defaultValue);
+                input.setSelection(input.getText().length());
+                input.setSingleLine(false);
+                input.setMaxLines(4);
+                input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                        | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+                android.widget.LinearLayout box = new android.widget.LinearLayout(MainActivity.this);
+                box.setOrientation(android.widget.LinearLayout.VERTICAL);
+                box.setPadding((int) (20 * density), (int) (6 * density), (int) (20 * density), 0);
+                box.addView(input, new android.widget.LinearLayout.LayoutParams(
+                        android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                        android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle("轻塑")
+                        .setMessage(message)
+                        .setView(box)
+                        .setPositiveButton("确定", (dialog, which) -> result.confirm(input.getText().toString()))
+                        .setNegativeButton("取消", (dialog, which) -> result.cancel())
+                        .setOnCancelListener(dialog -> result.cancel())
+                        .show();
+                input.requestFocus();
+                input.post(() -> {
+                    android.view.inputmethod.InputMethodManager imm =
+                            (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                    if (imm != null) imm.showSoftInput(input, 0);
+                });
+                return true;
+            }
         });
 
         // Load the main web dashboard

@@ -614,6 +614,17 @@ def main():
           prompt[:100])
     check("弹不出系统授权时把网页回调结掉", "invoke(origin, false" in prompt, prompt[-120:])
     check("授权结果回来要结掉挂起的回调", "settleGeoCallback" in act, "")
+    # 网页弹窗：不接管就会被系统顶成「网址为 https://appassets… 的网页显示」——内部地址外泄、
+    # 样式也不归应用管。三个回调都要接住，且每条分支都得把 JsResult 结掉，
+    # 漏一个网页那头的 JS 就永远卡在等结果上（点了取消也回不去）。
+    for hook in ("onJsAlert", "onJsConfirm", "onJsPrompt"):
+        check("接管网页弹窗 " + hook, ("boolean " + hook + "(WebView") in act, "")
+    check("弹窗被取消时同样结掉网页回调",
+          act.count("setOnCancelListener(dialog -> result.cancel())") == 3, "")
+    check("输入框弹窗把用户输入回填给网页", "result.confirm(input.getText().toString())" in act, "")
+    check("不回退到系统那套带网址的弹窗",
+          "super.onJsPrompt" not in act and "super.onJsAlert" not in act
+          and "super.onJsConfirm" not in act, "")
     mf = io.open(os.path.join(ROOT, "app", "src", "main", "AndroidManifest.xml"), encoding="utf-8").read()
     for perm in ("ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"):
         check("清单声明了 " + perm, perm in mf, perm)
