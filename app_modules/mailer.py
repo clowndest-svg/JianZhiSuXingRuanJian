@@ -69,7 +69,7 @@ def _config():
                 "from": str(raw.get("from") or raw.get("user") or "").strip(),
                 "tls": str(raw.get("tls") or "ssl").strip().lower(),
             }
-            if cand["host"] and cand["user"] and cand["password"] and cand["from"]:
+            if raw.get('enabled', True) and cand["tls"] in ('ssl', 'starttls', 'tls') and cand["host"] and cand["user"] and cand["password"] and cand["from"]:
                 cfg = cand
         except Exception:
             cfg = None

@@ -1,1 +1,26 @@
-{"name": "轻塑记录", "short_name": "轻塑", "start_url": "/", "scope": "/", "display": "standalone", "background_color": "#f8fafc", "theme_color": "#000000", "icons": [{"src": "/app-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}, {"src": "/app-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}]}
+{
+  "name": "轻塑记录",
+  "short_name": "轻塑",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#1f7a4d",
+  "icons": [
+    {
+      "src": "/app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "id": "/",
+  "lang": "zh-CN",
+  "description": "饮食、体重与训练记录，和朋友一起坚持"
+}

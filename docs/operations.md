@@ -40,6 +40,16 @@
 
 ## TLS
 
+r161 正式域名为 `scientificexploration.art`，`www` 经 HTTPS 308 跳转主域名；IP 的独立证书和升级清单继续保留。使用 `python3 scripts/enable-domain.py` 申请含主域名与www的证书并切换代理，失败保留原配置。域名证书位于 `/etc/letsencrypt/live/scientificexploration.art/`，与 IP 证书共同由现有续期 timer 管理；部署钩子重载 TLS 容器。迁移后监控优先检查域名。
+
+### 浏览器消息提醒
+
+发布时一次性生成 `/opt/qingsu/keys/webpush-vapid.pem`（root:qingsu，640），后续部署保留此密钥。`qingsu-push.timer` 每分钟读取未读私信及评论/回复/@，合并发送不带正文的通用通知；订阅绑定有效会话，退出或后台撤销会话后清除。无订阅时不发送。永久失效订阅删除，连续失败5次后删除并由用户重新开启；接口不接受任意推送主机，防止请求内网。浏览器、系统或网络不支持时明确提示，不宣称必达。安卓目前保留本地每日提醒，原生离线私信推送需要另外接入厂商通道。
+
+### 邮件配置
+
+在 `/ops/` 的「邮件接入」填写服务商 SMTP 配置。服务器文件为 `/opt/qingsu/mail.json`，由root写入、qingsu只读；不进入Git或运维审计。服务读取配置变更无需重启。界面检查只建立可信TLS连接并认证，不发邮件，不代表收件箱已收到验证码；真实投递必须另行验证。用户目前未提供账号，因此初始状态保持未配置。
+
 IP证书路径 `/etc/letsencrypt/live/124.220.54.64`，Certbot运行时 `/opt/qingsu/certbot-env`。HTTP 80 保留 `/.well-known/acme-challenge/` 与已有 `latest.json`、`latest-extensions.json`；轻塑入口跳转HTTPS。443容器 `qingsu-tls` 的证书挂载只读。
 
 `/opt/qingsu/certbot-env/bin/certbot renew --dry-run --run-deploy-hooks` 可在维护窗口验证续期；已有本轮成功记录。短有效期证书不能依赖一年一次的人工续期。公网入站 TCP 80/443 需持续开放。

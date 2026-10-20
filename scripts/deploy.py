@@ -63,12 +63,21 @@ try:
     shutil.copy2(stage/'server.py',root/'server.py.new');os.replace(root/'server.py.new',root/'server.py')
     if (root/'app_modules').exists():shutil.rmtree(root/'app_modules')
     shutil.copytree(stage/'app_modules',root/'app_modules');copy_files(stage/'web',root/'web')
-    for name in ('backup.py','monitor.py','set-min-build.py'):shutil.copy2(stage/'scripts'/name,root/name)
-    for name in ('server.py','app_modules','web','backup.py','monitor.py','set-min-build.py'):protect_code(root/name)
+    for name in ('backup.py','monitor.py','set-min-build.py','push-worker.py'):shutil.copy2(stage/'scripts'/name,root/name)
+    for name in ('server.py','app_modules','web','backup.py','monitor.py','set-min-build.py','push-worker.py'):protect_code(root/name)
+    # Provision once; redeployment must retain the key behind browser subscriptions.
+    import sys,grp
+    sys.path.insert(0,str(root))
+    from app_modules.webpush import provision
+    push_key=root/'keys/webpush-vapid.pem';provision(push_key)
+    os.chown(push_key,0,grp.getgrnam('qingsu').gr_gid);push_key.chmod(0o640)
     ips=[run('docker','inspect','-f','{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}',name) for name in ('xiaoye-release','qingsu-tls')]
     config=unit.read_text();import re
     config=re.sub(r'--forwarded-allow-ips=\S+','--forwarded-allow-ips='+','.join(ips),config)
     if 'QINGSU_CACHE_NAMESPACE=' not in config:config=config.replace('Environment=TZ=', 'Environment=QINGSU_CACHE_NAMESPACE=qingsu-prod\nEnvironment=TZ=')
+    if 'Environment=QINGSU_SITE_BASE=' in config:
+        config=re.sub(r'Environment=QINGSU_SITE_BASE=.*', 'Environment=QINGSU_SITE_BASE=https://scientificexploration.art', config)
+    else:config=config.replace('[Service]', '[Service]\nEnvironment=QINGSU_SITE_BASE=https://scientificexploration.art')
     unit.write_text(config);restart()
     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
     for _ in range(20):
@@ -88,7 +97,7 @@ try:
     gzip_types application/json application/javascript text/css image/svg+xml;''')
     tls.write_text(new_tls);run('docker','exec','qingsu-tls','nginx','-t');run('docker','exec','qingsu-tls','nginx','-s','reload')
     # Preserve the unrelated release manifests and the ACME challenge route on port 80.
-    redirected=re.sub(r'    location / \{.*?\n    \}', '    location / { return 308 https://124.220.54.64$request_uri; }',old_http,flags=re.S)
+    redirected=re.sub(r'    location / \{.*?\n    \}', '    location / { return 308 https://scientificexploration.art$request_uri; }',old_http,flags=re.S)
     if 'location = /version.json' not in redirected:
         redirected=redirected.replace('    location / {', '''    # Public update bootstrap for old Java HTTP clients that do not follow HTTPS redirects.
     location = /version.json { proxy_pass http://172.17.0.1:8000/version.json; }
@@ -96,7 +105,7 @@ try:
     if 'access_log off;' not in redirected:redirected=redirected.replace('server {','server {\n    access_log off;',1)
     http_file=root/'tls-http.conf';http_file.write_text(redirected)
     run('docker','cp',str(http_file),'xiaoye-release:/etc/nginx/conf.d/default.conf');run('docker','exec','xiaoye-release','nginx','-t');run('docker','exec','xiaoye-release','nginx','-s','reload')
-    with opener.open('https://124.220.54.64/health/ready',timeout=10) as r:live=json.load(r)
+    with opener.open('https://scientificexploration.art/health/ready',timeout=10) as r:live=json.load(r)
     assert live.get('source_revision')==args.revision,'线上提交与本次部署不符: %s'%live
     assert live.get('release')==RELEASE,'线上发布标签与本次部署不符: %s'%live
     for kind,text in {'service':'''[Unit]
@@ -114,7 +123,32 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 '''}.items():Path('/etc/systemd/system/qingsu-monitor.'+kind).write_text(text)
-    run('systemctl','daemon-reload');run('systemctl','enable','--now','qingsu-monitor.timer')
+    Path('/etc/systemd/system/qingsu-push.service').write_text('''[Unit]
+Description=Send generic Qingsu browser message notifications
+After=qingsu.service
+[Service]
+Type=oneshot
+User=qingsu
+Group=qingsu
+WorkingDirectory=/opt/qingsu
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0007
+ExecStart=/usr/bin/python3 /opt/qingsu/push-worker.py
+TimeoutStartSec=50
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/qingsu/data
+''')
+    Path('/etc/systemd/system/qingsu-push.timer').write_text('''[Unit]
+Description=Check unread messages for browser subscribers
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+[Install]
+WantedBy=timers.target
+''')
+    run('systemctl','daemon-reload');run('systemctl','enable','--now','qingsu-monitor.timer','qingsu-push.timer')
     (root/'release.json').write_text(json.dumps({'release':RELEASE,'source_revision':args.revision,'backup':str(backup)}))
     print(json.dumps({'deployed':RELEASE,'backup':str(backup),'source_revision':args.revision}))
 except Exception:

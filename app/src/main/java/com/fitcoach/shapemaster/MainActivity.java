@@ -30,6 +30,24 @@ public class MainActivity extends Activity {
     private long backPressedTime = 0;
     private Uri cameraUri;
     private String pendingExport;
+    private byte[] pendingPng;
+    private static final int PNG_EXPORT_REQUEST = 2027;
+
+    public void savePng(String dataUrl) {
+        if (dataUrl == null || !dataUrl.startsWith("data:image/png;base64,") || dataUrl.length() > 4000000) return;
+        final byte[] png;
+        try { png = android.util.Base64.decode(dataUrl.substring(22), android.util.Base64.DEFAULT); }
+        catch (IllegalArgumentException e) { return; }
+        if (png.length < 8 || png[0] != (byte)137 || png[1] != 80 || png[2] != 78 || png[3] != 71) return;
+        runOnUiThread(() -> {
+            if (pendingPng != null) return;
+            pendingPng = png;
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("image/png").putExtra(Intent.EXTRA_TITLE, "轻塑记录回顾.png");
+            try { startActivityForResult(intent, PNG_EXPORT_REQUEST); }
+            catch (Exception e) { pendingPng = null; Toast.makeText(this, "无法打开图片保存位置", Toast.LENGTH_LONG).show(); }
+        });
+    }
     private static final int SAVE_CSV_REQUEST = 1002;
 
     public void saveCsv(String content) {
@@ -257,6 +275,17 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == PNG_EXPORT_REQUEST) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingPng != null) {
+                try (java.io.OutputStream out = getContentResolver().openOutputStream(data.getData())) {
+                    if (out == null) throw new java.io.IOException("No output stream");
+                    out.write(pendingPng);
+                    Toast.makeText(this, "回顾图片已保存", Toast.LENGTH_LONG).show();
+                } catch (Exception e) { Toast.makeText(this, "图片没保存，请重新选择位置", Toast.LENGTH_LONG).show(); }
+            }
+            pendingPng = null;
+            return;
+        }
         if(requestCode==SAVE_CSV_REQUEST){
             if(resultCode==RESULT_OK && data!=null && data.getData()!=null && pendingExport!=null){
                 try(java.io.OutputStream out=getContentResolver().openOutputStream(data.getData())){

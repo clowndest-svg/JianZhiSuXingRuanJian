@@ -84,10 +84,12 @@ jobs:
       - run: python tests/test_integration.py
       - run: python tests/test_ai_contract.py
       - run: python tests/test_update_copy.py
+      - run: python tests/test_companion.py
       - run: python tests/legacy-backend.py
       - run: node --check app/src/main/assets/app.js
       - run: node --check app/src/main/assets/features.js
       - run: node --check app/src/main/assets/sw.js
+      - run: node --check app/src/main/assets/companion.js
       - run: node tests/legacy-frontend.mjs
       - run: node tests/frontend-integration.mjs
 
@@ -98,11 +100,13 @@ jobs:
     timeout-minutes: 60
     environment:
       name: production
-      url: https://124.220.54.64/
+      url: https://scientificexploration.art/
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Verify canonical HTTPS before changing production
+        run: curl --fail --silent --show-error --max-time 20 https://scientificexploration.art/health/ready
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'

@@ -1,11 +1,17 @@
 # 轻塑：Android 与网页记录工具
 
-当前版本：r155 / Android **2.0.7（39）**。
+当前版本：r161 / Android **2.2.0（45）**。
 
-- 网页：https://124.220.54.64/
-- 安装包：https://124.220.54.64/qingsu.apk
-- 版本与指纹：https://124.220.54.64/version.json
-- 就绪检查：https://124.220.54.64/health/ready
+- 网页：https://scientificexploration.art/
+- 介绍与教程：https://scientificexploration.art/about
+- 安装包：https://scientificexploration.art/qingsu.apk
+- 版本与指纹：https://scientificexploration.art/version.json
+- 就绪检查：https://scientificexploration.art/health/ready
+- 兼容入口：https://124.220.54.64/ （保留旧客户端升级）
+
+r161 增加最近7天/30天回顾与图片导出、最多8人的共同目标、网页安装与更新引导、可选的浏览器后台消息提醒。共同目标只公开组内昵称与达成天数；推送订阅与登录会话绑定，退出或撤销会话后停止。通知不含正文或身体数据，送达取决于浏览器推送服务、网络与系统设置；安卓原生后台私信推送尚未接入厂商通道。
+
+后台 `/ops/` 新增域名/证书/发布状态、邮件配置及TLS连接/认证检查。邮件账号尚未提供，默认不配置、不启用；连接检查不发送邮件、不代表邮件投递成功。
 
 支持本人饮食、体重、训练、饮水和周期记录；训练动作配火柴人关键帧演示（按姿态表逐帧插值画出关节轨迹，矢状面区分远近侧、发力肌群高亮；不宣称是真人示范，也不再依赖 WebGL）；支持浏览器与 App 内定位（经纬度就近认城市，离锚点太远就照实说没认出来、改手填；城市与忌口决定外卖点单顺序与食谱冲突标注，无商家数据）与个人中心（头像、改密码、邮箱绑定与验证码找回密码，发信通道未配置时如实拒绝）；提供历史修正/删除/补录、份量确认、分享权限与撤销、完整日确认、离线草稿、Android 每日提醒及 CSV 保存。所有热量、预算、宏量和消耗均为估算；系统不分析照片，也不提供个人诊疗或营养处方。
 
@@ -19,6 +25,7 @@ python -m venv .venv
 .venv/Scripts/python tests/test_integration.py
 .venv/Scripts/python tests/test_ai_contract.py
 .venv/Scripts/python tests/test_update_copy.py
+.venv/Scripts/python tests/test_companion.py
 .venv/Scripts/python tests/legacy-backend.py
 node tests/legacy-frontend.mjs
 node tests/frontend-integration.mjs
@@ -33,7 +40,7 @@ python make_version_json.py
 python scripts/package-release.py --output release.tar
 ```
 
-生产 API 默认使用 `https://124.220.54.64`；隔离 QA 可通过 Gradle 属性 `qingsuApiBase` 指定完整入口，**QA 包不得作为正式安装包发布**。网页使用同源 API，支持服务端配置的隔离路径。
+生产 API 默认使用 `https://scientificexploration.art`；隔离 QA 可通过 Gradle 属性 `qingsuApiBase` 指定完整入口，**QA 包不得作为正式安装包发布**。网页使用同源 API，支持服务端配置的隔离路径。
 
 ## 数据、隐私与运维
 

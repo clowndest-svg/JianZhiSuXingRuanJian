@@ -48,6 +48,17 @@ try:
     assert api('/api/dashboard',token=token)[1]['today_burned']==220;checks.append('idempotent workout')
     assert api('/api/checklist',dict(state={'test':True}),token)[0]==200
     assert api('/api/dashboard',token=token)[1]['checklist']['test'];checks.append('checklist persistence')
+    summary=api('/api/summary?days=30',token=token)
+    assert summary[0]==200 and summary[1]['days']==30 and summary[1]['workout_days']==1
+    checks.append('private 30-day summary')
+    status,goal=api('/api/goals',dict(title='Release verification',kind='workout',target=3,days=7),token)
+    assert status==200 and goal.get('invite')
+    goals=api('/api/goals',token=token)[1]['items'];assert len(goals)==1 and goals[0]['members'][0]['days']==1
+    assert api('/api/goals/'+str(goal['id'])+'/leave',{},token)[0]==200
+    checks.append('shared goal creation, real progress and removal')
+    assert isinstance(api('/api/push/config',token=token)[1]['available'],bool)
+    with opener.open(base+'/about',timeout=15) as response:assert response.status==200
+    checks.append('push capability and public guide')
     assert api('/api/logout',{},token)[0]==200 and api('/api/dashboard',token=token)[0]==401
     assert api('/api/dashboard',token=login['token'])[0]==200;checks.append('session revocation')
     with opener.open(base+'/health/ready',timeout=15) as response:ready=json.load(response)

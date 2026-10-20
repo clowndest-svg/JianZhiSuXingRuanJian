@@ -29,7 +29,7 @@ ROOT = Path("/opt/qingsu")
 INCOMING = ROOT / "ci-incoming"
 RELEASES = ROOT / "releases"
 BACKUPS = ROOT / "backups"
-PUBLIC_BASE = "https://124.220.54.64"
+PUBLIC_BASE = "https://scientificexploration.art"
 
 
 def run(label, *command, env=None, check=True):
@@ -219,11 +219,11 @@ def restore_main(backup, previous_release):
     if (backup / "qingsu-ci-deploy").is_file():
         shutil.copy2(backup / "qingsu-ci-deploy", "/usr/local/sbin/qingsu-ci-deploy")
     tls = ROOT / "tls" / "default.conf"
-    shutil.copy2(backup / "nginx-tls.conf", tls)
+    # Keep the single-file bind mount pointing at the inode nginx reads.
+    tls.write_bytes((backup / "nginx-tls.conf").read_bytes())
     http_temp = ROOT / "tls-http-ci-rollback.conf"
     shutil.copy2(backup / "nginx-http.conf", http_temp)
     run("restore TLS nginx configuration", "docker", "exec", "qingsu-tls", "nginx", "-t")
-    run("reload restored TLS nginx configuration", "docker", "cp", str(tls), "qingsu-tls:/etc/nginx/conf.d/default.conf")
     run("test restored TLS nginx configuration", "docker", "exec", "qingsu-tls", "nginx", "-t")
     run("reload restored TLS nginx", "docker", "exec", "qingsu-tls", "nginx", "-s", "reload")
     run("restore HTTP nginx configuration", "docker", "cp", str(http_temp), "xiaoye-release:/etc/nginx/conf.d/default.conf")

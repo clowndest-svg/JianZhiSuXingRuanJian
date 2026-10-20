@@ -351,6 +351,9 @@ public class WebAppInterface {
     @JavascriptInterface public void saveCsv(String content) {
         if(context instanceof MainActivity)((MainActivity)context).saveCsv(content);
     }
+    @JavascriptInterface public void savePng(String dataUrl) {
+        if(context instanceof MainActivity)((MainActivity)context).savePng(dataUrl);
+    }
     @JavascriptInterface public String getApiBase() {return BuildConfig.API_BASE_URL;}
     @JavascriptInterface public void localAiRequest(String id,int port,String endpoint,String body) {
         if(webView==null || id==null || id.length()>100 || port<1024 || port>65535

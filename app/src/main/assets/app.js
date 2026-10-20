@@ -4,14 +4,14 @@
 // ==========================================
 
 const API_BASE = window.AndroidBridge && window.AndroidBridge.getApiBase ? window.AndroidBridge.getApiBase() : window.location.protocol.startsWith("http") && window.location.hostname !== "appassets.androidplatform.net"
-    ? window.location.origin+(window.__API_PATH__||'') : "https://124.220.54.64";
+    ? window.location.origin+(window.__API_PATH__||'') : "https://scientificexploration.art";
 
 const TOKEN_KEY = "QINGSU_AUTH_TOKEN";
 const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 44;
+const APP_BUILD = 45;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -4310,7 +4310,7 @@ async function exportMyData() {
 }
 
 function copyApkDownloadUrl() {
-    const url = "https://124.220.54.64/qingsu.apk";
+    const url = API_BASE + "/qingsu.apk";
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(url).then(() => {
             callNativeToast("📋 公网直链已复制！可直接发送给手机/微信打开！");

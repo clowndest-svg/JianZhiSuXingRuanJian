@@ -632,3 +632,5 @@ body.desktop-view .ex-detail{max-width:min(500px,calc(100vw - 24px))}
 .cmt-pop{animation:cmtPop .34s ease-out}
 @keyframes cmtPop{0%{transform:scale(.985)}45%{transform:scale(1.012)}100%{transform:scale(1)}}
 @media (prefers-reduced-motion:reduce){.cmt-pop,.cm-hearted::after{animation:none}}
+/* Period summaries and opt-in shared goals. */
+.period-stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}.period-stats div{padding:12px;background:#f1f8f3;border-radius:12px}.period-stats dt{font-size:12px;color:#526359}.period-stats dd{margin:6px 0 0;font-weight:700;font-size:18px}.period-table{max-height:40vh;overflow:auto}.period-table table{width:100%;border-collapse:collapse;font-size:13px}.period-table th,.period-table td{text-align:left;padding:9px 5px;border-bottom:1px solid #e2ebe4}.goal-card{padding:16px;border:1px solid #d7e3da;border-radius:14px;margin-top:12px}.goal-card p{font-size:13px}.goal-card strong{float:right}.td-field input,.td-field select{max-width:100%;box-sizing:border-box}
