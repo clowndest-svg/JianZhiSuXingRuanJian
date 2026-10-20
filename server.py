@@ -429,6 +429,9 @@ def _community_schema(c):
         FOREIGN KEY(user_id) REFERENCES users(id)
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_posts_open ON posts(status, id DESC)")
+    # 标题与正文分开存（照小红书：标题一行、20 字内，正文另算）。老帖子留空串，
+    # 卡片上就不显示标题行——不给历史数据硬编一个假标题。
+    _ensure_columns(c, "posts", [("title", "TEXT NOT NULL DEFAULT ''")])
     c.execute("""
     CREATE TABLE IF NOT EXISTS post_likes (
         post_id INTEGER NOT NULL, user_id INTEGER NOT NULL, created_at TEXT NOT NULL,
@@ -445,6 +448,26 @@ def _community_schema(c):
         status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL,
         UNIQUE(user_id, request_id), FOREIGN KEY(post_id) REFERENCES posts(id))""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id, id)")
+    # 评论也能配图与被点赞。计数一律现算不存列的话，热评排序就得每页重算一次全表，
+    # 所以和 posts.like_count 一样存冗余列，改计数的那两处同时改它。
+    _ensure_columns(c, "comments", [
+        ("images", "TEXT NOT NULL DEFAULT '[]'"),
+        ("like_count", "INTEGER NOT NULL DEFAULT 0"),
+    ])
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS comment_likes (
+        comment_id INTEGER NOT NULL, user_id INTEGER NOT NULL, created_at TEXT NOT NULL,
+        PRIMARY KEY(comment_id, user_id), FOREIGN KEY(comment_id) REFERENCES comments(id))""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_comment_likes_user ON comment_likes(user_id)")
+    # @ 提醒单独建表：通知是"发一次就完了"的流水，而"谁在哪个帖子被 @ 过"要能反查、
+    # 也要在评论被删时跟着收回，只塞在 notifications 里两头都对不上。
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS mentions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL, comment_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL, actor_id INTEGER NOT NULL, created_at TEXT NOT NULL,
+        UNIQUE(comment_id, user_id), FOREIGN KEY(comment_id) REFERENCES comments(id))""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_mentions_user ON mentions(user_id, id DESC)")
     c.execute("""
     CREATE TABLE IF NOT EXISTS follows (
         follower_id INTEGER NOT NULL, followee_id INTEGER NOT NULL, created_at TEXT NOT NULL,
@@ -3395,7 +3418,7 @@ def private_photo(name: str, expires: int=0, signature: str="",audience:int=0):
     expected=hmac.new(media_key(),payload.encode(),hashlib.sha256).hexdigest()
     if expires<int(time.time()) or expires>time.time()+901 or not secrets.compare_digest(signature,expected):
         raise HTTPException(status_code=404,detail="照片不存在或授权已失效")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp|mp4|webm)",name,re.I):
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp|gif|mp4|webm)",name,re.I):
         raise HTTPException(status_code=404,detail="照片不存在")
     path=os.path.join(UPLOAD_DIR,name)
     if not os.path.isfile(path):raise HTTPException(status_code=404,detail="照片不存在")
@@ -3670,6 +3693,7 @@ def _post_card(conn, row, me):
     followed = bool(conn.execute("SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?",
                                  (me["id"], row["user_id"])).fetchone()) if me else False
     return {"id": pid,
+            "title": row["title"] or "",
             "body": row["body"],
             "images": [signed_photo("/uploads/" + n) for n in community.read_images(row["images"])],
             "author": _user_brief(conn, row["user_id"]),
@@ -3695,12 +3719,17 @@ def _require_member(conn):
 
 class PostReq(ValidatedModel):
     text: str
+    # 标题是可选的（照小红书：老笔记就没有标题这一行），但给了就必须是一行 20 字内
+    title: Optional[str] = None
     images: Optional[List[str]] = None
     request_id: Optional[str] = None
 
 
 class CommentReq(ValidatedModel):
     text: str
+    images: Optional[List[str]] = None
+    # 客户端从 @ 面板挑的人，服务端逐条核验正文里真写了 @他 才算提及
+    mentions: Optional[List[int]] = None
     reply_to: Optional[int] = None
     request_id: Optional[str] = None
 
@@ -3764,28 +3793,61 @@ class NoticeReadReq(ValidatedModel):
     all: Optional[bool] = None
 
 
+GIF_MAX = 8 * 1024 * 1024
+GIF_MAX_EDGE = 720          # 表情包尺寸的动图用不到更大；再大就是拿动图当相册
+GIF_MAX_FRAMES = 60
+
+
+def _gif_checks(raw):
+    """动图只做"是不是真 GIF、够不够小"这两件事——绝不重编码。
+
+    PIL 存 GIF 只保留首帧，一动图重编码就变成静图，用户会以为"传上去就不会动了"。
+    """
+    from PIL import Image
+    if raw[:6] not in (b"GIF87a", b"GIF89a"):
+        raise ValueError("不是 GIF 动图")
+    with Image.open(io.BytesIO(raw)) as image:
+        if image.format != "GIF":
+            raise ValueError("不是 GIF 动图")
+        w, h = image.size
+        if w > GIF_MAX_EDGE or h > GIF_MAX_EDGE:
+            raise ValueError("动图最长边不能超过 %d 像素" % GIF_MAX_EDGE)
+        if getattr(image, "n_frames", 1) > GIF_MAX_FRAMES:
+            raise ValueError("动图帧数不能超过 %d 帧" % GIF_MAX_FRAMES)
+
+
 @app.post("/api/community/media")
 async def community_media(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
-    """发帖配图：沿用打卡照那套真校验（格式、像素上限、去 EXIF、重编码），
-    但落一个独立文件名并登记归属——不登记就没法挡住有人把别人的身材照文件名拼进帖子。"""
+    """发帖与评论的配图：静图沿用打卡照那套真校验（格式、像素上限、去 EXIF、重编码），
+    动图（GIF）单独一条路——原样存，保住帧序列。两条都登记归属：
+    不登记就没法挡住有人把别人的身材照文件名拼进帖子。"""
     raw = await file.read()
-    if len(raw) > 8 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="图片不能超过 8MB")
-    name = uuid.uuid4().hex + ".jpg"
-    try:
-        from PIL import Image, ImageOps
-        with Image.open(io.BytesIO(raw)) as image:
-            if image.format not in ("JPEG", "PNG", "WEBP") or image.width * image.height > 20000000:
-                raise ValueError("格式或尺寸不支持")
-            image = ImageOps.exif_transpose(image).convert("RGB")
-            image.thumbnail((1600, 1600))
-            out = io.BytesIO()
-            image.save(out, format="JPEG", quality=85)
-            blob = out.getvalue()
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=400, detail="请选择有效的 JPEG、PNG 或 WebP 图片")
+    from PIL import Image, ImageOps
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        if len(raw) > GIF_MAX:
+            raise HTTPException(status_code=413, detail="动图不能超过 8MB")
+        try:
+            _gif_checks(raw)
+        except Exception:
+            raise HTTPException(status_code=400, detail="这个动图打不开，或者太大（限 720 像素、60 帧）")
+        name, blob = uuid.uuid4().hex + ".gif", raw
+    else:
+        if len(raw) > 8 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="图片不能超过 8MB")
+        name = uuid.uuid4().hex + ".jpg"
+        try:
+            with Image.open(io.BytesIO(raw)) as image:
+                if image.format not in ("JPEG", "PNG", "WEBP") or image.width * image.height > 20000000:
+                    raise ValueError("格式或尺寸不支持")
+                image = ImageOps.exif_transpose(image).convert("RGB")
+                image.thumbnail((1600, 1600))
+                out = io.BytesIO()
+                image.save(out, format="JPEG", quality=85)
+                blob = out.getvalue()
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="请选择有效的 JPEG、PNG、WebP 图片或 GIF 动图")
     with open(os.path.join(UPLOAD_DIR, name), "wb") as f:
         f.write(blob)
     conn = get_db()
@@ -3795,7 +3857,29 @@ async def community_media(file: UploadFile = File(...), user: dict = Depends(get
         conn.commit()
     finally:
         conn.close()
-    return {"code": 0, "name": name, "url": signed_photo("/uploads/" + name)}
+    return {"code": 0, "name": name, "kind": "gif" if name.endswith(".gif") else "image",
+            "url": signed_photo("/uploads/" + name)}
+
+
+@app.get("/api/community/stickers")
+def my_stickers(user: dict = Depends(get_current_user)):
+    """我自己传过的动图，回列表给评论面板当"我的表情库"。
+
+    没有第三方动图图源，就不假装能搜全网表情——只把自己存过的 GIF 再拿出来用，
+    这一条是真的能点、真的发得出去的。
+    """
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT name FROM media_uploads WHERE user_id=? AND name LIKE '%.gif'"
+                            " ORDER BY created_at DESC, name DESC LIMIT 24", (user["id"],)).fetchall()
+        out = []
+        for r in rows:
+            name = r["name"]
+            if re.fullmatch(r"[0-9a-f]{32}\.gif", name or "") and os.path.isfile(os.path.join(UPLOAD_DIR, name)):
+                out.append({"name": name, "url": signed_photo("/uploads/" + name)})
+        return {"code": 0, "items": out}
+    finally:
+        conn.close()
 
 
 @app.post("/api/community/posts")
@@ -3804,12 +3888,14 @@ def create_post(req: PostReq, request: Request, user: dict = Depends(get_current
     if not ok:
         raise HTTPException(status_code=429, detail="发帖太快了，歇一分钟再发")
     try:
-        body = community.clean_body(req.text, community.POST_MAX, "正文")
+        title = community.clean_title(req.title)
         images = community.clean_images(req.images)
+        # 正文可以为空，但标题与图至少要有一个——"一张图 + 一句话标题"就是小红书最常见的笔记形状
+        body = community.clean_body(req.text, community.POST_MAX, "正文") if str(req.text or "").strip() else ""
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
-    if not images and not body.strip():
-        raise HTTPException(status_code=400, detail="正文和图片至少给一个")
+    if not images and not (title or body):
+        raise HTTPException(status_code=400, detail="标题、正文和图片至少给一个")
     key = (req.request_id or "")[:64] or None
     conn = get_db()
     try:
@@ -3827,9 +3913,9 @@ def create_post(req: PostReq, request: Request, user: dict = Depends(get_current
                 return {"code": 0, "duplicate": True, "post": _post_card(conn, row, user)}
         stamp = _now()
         region = region_for(_ip(request))
-        cur = conn.execute("INSERT INTO posts(user_id,body,images,region,request_id,created_at)"
-                           " VALUES (?,?,?,?,?,?)",
-                           (user["id"], body, community.images_json(images), region, key, stamp))
+        cur = conn.execute("INSERT INTO posts(user_id,title,body,images,region,request_id,created_at)"
+                           " VALUES (?,?,?,?,?,?,?)",
+                           (user["id"], title, body, community.images_json(images), region, key, stamp))
         # 解析不出来的那一次不许把已有属地洗掉：走代理或换网络时属地说没就没了，
         # 用户看到的是"我明明有属地"，很难解释。帖子本身照实记空串。
         if region:
@@ -3860,11 +3946,12 @@ def delete_post(post_id: int, user: dict = Depends(get_current_user)):
 
 class PostEditReq(ValidatedModel):
     text: str
+    title: Optional[str] = None
 
 
 @app.patch("/api/community/posts/{post_id}")
 def edit_post(post_id: int, req: PostEditReq, user: dict = Depends(get_current_user)):
-    """作者改自己的帖子。只改正文与 edited_at；点赞/评论/属地一概不碰。"""
+    """作者改自己的帖子。只改标题、正文与 edited_at；点赞/评论/属地一概不碰。"""
     conn = get_db()
     try:
         row = conn.execute("SELECT * FROM posts WHERE id=? AND status='open'", (post_id,)).fetchone()
@@ -3873,11 +3960,14 @@ def edit_post(post_id: int, req: PostEditReq, user: dict = Depends(get_current_u
         if int(row["user_id"]) != int(user["id"]):
             raise HTTPException(status_code=403, detail="只能改自己的帖子")
         try:
-            body = community.clean_body(req.text, 1200, "帖子内容")
+            # 没带 title 的旧客户端不该被顺手清空标题
+            title = (row["title"] or "") if req.title is None else community.clean_title(req.title)
+            body = community.clean_body(req.text, community.POST_MAX, "正文")
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error))
         stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute("UPDATE posts SET body=?, edited_at=? WHERE id=?", (body, stamp, post_id))
+        conn.execute("UPDATE posts SET title=?, body=?, edited_at=? WHERE id=?",
+                     (title, body, stamp, post_id))
         conn.commit()
         row = conn.execute("SELECT * FROM posts WHERE id=?", (post_id,)).fetchone()
         return {"code": 0, "post": _post_card(conn, row, user)}
@@ -3970,6 +4060,31 @@ def community_feed(tab: str = "latest", cursor: int = 0, limit: int = community.
         conn.close()
 
 
+def _resolve_mentions(conn, body, ids, actor_id):
+    """客户端从 @ 面板挑的人，服务端逐条核验正文里确实写了 @他的名字 才算提及。
+
+    不核验就等于开一条骚扰通道：谁都能把别人的 user_id 拼进请求给人发通知。
+    """
+    seen, out = set(), []
+    for raw in list(ids or [])[:community.MENTION_MAX]:
+        try:
+            uid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if uid == int(actor_id) or uid in seen:
+            continue
+        row = conn.execute("SELECT id, nickname, username FROM users WHERE id=?", (uid,)).fetchone()
+        if not row:
+            continue
+        name = (row["nickname"] or row["username"] or "").strip()
+        # @小田 不能算 @小田田 的提及，所以后面不能再跟一个字或字母
+        if not name or not re.search(r"@" + re.escape(name) + r"(?!\w)", body):
+            continue
+        seen.add(uid)
+        out.append(row)
+    return out
+
+
 @app.get("/api/community/posts/{post_id}")
 def community_post_detail(post_id: int, user: dict = Depends(get_current_user)):
     conn = get_db()
@@ -3984,20 +4099,45 @@ def community_post_detail(post_id: int, user: dict = Depends(get_current_user)):
             "LEFT JOIN comments parent ON parent.id=c.reply_to AND parent.post_id=c.post_id "
             "LEFT JOIN users reply_user ON reply_user.id=parent.user_id "
             "WHERE c.post_id=? AND c.status='open' ORDER BY c.id ASC LIMIT 200", (post_id,)).fetchall()
+        # 一次取「我点过赞的评论」和「这条帖子下的 @」，别在下面的循环里逐条查——
+        # 200 条评论就是 400 次往返，帖子详情是全站最热的页面
+        liked = {int(r[0]) for r in conn.execute(
+            "SELECT cl.comment_id FROM comment_likes cl JOIN comments cm ON cm.id=cl.comment_id "
+            "WHERE cm.post_id=? AND cl.user_id=?", (post_id, user["id"])).fetchall()}
+        ment = {}
+        for r in conn.execute("SELECT comment_id, user_id FROM mentions WHERE post_id=?",
+                              (post_id,)).fetchall():
+            ment.setdefault(int(r["comment_id"]), []).append(int(r["user_id"]))
+        # 名字一次查全：前端要把 @小田 画成可点的，只给 id 它就得逐条再问一次
+        named, all_ids = {}, sorted({uid for ids in ment.values() for uid in ids})
+        if all_ids:
+            for r in conn.execute("SELECT id, nickname, username FROM users WHERE id IN (%s)"
+                                  % ",".join("?" * len(all_ids)), all_ids).fetchall():
+                named[int(r["id"])] = (r["nickname"] or r["username"] or "").strip()
+        items = [{"id": int(c["id"]), "body": c["body"], "region": c["region"] or "",
+                  "images": [signed_photo("/uploads/" + n) for n in community.clean_images(
+                      c["images"], limit=community.COMMENT_IMAGES_MAX)],
+                  "like_count": int(c["like_count"] or 0), "liked_by_me": int(c["id"]) in liked,
+                  "mentions": [{"id": u, "name": named.get(u, "")} for u in ment.get(int(c["id"]), [])],
+                  "created_at": c["created_at"],
+                  "reply_to": int(c["reply_to"]) if c["reply_to"] is not None else None,
+                  "reply_to_user_id": int(c["reply_to_user_id"])
+                                                      if c["reply_to_user_id"] is not None else None,
+                  "reply_to_name": ((c["reply_to_nickname"] or c["reply_to_username"] or "")
+                                    if c["reply_to_user_id"] is not None else ""),
+                  # 前端按这个决定要不要给「删除」。口径必须和 DELETE 端点一致：
+                  # 作者本人能删，楼主也能清理自己帖子下的评论（跟微博一样）。
+                  # 这个字段漏返回时按钮永远不出现，界面上看着像"本来就没有删除"。
+                  "deletable": int(c["user_id"]) == int(user["id"])
+                                     or int(row["user_id"]) == int(user["id"]),
+                  "author": _user_brief(conn, c["user_id"])} for c in comments]
+        # 热评在前（小红书也是这个口径）：一级评论按点赞数排，回复仍按时间排，
+        # 否则"最多人点赞的那条"会沉在长回复下面看不见。
+        tops = sorted([x for x in items if not x["reply_to"]],
+                      key=lambda x: (-x["like_count"], x["id"]))
+        tails = [x for x in items if x["reply_to"]]
         return {"code": 0, "post": _post_card(conn, row, user),
-                "comments": [{"id": int(c["id"]), "body": c["body"], "region": c["region"] or "",
-                              "created_at": c["created_at"],
-                              "reply_to": int(c["reply_to"]) if c["reply_to"] is not None else None,
-                              "reply_to_user_id": int(c["reply_to_user_id"])
-                                                  if c["reply_to_user_id"] is not None else None,
-                              "reply_to_name": ((c["reply_to_nickname"] or c["reply_to_username"] or "")
-                                                if c["reply_to_user_id"] is not None else ""),
-                              # 前端按这个决定要不要给「删除」。口径必须和 DELETE 端点一致：
-                              # 作者本人能删，楼主也能清理自己帖子下的评论（跟微博一样）。
-                              # 这个字段漏返回时按钮永远不出现，界面上看着像"本来就没有删除"。
-                              "deletable": int(c["user_id"]) == int(user["id"])
-                                         or int(row["user_id"]) == int(user["id"]),
-                              "author": _user_brief(conn, c["user_id"])} for c in comments]}
+                "comments": tops + tails}
     finally:
         conn.close()
 
@@ -4036,15 +4176,24 @@ def create_comment(post_id: int, req: CommentReq, request: Request,
     if not ok:
         raise HTTPException(status_code=429, detail="评论太快了，歇一分钟再发")
     try:
-        body = community.clean_body(req.text, community.COMMENT_MAX, "评论")
+        body = community.clean_body(req.text, community.COMMENT_MAX, "评论") if str(req.text or "").strip() else ""
+        images = community.clean_images(req.images, limit=community.COMMENT_IMAGES_MAX)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
+    if not body and not images:
+        raise HTTPException(status_code=400, detail="评论写一句，或者配一张图")
     key = (req.request_id or "")[:64] or None
     conn = get_db()
     try:
         post = conn.execute("SELECT id, user_id FROM posts WHERE id=? AND status='open'", (post_id,)).fetchone()
         if not post:
             raise HTTPException(status_code=404, detail="帖子不存在或已删除")
+        if images:
+            owned = {r[0] for r in conn.execute(
+                "SELECT name FROM media_uploads WHERE user_id=? AND name IN (%s)"
+                % ",".join("?" * len(images)), [user["id"]] + images)}
+            if len(owned) != len(images):
+                raise HTTPException(status_code=400, detail="有图片不属于你，请重新选择")
         if key:
             hit = conn.execute("SELECT * FROM comments WHERE user_id=? AND request_id=?",
                                (user["id"], key)).fetchone()
@@ -4058,9 +4207,11 @@ def create_comment(post_id: int, req: CommentReq, request: Request,
                                   (req.reply_to, post_id)).fetchone()
             if not parent:
                 raise HTTPException(status_code=400, detail="要回复的那条评论不在了")
-        cur = conn.execute("INSERT INTO comments(post_id,user_id,reply_to,body,region,request_id,created_at)"
-                           " VALUES (?,?,?,?,?,?,?)",
-                           (post_id, user["id"], req.reply_to, body, region, key, stamp))
+        targets = _resolve_mentions(conn, body, req.mentions, user["id"])
+        cur = conn.execute("INSERT INTO comments(post_id,user_id,reply_to,body,images,region,request_id,created_at)"
+                           " VALUES (?,?,?,?,?,?,?,?)",
+                           (post_id, user["id"], req.reply_to, body, community.images_json(images),
+                            region, key, stamp))
         conn.execute("UPDATE posts SET comment_count = comment_count + 1 WHERE id=?", (post_id,))
         # 界面上写的是"发一次帖子或评论就会带上属地"，评论这条也得真的落库才算话
         if region:
@@ -4072,10 +4223,48 @@ def create_comment(post_id: int, req: CommentReq, request: Request,
         else:
             _notify(conn, post["user_id"], "comment", user["id"], post_id, cur.lastrowid, body,
                     "comment:%d" % cur.lastrowid)
+        for m in targets:
+            conn.execute("INSERT OR IGNORE INTO mentions(post_id,comment_id,user_id,actor_id,created_at)"
+                         " VALUES (?,?,?,?,?)", (post_id, cur.lastrowid, m["id"], user["id"], stamp))
+            _notify(conn, m["id"], "mention", user["id"], post_id, cur.lastrowid, body,
+                    "mention:%d" % cur.lastrowid)
         conn.commit()
         return {"code": 0, "duplicate": False,
                 "comment": {"id": int(cur.lastrowid), "body": body, "region": region,
+                            "images": [signed_photo("/uploads/" + n) for n in images],
+                            "like_count": 0, "liked_by_me": False,
+                            "mentions": [{"id": int(m["id"]),
+                                          "name": (m["nickname"] or m["username"] or "").strip()}
+                                         for m in targets],
                             "created_at": stamp, "author": _user_brief(conn, user["id"])}}
+    finally:
+        conn.close()
+
+
+@app.post("/api/community/comments/{comment_id}/like")
+def toggle_comment_like(comment_id: int, req: LikeReq, user: dict = Depends(get_current_user)):
+    """评论点赞：和帖子那套一样，明细是唯一真相，计数是冗余列——
+    只在 rowcount 真的变了的时候动计数，重复点与取消点都不会把数拧歪。"""
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT id, user_id FROM comments WHERE id=? AND status='open'",
+                           (comment_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="评论不存在")
+        if req.on:
+            cur = conn.execute("INSERT OR IGNORE INTO comment_likes(comment_id,user_id,created_at)"
+                               " VALUES (?,?,?)", (comment_id, user["id"], _now()))
+            if cur.rowcount:
+                conn.execute("UPDATE comments SET like_count = like_count + 1 WHERE id=?", (comment_id,))
+        else:
+            cur = conn.execute("DELETE FROM comment_likes WHERE comment_id=? AND user_id=?",
+                               (comment_id, user["id"]))
+            if cur.rowcount:
+                conn.execute("UPDATE comments SET like_count = MAX(0, like_count - 1) WHERE id=?",
+                             (comment_id,))
+        conn.commit()
+        total = conn.execute("SELECT like_count FROM comments WHERE id=?", (comment_id,)).fetchone()[0]
+        return {"code": 0, "like_count": int(total), "liked": bool(req.on)}
     finally:
         conn.close()
 
@@ -4093,6 +4282,9 @@ def delete_comment(comment_id: int, user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=403, detail="只能删自己的评论")
         conn.execute("UPDATE comments SET status='deleted' WHERE id=?", (comment_id,))
         conn.execute("UPDATE posts SET comment_count = MAX(0, comment_count - 1) WHERE id=?", (row["post_id"],))
+        # 评论没了，那条评论带来的 @ 提醒也要收回：留着就是一点就 404 的"死通知"
+        conn.execute("DELETE FROM notifications WHERE kind='mention' AND dedup=?",
+                     ("mention:%d" % comment_id,))
         conn.commit()
         return {"code": 0}
     finally:
@@ -4347,6 +4539,9 @@ def list_notifications(cursor: int = 0, limit: int = 30, user: dict = Depends(ge
             "SELECT * FROM notifications WHERE user_id=? AND (?=0 OR id<?) ORDER BY id DESC LIMIT ?",
             (user["id"], after, after or 0, size + 1)).fetchall()
         items = [{"id": int(r["id"]), "kind": r["kind"], "post_id": r["post_id"],
+                  # comment_id 必须下发：@ 提醒与"回复了我哪条评论"要点进去停在那条评论上，
+                  # 列一直有值，只是以前没给前端，等于把定位能力锁在库里
+                  "comment_id": r["comment_id"],
                   "text": r["body_text"], "created_at": r["created_at"],
                   "read_at": r["read_at"], "actor": _user_brief(conn, r["actor_id"]) if r["actor_id"] else None}
                  for r in rows[:size]]

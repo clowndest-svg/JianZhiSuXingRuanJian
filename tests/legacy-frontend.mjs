@@ -1927,6 +1927,118 @@ try {
   check("r159 判据块本身跑通了", false, String(e && e.message));
 }
 
+// ===== r160：卡片重排、评论 @ 与配图、通知定位（真调用渲染函数，不是查字符串）=====
+try {
+  const F160_REL = "app/src/main/assets/features.js";
+  const feat160 = MUTANT ? execFileSync("git", ["show", MUT_REF + ":" + F160_REL],
+      { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+    : fs.readFileSync(path.join(ROOT, F160_REL), "utf8");
+  const h160 = makeCtx();
+  loadJs(h160.context);
+  run(h160.context, feat160.replace(/^\s*let localGuidanceRows\s*=\s*\[\s*\]\s*;\s*$/m, "/* 由 app.js 声明 */"));
+  const r160 = code => String(run(h160.context, code));
+
+  r160('state.user={id:"2",username:"me",nickname:"我"};');
+  const card = r160('cmCardHTML({id:7,title:"一周掉两斤",body:"正文第一行\\n第二行",images:["/uploads/a.jpg","/uploads/b.jpg"],'
+    + 'author:{id:3,name:"小田"},like_count:5,liked_by_me:true,comment_count:9,favorite_count:2},true)');
+  check("卡片是封面 + 标题 + 底部作者与点赞",
+        card.indexOf('class="cm-cover"') >= 0 && card.indexOf('class="cm-title"') >= 0
+          && card.indexOf("一周掉两斤") >= 0 && card.indexOf("正文第一行") < 0
+          && card.indexOf('id="post-7"') >= 0, card.slice(0, 200));
+  check("多于一张图要标出张数，只露封面不露九宫格",
+        card.indexOf("2 张图") >= 0 && card.indexOf("cm-grid") < 0, card.slice(0, 160));
+  check("卡片点赞数与选中态都按服务端给的写",
+        card.indexOf("data-like>5") >= 0 && card.indexOf('aria-pressed="true"') >= 0, card.slice(-220));
+  check("双击封面点赞挂在封面图上", card.indexOf('ondblclick="dblLikePost(7,this)') >= 0, "");
+  const noImg = r160('cmCardHTML({id:8,title:"",body:"只有文字的帖子",images:[],author:{id:3,name:"小田"},like_count:0},true)');
+  check("没配图的卡片用文字占位卡，不留白块也不假装是图",
+        noImg.indexOf("cm-cover-none") >= 0 && noImg.indexOf("只有文字的帖子") >= 0, noImg.slice(0, 200));
+  check("没图又没标题时，正文只出现一次（不再封面一遍、标题行一遍）",
+        (noImg.match(/只有文字的帖子/g) || []).length === 1 && noImg.indexOf("cm-title") < 0, noImg.slice(0, 240));
+  const noImgT = r160('cmCardHTML({id:9,title:"有标题没图",body:"正文在这里",images:[],author:{id:3,name:"小田"},like_count:0},true)');
+  check("有标题没图时文字卡放标题、下面那行放正文，两样各说一次",
+        (noImgT.match(/有标题没图/g) || []).length === 1 && noImgT.indexOf("正文在这里") >= 0, noImgT.slice(0, 260));
+  check("带图卡片的标题也只出现一次",
+        (card.match(/一周掉两斤/g) || []).length === 1, card.slice(0, 260));
+
+  const cmt = r160('qsCommentHTML({id:21,body:"@小田 你看这条",region:"浙江",created_at:"x",'
+    + 'images:["/uploads/c.gif"],like_count:3,liked_by_me:true,mentions:[{id:3,name:"小田"}],'
+    + 'author:{id:4,name:"阿明"},deletable:false},false,7)');
+  check("评论里的 @ 画成可点的人（用服务端确认过的那几个）",
+        cmt.indexOf('class="pd-at"') >= 0 && cmt.indexOf("openMemberHome(3)") >= 0, cmt.slice(0, 260));
+  check("评论配图渲染出来，动图也走同一个 <img>",
+        cmt.indexOf("pd-cmt-imgs") >= 0 && cmt.indexOf("c.gif") >= 0, "");
+  check("评论点赞按钮带计数与自己点过的状态",
+        cmt.indexOf("pd-cmt-like") >= 0 && cmt.indexOf('aria-pressed="true"') >= 0
+          && cmt.indexOf("<b>3</b>") >= 0, cmt.slice(-260));
+  check("服务端没确认的 @ 名字，前端绝不自己猜成用户",
+        r160('qsCommentHTML({id:22,body:"@路人 也看看",created_at:"x",author:{id:5,name:"甲"}},false,7)')
+          .indexOf("pd-at") < 0, "");
+  const nested = r160('qsMentionHTML("帮我 @小田 看一下 @小田",[{id:2,name:"小田"},{id:6,name:"小田"}])');
+  check("两个人同名时 @ 不许套按钮（button 嵌 button 会被浏览器截成空按钮）",
+        (nested.match(/<button/g) || []).length === 2 && (nested.match(/@小田<\/button>/g) || []).length === 2,
+        nested.slice(0, 240));
+  const atList = r160('(function(){cm.atRows=[{id:3,name:"小田",region:"",public_id:"12345678"},'
+    + '{id:9,name:"小田",region:"",public_id:"87654321"}];renderAtList("");'
+    + 'return document.getElementById("cmt-at-list").innerHTML;})()');
+  check("同名的人在 @ 列表里靠轻塑号分辨，不是一排一模一样的名字",
+        atList.indexOf("#12345678") >= 0 && atList.indexOf("#87654321") >= 0, atList.slice(0, 260));
+  const order = r160('qsCommentsHTML([{id:1,author:{id:2,name:"甲"}},{id:2,author:{id:2,name:"甲"}},'
+    + '{id:3,reply_to:1,author:{id:2,name:"甲"}}],7)');
+  check("服务端给的顺序（热评在前）在渲染后保持不变",
+        order.indexOf('data-comment="1"') < order.indexOf('data-comment="2"')
+          && order.indexOf("pd-cmt-replies") >= 0, order.slice(0, 120));
+
+  const foot = r160('cmtFootHTML(9)');
+  check("评论输入区四个入口都在，且都指向这条帖子",
+        foot.indexOf("cmt-emoji-btn") >= 0 && foot.indexOf("cmt-at-btn") >= 0
+          && foot.indexOf("cmt-gif-btn") >= 0 && foot.indexOf("cmt-img-btn") >= 0
+          && foot.indexOf("submitComment(9)") >= 0, foot.slice(0, 200));
+  check("表情面板复用同一套表情集，不再各写一份",
+        foot.indexOf("dm-emoji-grid") >= 0 && foot.indexOf("cmtInsert(") >= 0, "");
+
+  r160('cmReplyTo=null; cm.cmtMentions=[]; cm.atQuery="";');
+  r160('document.getElementById("cm-comment-text").value="帮我看看 @小";');
+  const picked = r160('(function(){pickMention(3,"小田");return document.getElementById("cm-comment-text").value'
+    + '+\"|\"+JSON.stringify(cm.cmtMentions);})()');
+  check("选人时把打了一半的 @小 换成完整 @小田，正文里不留半截",
+        picked.indexOf("帮我看看 @小田 ") === 0 && picked.indexOf("@小@") < 0, picked);
+  const twice = r160('(function(){pickMention(3,"小田");return cm.cmtMentions.length;})()');
+  check("同一个人重复选只记一次", twice === "1", twice);
+  // 生成出来的 onclick 必须自己闭合：少一个引号，浏览器会把整行吃成属性值，
+  // 面板看着有内容但一行都点不动（r160 浏览器实测就是这么抓出来的）。
+  const atHtml = r160('(function(){cm.atRows=[{id:3,name:"小田",region:"浙江",avatar:""}];renderAtList("");'
+    + 'return document.getElementById("cmt-at-list").innerHTML;})()');
+  check("@ 列表那一行的 onclick 属性闭合，且行内子元素没被吃进属性",
+        /onclick="pickMention\(3,'小田'\)"/.test(atHtml) && atHtml.indexOf('class="cmt-at-name"') > 0
+          && atHtml.indexOf("</button>") > 0, atHtml.slice(0, 240));
+  check("表情按钮生成的 onclick 也是闭合的",
+        /onclick="cmtInsert\('😀'\)"/.test(foot), (foot.match(/onclick="cmtInsert[^"]*/) || ["没找到"])[0]);
+  h160.sandbox.__fetchHandler = () => Promise.resolve({
+    ok: true, status: 200, json: async () => ({ code: 0, items: [{ name: "ab.gif", url: "/uploads/ab.gif" }] })
+  });
+  await run(h160.context, "loadMyStickers();");
+  await new Promise(r => setTimeout(r, 400));
+  const gifHtml = r160('document.getElementById("cmt-gif-grid").innerHTML');
+  check("动图库每一行的 onclick 闭合（带名字与签名链接两个字符串参数）",
+        /onclick="pickSticker\('ab\.gif','\/uploads\/ab\.gif'\)"/.test(gifHtml)
+          && gifHtml.indexOf("<img") > 0, gifHtml.slice(0, 240));
+  const tok = r160('atTokenAtCursor("帮我看看 @小田")+"/"+atTokenAtCursor("普通文本")+"/"+atTokenAtCursor("@")');
+  check("只有光标前正在打 @词 时才认作提及输入", tok === "小田/null/", tok);
+
+  r160('QS_PAGES.length=0;');
+  r160('openPostDetail(12,34)');
+  const arg = r160('String(QS_PAGES[QS_PAGES.length-1].arg)');
+  check("通知点进来带的是 帖子:评论 字符串（传对象会被 String() 撞成同一个键）",
+        arg === "12:34", arg);
+  r160('QS_PAGES.length=0;openPostDetail(12)');
+  check("没有评论 id 时仍按帖子号跳", r160('String(QS_PAGES[QS_PAGES.length-1].arg)') === "12", "");
+  // 高亮与"评论已不在"那两条不在这里测：桩里 document.querySelector 永远造一个新元素，
+  // 找不到分支根本走不到——那两样放到真浏览器里量（见 r160 界面验收）。
+} catch (e) {
+  check("r160 判据块本身跑通了", false, String(e && e.message));
+}
+
 const bad = R.filter(x => !x[1]);
 console.log(`\n=== ${MUTANT ? "变异样本(HEAD 改动前)" : "当前源码"}：${R.length} 条，绿 ${R.length - bad.length}，红 ${bad.length} ===`);
 for (const [name, ok, detail] of R) console.log(`  ${ok ? "绿" : "红"} ${name}${ok ? "" : "  -> " + detail}`);

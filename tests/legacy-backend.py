@@ -1622,7 +1622,8 @@ def main():
         feat_js = read_asset("features.js")
         # ── r149 社区 / 私信 / 反馈：能真跑的判据绝不只是查字符串 ──
         import time as _gate_time   # main() 里 1800 行处有一句 import time，会让这个名字在整个函数里先变局部
-        _cm_tables = ("posts", "post_likes", "comments", "follows", "notifications", "conversations",
+        _cm_tables = ("posts", "post_likes", "comments", "comment_likes", "mentions",
+                      "follows", "notifications", "conversations",
                       "messages", "user_blocks", "content_reports", "feedback", "media_uploads",
                       "community_profile")
         _missing_tables = [t for t in _cm_tables
@@ -1683,9 +1684,11 @@ def main():
         _bad_kind = [k for k in m.community.NOTICE_KINDS
                      if not m.community.notice_text(k, "小田", "今天吃了什么").startswith("小田")]
         check("每种通知都拼得出人话", not _bad_kind, _bad_kind)
-        check("正文与评论的更严上限在模块里，不在界面字面量里",
+        check("正文、评论、标题与配图上限都写在模块里，不在界面字面量里",
               m.community.POST_MAX == 1000 and m.community.COMMENT_MAX == 500
-              and m.community.BIO_MAX == 60 and m.community.IMAGES_MAX == 6, "")
+              and m.community.BIO_MAX == 60 and m.community.IMAGES_MAX == 9
+              and m.community.TITLE_MAX == 20 and m.community.COMMENT_IMAGES_MAX == 3
+              and m.community.MENTION_MAX == 5, "")
         _over = ""
         try:
             m.community.clean_body("字" * 1001, m.community.POST_MAX, "正文")
@@ -1754,8 +1757,11 @@ def main():
               and 'partner["blocked"]' in srv_src, {"paintThread 长度": len(_pt)})
         # 作者行没有 flex 容器时，"关注"按钮会掉到下一行；名字与属地是 inline span 时
         # 会连成"小田属地 湖南"——这两条都是截图里量出来的，不是猜的
-        check("帖子卡片作者行有 flex 容器包住关注按钮",
-              '<div class="cm-card-head">' in feat_js and ".cm-card-head{display:flex" in feat_css, "")
+        # r160 起广场卡片是"封面 + 标题 + 底部作者与点赞"，作者行从卡片顶部挪到了底部
+        check("帖子卡片有封面块与作者行两级，标题是一行可点的按钮",
+              '<div class="cm-card-main">' in feat_js and ".cm-cover{position:relative" in feat_css
+              and 'class="cm-title"' in feat_js and ".cm-title{display:-webkit-box" in feat_css
+              and ".cm-card-foot{display:flex" in feat_css, "")
         check("名字、属地、摘要各自成行，不连成一串",
               all((".%s{" % k) in feat_css and (".%s{display:block" % k) in feat_css
                   for k in ("cm-name", "cm-sub", "cm-row-title", "cm-row-meta",
@@ -2316,7 +2322,10 @@ def main():
           and "closePage(true)" in _fjs, "")
     check("帖子编辑接口存在且只有作者能改",
           '@app.patch("/api/community/posts/{post_id}")' in srv_txt
-          and "只能改自己的帖子" in srv_txt and "SET body=?, edited_at=?" in srv_txt, "")
+          and "只能改自己的帖子" in srv_txt
+          and "SET title=?, body=?, edited_at=?" in srv_txt, "")
+    check("编辑时不带 title 的旧客户端不许把已有标题洗成空",
+          'title = (row["title"] or "") if req.title is None else community.clean_title(req.title)' in srv_txt, "")
     check("帖子卡片带 edited_at（前端才能显示已编辑）",
           '"edited_at": row["edited_at"]' in srv_txt, "")
     check("自己/对方的 id 比较用 qsSameId（=== 会把字符串 id 判成别人）",
@@ -2515,6 +2524,97 @@ def main():
           and "img.src=API_BASE+accountCache.avatar_url" not in _a_js, "")
     check("上传头像仍然并进文件选择行（没退回成一整行巨块）",
           '<div class="td-actions"><button type="button" class="td-btn" onclick="uploadAvatar()">上传头像</button></div>' not in _a_js, "")
+
+    # ---- r160：帖子标题、评论点赞/图/动图/@ 提醒、通知定位、广场卡片重排 ----
+    _b_css = _repo_file("app/src/main/assets/features.css")
+    _b_js = _repo_file("app/src/main/assets/features.js")
+    _b_html = _repo_file("app/src/main/assets/index.html")
+    _mod = _repo_file("app_modules/community.py")
+    check("帖子有独立标题列，评论有配图与点赞计数列",
+          '_ensure_columns(c, "posts", [("title", "TEXT NOT NULL DEFAULT \'\'")])' in srv_txt
+          and '("images", "TEXT NOT NULL DEFAULT \'[]\'")' in srv_txt
+          and '("like_count", "INTEGER NOT NULL DEFAULT 0")' in srv_txt, "")
+    check("评论点赞与 @ 各建一张明细表（计数只是冗余列，明细才是真相）",
+          "CREATE TABLE IF NOT EXISTS comment_likes" in srv_txt
+          and "CREATE TABLE IF NOT EXISTS mentions" in srv_txt
+          and "UNIQUE(comment_id, user_id)" in srv_txt, "")
+    check("标题压成一行并卡 20 字（照小红书，两行的标题就是正文）",
+          "def clean_title(text)" in _mod
+          and 're.sub(r"\\s*\\n+\\s*", " ", str(text or ""))' in _mod and "TITLE_MAX = 20" in _mod, "")
+    check("发帖写 title，编辑不带 title 时保留原标题",
+          "INSERT INTO posts(user_id,title,body,images" in srv_txt
+          and 'title = (row["title"] or "") if req.title is None else community.clean_title(req.title)' in srv_txt, "")
+    check("评论点赞只在明细真的变化时动计数（重复点与取消点都不拧歪）",
+          "INSERT OR IGNORE INTO comment_likes" in srv_txt
+          and "like_count = MAX(0, like_count - 1) WHERE id=?" in srv_txt, "")
+    check("@ 提醒要正文里真写了 @昵称 才算，否则就是骚扰通道",
+          "def _resolve_mentions(" in srv_txt
+          and "re.escape(name)" in srv_txt and '(?!\\w)' in srv_txt, "")
+    check("自己 @ 自己不发通知，一条评论最多 @ 五个人",
+          "if uid == int(actor_id) or uid in seen:" in srv_txt
+          and "community.MENTION_MAX" in srv_txt and "MENTION_MAX = 5" in _mod, "")
+    check("通知下发 comment_id（列一直有值，不给前端等于把定位锁在库里）",
+          '"comment_id": r["comment_id"],' in srv_txt, "")
+    check("删评论要收回那条 @ 的通知，别留一点就 404 的死链",
+          "DELETE FROM notifications WHERE kind='mention' AND dedup=?" in srv_txt, "")
+    check("动图原样落盘，不被重编码成静图",
+          'raw[:6] in (b"GIF87a", b"GIF89a")' in srv_txt and "def _gif_checks(" in srv_txt
+          and 'name, blob = uuid.uuid4().hex + ".gif", raw' in srv_txt, "")
+    check("动图文件名要三处一起放行：clean_images、上传白名单、/uploads 路由",
+          r"[0-9a-f]{32}\.(?:jpg|gif)" in _mod and "jpg|jpeg|png|webp|gif|mp4|webm" in srv_txt, "")
+    check("我的动图库只回自己传过的 GIF",
+          '@app.get("/api/community/stickers")' in srv_txt and "name LIKE '%.gif'" in srv_txt, "")
+    check("详情页一次取回点赞与 @，不在每条评论里逐条查",
+          "SELECT cl.comment_id FROM comment_likes cl JOIN comments cm" in srv_txt
+          and "SELECT comment_id, user_id FROM mentions WHERE post_id=?" in srv_txt, "")
+    check("热评排在时间前面，回复仍按时间排",
+          'key=lambda x: (-x["like_count"], x["id"])' in srv_txt, "")
+    check("评论配图有自己上限，且同一张图只算一次",
+          "COMMENT_IMAGES_MAX = 3" in _mod
+          and "limit=community.COMMENT_IMAGES_MAX" in srv_txt and "if name in out:" in _mod, "")
+    check("发帖器有标题输入框（20 字），编辑框也有",
+          'id="cm-post-title" type="text" maxlength="20"' in _b_html
+          and 'id="pd-edit-title"' in _b_js, "")
+    check("评论输入区四个入口都在：表情、@、动图、配图",
+          "cmt-emoji-btn" in _b_js and "cmt-at-btn" in _b_js and "cmt-gif-btn" in _b_js
+          and "cmt-img-btn" in _b_js and "cmt-image-file" in _b_js, "")
+    check("@ 面板：默认列我关注的人，打 @xxx 实时搜，旧搜索不许盖新结果",
+          "/api/community/connections?kind=following" in _b_js
+          and "/api/community/search?q=" in _b_js
+          and "if (seq !== cm.atSeq) return" in _b_js and "function atTokenAtCursor" in _b_js, "")
+    check("选人时把打了一半的 @xxx 换成完整昵称，正文里不留半截",
+          'input.value.replace(/@([^\\s@]{0,16})$/, "")' in _b_js, "")
+    check("待发区把回复对象、@ 到的人、配图都摊开可撤",
+          "function syncCmtDraft()" in _b_js and "cmt-draft" in _b_js
+          and "dropCmtMention(" in _b_js and "dropCmtImage(" in _b_js, "")
+    check("评论里的 @ 只把服务端确认过的人画成按钮，前端不猜谁是用户",
+          "function qsMentionHTML(" in _b_js and "qsMentionHTML(escapeHtml(c.body), c.mentions)" in _b_js, "")
+    check("通知整行可点，带评论 id 时用 帖子:评论 定位（对象参数会被 String() 撞成一个键）",
+          "function openPostDetail(id, commentId)" in _b_js
+          and 'Number(id) + ":" + Number(commentId)' in _b_js
+          and "function qsFocusComment(cid)" in _b_js and 'data-comment="' in _b_js, "")
+    check("卡片是封面 + 两行标题 + 底部作者与点赞，双击封面点赞",
+          "cm-cover-none" in _b_js and 'ondblclick="dblLikePost(' in _b_js
+          and "function dblLikePost(" in _b_js, "")
+    check("双列瀑布卡在窄屏两列、宽屏三列",
+          ".cm-feed{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))" in _b_css
+          and ".cm-feed{grid-template-columns:repeat(3,minmax(0,1fr))" in _b_css, "")
+    _i760 = _b_css.find("@media(min-width:760px)")
+    _i900 = _b_css.find("@media (min-width:900px){.cm-feed{")
+    check("宽屏三列那条排在 760px 两列之后（同权重写在上面会被静默盖掉）",
+          _i760 > 0 and _i900 > _i760, "760@%d 900@%d" % (_i760, _i900))
+    check("高亮那条评论只用 inset 阴影描边，亮起的瞬间不抖版",
+          ".pd-cmt-flash{background:#FFFBEB;border-radius:10px;box-shadow:inset" in _b_css, "")
+    check("评论点赞就地改数字，不重画整页",
+          "async function toggleCommentLike(" in _b_js and 'btn.querySelector("b")' in _b_js, "")
+    check("换帖子必须丢掉上一张的评论草稿",
+          "cmReplyTo = null; cm.cmtImages = []; cm.cmtMentions = []" in _b_js, "")
+    _settab = _b_js.split("function setMessageTab(which)")[1].split("\n}")[0] if "function setMessageTab(which)" in _b_js else ""
+    check("点「互动通知」这一类要真的去读一次（只画内存的话第一次点是空的）",
+          "loadMessages()" in _settab and "renderMessages()" in _settab, _settab.strip()[:160])
+    check("读消息时若又切了类别，不许把那次切换吞掉",
+          "if (cm.loadingMsg) { cm.msgAgain = true; return; }" in _b_js
+          and "if (cm.msgAgain) { cm.msgAgain = false; loadMessages(); }" in _b_js, "")
 
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (

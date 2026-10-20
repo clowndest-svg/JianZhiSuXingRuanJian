@@ -690,6 +690,180 @@ class Integration(unittest.TestCase):
         self.assertEqual(external.status_code, 200)
         self.assertEqual(external.json()['post']['images'], [], '外部 URL 一律丢掉，不给转成签名链接的机会')
 
+    def test_post_title_is_one_line_optional_and_shows_everywhere(self):
+        """标题是可选的一行短标题：卡片、详情、编辑都要带上它，且不能被塞成两行。"""
+        made = self.c.post('/api/community/posts', headers=self.auth,
+                           json={'title': '  一周掉两斤的吃法  ', 'text': '正文第一段\n第二段'}).json()
+        self.assertEqual(made['post']['title'], '一周掉两斤的吃法', '前后空格要剪掉')
+        self.assertEqual(made['post']['body'], '正文第一段\n第二段', '正文里的换行是内容，不许被压掉')
+        pid = made['post']['id']
+        self.assertEqual(self.c.get('/api/community/feed', headers=self.auth).json()['items'][0]['title'],
+                         '一周掉两斤的吃法', '信息流卡片读不到标题，标题就白写了')
+        self.assertEqual(self.c.get('/api/community/posts/%d' % pid, headers=self.auth).json()['post']['title'],
+                         '一周掉两斤的吃法')
+        too_long = self.c.post('/api/community/posts', headers=self.auth,
+                               json={'title': '标' * 21, 'text': '超长标题'})
+        self.assertEqual(too_long.status_code, 400, '标题必须卡住长度（小红书是 20 字）')
+        two_lines = self.c.post('/api/community/posts', headers=self.auth,
+                                json={'title': '第一行\n第二行', 'text': '带换行的标题'})
+        self.assertEqual(two_lines.status_code, 200)
+        self.assertEqual(two_lines.json()['post']['title'], '第一行 第二行', '标题压成一行，不留换行')
+        blank = self.c.post('/api/community/posts', headers=self.auth, json={'title': '', 'text': '   '})
+        self.assertEqual(blank.status_code, 400, '标题、正文、图都没有就是空帖')
+        # 编辑：不带 title 的旧客户端不许把已有标题清空
+        keep = self.c.patch('/api/community/posts/%d' % pid, headers=self.auth, json={'text': '只改正文'}).json()
+        self.assertEqual(keep['post']['title'], '一周掉两斤的吃法', '没给 title 就被洗成空，等于改一个字丢个标题')
+        self.assertEqual(keep['post']['body'], '只改正文')
+        changed = self.c.patch('/api/community/posts/%d' % pid, headers=self.auth,
+                               json={'title': '改过的标题', 'text': '只改正文'}).json()
+        self.assertEqual(changed['post']['title'], '改过的标题')
+        over = self.c.patch('/api/community/posts/%d' % pid, headers=self.auth,
+                            json={'title': '标' * 21, 'text': 'x'})
+        self.assertEqual(over.status_code, 400)
+
+    def test_comment_likes_agree_with_their_own_rows_and_sort_hot_first(self):
+        """评论点赞：明细是唯一真相，计数只是冗余列；热评要排在时间前面。"""
+        pal, pauth = self._member('liker1', nickname='点赞甲')
+        pid = self.c.post('/api/community/posts', headers=self.auth, json={'text': '求点赞'}).json()['post']['id']
+        c1 = self.c.post('/api/community/posts/%d/comments' % pid, headers=self.auth,
+                         json={'text': '第一条'}).json()['comment']['id']
+        c2 = self.c.post('/api/community/posts/%d/comments' % pid, headers=pauth,
+                         json={'text': '第二条应该排前面'}).json()['comment']['id']
+        for _ in range(2):
+            self.assertEqual(self.c.post('/api/community/comments/%d/like' % c2, headers=self.auth,
+                                         json={'on': True}).json()['like_count'], 1,
+                             '同一个人点两次只能算一次')
+        self.assertEqual(self.c.post('/api/community/comments/%d/like' % c2, headers=pauth,
+                                     json={'on': True}).json()['like_count'], 2)
+        self.assertEqual(self.c.post('/api/community/comments/%d/like' % c2, headers=pauth,
+                                     json={'on': False}).json()['like_count'], 1)
+        rows = self.c.get('/api/community/posts/%d' % pid, headers=self.auth).json()['comments']
+        self.assertEqual([x['id'] for x in rows], [c2, c1], '有赞的那条要排在最前')
+        self.assertEqual(rows[0]['like_count'], 1)
+        self.assertTrue(rows[0]['liked_by_me'], '我自己点过赞，回执要说 liked_by_me')
+        mine_rows = self.c.get('/api/community/posts/%d' % pid, headers=pauth).json()['comments']
+        self.assertFalse(mine_rows[0]['liked_by_me'], '点赞状态是每个人的，不许串号')
+        conn = self.m.get_db()
+        try:
+            real = conn.execute("SELECT COUNT(*) FROM comment_likes WHERE comment_id=?", (c2,)).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(real, rows[0]['like_count'], '计数和明细对不上，说明有一处没跟着改')
+        self.assertEqual(self.c.post('/api/community/comments/999999/like', headers=self.auth,
+                                     json={'on': True}).status_code, 404)
+
+    def test_comment_mentions_only_notify_people_actually_named(self):
+        """@ 提醒：客户端挑的人，必须正文里真写了 @他的名字 才算，否则就是骚扰通道。"""
+        pal, pauth = self._member('mentionee', nickname='小田')
+        pal_id = int(pal['id'])
+        pid = self.c.post('/api/community/posts', headers=self.auth, json={'text': '点名测试'}).json()['post']['id']
+        before = len(self.c.get('/api/notifications', headers=pauth).json()['items'])
+        # 只报 id、正文里没写 @小田 —— 必须不发通知
+        sneaky = self.c.post('/api/community/posts/%d/comments' % pid, headers=self.auth,
+                             json={'text': '我谁都没提', 'mentions': [pal_id]}).json()
+        self.assertEqual(len(self.c.get('/api/notifications', headers=pauth).json()['items']), before,
+                         '正文里没有 @名字，光凭 user_id 就能给人发通知')
+        self.assertEqual(sneaky['comment']['mentions'], [], '回执要如实说这条没提到人')
+        hit = self.c.post('/api/community/posts/%d/comments' % pid, headers=self.auth,
+                          json={'text': '@小田 快来看这条', 'mentions': [pal_id]}).json()
+        cid = hit['comment']['id']
+        self.assertEqual(hit['comment']['mentions'], [{'id': pal_id, 'name': '小田'}],
+                         '回执要带回名字，前端才能立刻把 @ 画成可点的')
+        notes = self.c.get('/api/notifications', headers=pauth).json()['items']
+        self.assertEqual(len(notes), before + 1)
+        top = notes[0]
+        self.assertEqual(top['kind'], 'mention')
+        self.assertEqual(top['post_id'], pid, '通知要带帖子 id，否则点不进去')
+        self.assertEqual(top['comment_id'], cid, '不带 comment_id 就只能跳到帖子顶部，定位不到那条评论')
+        self.assertTrue(top['text'].startswith(self.signup['nickname'] or self.signup['username']),
+                        '通知句子必须按老规矩以操作者的名字开头：' + top['text'])
+        self.assertIsNone(top['read_at'], '新通知必须算未读')
+        detail = self.c.get('/api/community/posts/%d' % pid, headers=pauth).json()['comments']
+        self.assertEqual([x for x in detail if x['id'] == cid][0]['mentions'],
+                         [{'id': pal_id, 'name': '小田'}],
+                         '详情页要认出这条 @ 了谁，前端才能把 @ 画成可点的')
+        # 自己 @ 自己不算；不存在的 id 忽略；同名不同人不误伤
+        self.assertEqual(self.c.post('/api/community/posts/%d/comments' % pid, headers=pauth,
+                                     json={'text': '@小田 我自己', 'mentions': [pal_id]}
+                                     ).json()['comment']['mentions'], [], '自己@自己不给自己发通知')
+        self.assertEqual(self.c.post('/api/community/posts/%d/comments' % pid, headers=self.auth,
+                                     json={'text': '@小田 也在', 'mentions': [999999]}
+                                     ).json()['comment']['mentions'], [], '不存在的用户不该发通知')
+        twin = self.c.post('/api/community/posts/%d/comments' % pid, headers=self.auth,
+                           json={'text': '@小田田 也来看', 'mentions': [pal_id]}).json()
+        self.assertEqual(twin['comment']['mentions'], [], '@小田 不能算 @小田田 的开头')
+        # 评论被删，那条 @ 的提醒要收回，别留一点就 404 的死通知
+        self.c.delete('/api/community/comments/%d' % cid, headers=self.auth)
+        left = self.c.get('/api/notifications', headers=pauth).json()['items']
+        self.assertNotIn(cid, [x.get('comment_id') for x in left], '评论删了，@ 提醒还留着就是死链')
+
+    def test_comment_gif_upload_keeps_its_frames(self):
+        """动图必须原样存：重编码只留首帧，用户会以为"传上去就不会动了"。"""
+        buf = io.BytesIO()
+        a = Image.new('RGB', (30, 30), (255, 0, 0))
+        b = Image.new('RGB', (30, 30), (0, 255, 0))
+        a.save(buf, format='GIF', save_all=True, append_images=[b], duration=80, loop=0)
+        raw = buf.getvalue()
+        up = self.c.post('/api/community/media', headers=self.auth,
+                         files={'file': ('m.gif', raw, 'image/gif')}).json()
+        self.assertEqual(up['kind'], 'gif')
+        self.assertTrue(up['name'].endswith('.gif'), up)
+        got = self.c.get(up['url'])
+        self.assertEqual(got.status_code, 200, '签名链接要能取到')
+        served = Image.open(io.BytesIO(got.content))
+        self.assertEqual(served.format, 'GIF')
+        self.assertGreater(getattr(served, 'n_frames', 1), 1, '落到服务器上的动图只剩一帧＝被重编码成静图')
+        pid = self.c.post('/api/community/posts', headers=self.auth, json={'text': '动图评论'}).json()['post']['id']
+        cid = self.c.post('/api/community/posts/%d/comments' % pid, headers=self.auth,
+                          json={'text': '发个动图', 'images': [up['name']]}).json()['comment']['id']
+        row = [x for x in self.c.get('/api/community/posts/%d' % pid, headers=self.auth).json()['comments']
+               if x['id'] == cid][0]
+        self.assertEqual([i.split('?')[0] for i in row['images']], ['/uploads/' + up['name']],
+                         '详情页要带回动图链接，前端才知道该画成图而不是当文字')
+        stickers = self.c.get('/api/community/stickers', headers=self.auth).json()['items']
+        self.assertEqual([s['name'] for s in stickers], [up['name']], '我的动图库要能看见刚传的那张')
+        big = io.BytesIO()
+        Image.new('RGB', (900, 900), (1, 2, 3)).save(big, format='GIF')
+        self.assertEqual(self.c.post('/api/community/media', headers=self.auth,
+                                     files={'file': ('big.gif', big.getvalue(), 'image/gif')}).status_code,
+                         400, '超大动图要挡住，别拿动图当相册')
+        self.assertEqual(self.c.post('/api/community/media', headers=self.auth,
+                                     files={'file': ('f.gif', b'GIF89a-not-really', 'image/gif')}).status_code,
+                         400, '假冒装的要拒绝')
+
+    def test_comment_images_are_owned_and_capped(self):
+        mine, mauth = self._member('cmtimg')
+        other, oauth = self._member('cmtsteal')
+        buf = io.BytesIO()
+        Image.new('RGB', (40, 40), (30, 120, 200)).save(buf, format='PNG')
+        name = self.c.post('/api/community/media', headers=mauth,
+                           files={'file': ('c.png', buf.getvalue(), 'image/png')}).json()['name']
+        pid = self.c.post('/api/community/posts', headers=mauth, json={'text': '配图评论测试'}).json()['post']['id']
+        one = self.c.post('/api/community/posts/%d/comments' % pid, headers=mauth,
+                          json={'text': '', 'images': [name]}).json()
+        self.assertEqual(one['comment']['images'][0].split('?')[0], '/uploads/' + name,
+                         '只发图不写字也要发得出去（小红书就是这么发的）')
+        stolen = self.c.post('/api/community/posts/%d/comments' % pid, headers=oauth,
+                             json={'text': '偷图', 'images': [name]})
+        self.assertEqual(stolen.status_code, 400, '别人上传的文件不能拼进自己的评论')
+        many_names = []
+        for i in range(4):
+            box = io.BytesIO()
+            Image.new('RGB', (40, 40), (30 + i * 40, 120, 200)).save(box, format='PNG')
+            many_names.append(self.c.post('/api/community/media', headers=mauth,
+                                          files={'file': ('c%d.png' % i, box.getvalue(), 'image/png')}
+                                          ).json()['name'])
+        many = self.c.post('/api/community/posts/%d/comments' % pid, headers=mauth,
+                           json={'text': '一次塞四张', 'images': many_names}).json()
+        self.assertEqual(len(many['comment']['images']), self.m.community.COMMENT_IMAGES_MAX,
+                         '评论配图要按评论自己的上限，不能沿用帖子的')
+        dup = self.c.post('/api/community/posts/%d/comments' % pid, headers=mauth,
+                          json={'text': '同一张塞六遍', 'images': many_names[:1] * 6}).json()
+        self.assertEqual(len(dup['comment']['images']), 1, '同一张图只算一张，别让它吃掉配额')
+        blank = self.c.post('/api/community/posts/%d/comments' % pid, headers=mauth,
+                            json={'text': '   ', 'images': []})
+        self.assertEqual(blank.status_code, 400, '空文字空图不算一条评论')
+
     def test_direct_messages_persist_and_unread(self):
         """私信必须落在服务端：退出重进、换设备都还在，未读以 read_at 现算。"""
         peer, pauth = self._member('peer')

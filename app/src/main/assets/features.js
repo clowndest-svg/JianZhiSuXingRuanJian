@@ -626,15 +626,17 @@ async function submitForgotReset(){
    2. 发帖、评论、私信全部带 request_id 幂等，重试不该产生第二条；
    3. WebSocket 只是加速器，发不出去会自动退回 HTTP——断了也不许"看起来发了"。
    ============================================================ */
-const CM_LIMITS = { post: 1000, comment: 500, dm: 1000, bio: 60, feedback: 800 };
+const CM_LIMITS = { title: 20, post: 1000, postImages: 9, comment: 500, dm: 1000, bio: 60, feedback: 800, cmtImages: 3 };
 const CM_TOOLS = ["recipes", "workout", "body", "takeout", "charts", "gemini"];
 const cm = {
     feed: "latest", items: [], cursor: 0, more: false, loading: false, loaded: false,
-    msgTab: "chats", convs: [], notices: [], loadingMsg: false,
+    msgTab: "chats", convs: [], notices: [], loadingMsg: false, msgAgain: false,
     thread: null, bubbles: [], pending: {},
     ws: null, wsState: "idle", wsRetry: 0, wsTimer: null,
     stats: null, feedbackKind: "bug", images: [],
-    myTheme: "green", unreadTotal: 0, postId: 0
+    myTheme: "green", unreadTotal: 0, postId: 0,
+    // 评论草稿态：配图、@ 到的人、当前展开的面板，换帖子或发出去都要清干净
+    cmtImages: [], cmtMentions: [], cmtPanel: "", atRows: [], atQuery: "", atSeq: 0, stickers: null
 };
 
 /* 换账号必须把社区与私信的内存状态一起清掉：
@@ -648,6 +650,7 @@ function resetCommunity() {
     cm.convs = []; cm.notices = []; cm.thread = null; cm.bubbles = [];
     cm.pending = {}; cm.stats = null; cm.images = []; cm.myTheme = "green";
     cm.unreadTotal = 0; cm.postId = 0;
+    cm.cmtImages = []; cm.cmtMentions = []; cm.cmtPanel = ""; cm.atRows = []; cm.atQuery = "";
     qsCloseAllPages();
     paintNavBadge();
 }
@@ -738,8 +741,9 @@ function qsSetFoot(html) {
     if (!foot) return;
     foot.innerHTML = html || "";
     foot.hidden = !html;
-    // 私聊输入区是竖排（工具栏 + 面板 + 输入），别把评论输入框也带成竖排
+    // 私聊与评论的输入区都是竖排（工具栏 + 面板 + 输入），别把帖子详情那种单行输入也带成竖排
     foot.classList.toggle("dm-foot", !!html && html.indexOf("dm-tools") >= 0);
+    foot.classList.toggle("cmt-foot", !!html && html.indexOf("cmt-tools") >= 0);
 }
 
 /** 复制按钮的通用出口：值放在 data-copy 里，避免把内容拼进 onclick 时踩引号转义。 */
@@ -838,45 +842,47 @@ function setCommunityTab(which) {
     loadCommunity(false);
 }
 
-/* 广场卡片上的两个数字都从 cm.items 现写：点赞/评论之后只改内存不改 DOM，
-   界面就会一直停在旧值，用户以为没生效又点一次。 */
+/* 广场卡片上的数字从 cm.items 现写：点赞之后只改内存不改 DOM，
+   界面就会一直停在旧值，用户以为没生效又点一次。
+   r160 起卡片只有点赞（评论数与收藏收进详情页，照小红书的卡片密度）。 */
 function syncCardCounts(postId) {
     const item = cm.items.find(x => x.id === Number(postId));
     const card = document.getElementById("post-" + postId);
     if (!item || !card) return;
-    const nums = card.querySelectorAll(".cm-act b");
-    if (nums[0]) nums[0].textContent = String(Number(item.like_count));
-    if (nums[1]) nums[1].textContent = String(Number(item.comment_count));
+    const num = card.querySelector("[data-like]");
+    if (num) num.textContent = String(Number(item.like_count));
     const like = card.querySelector(".cm-act");
     if (like) like.setAttribute("aria-pressed", item.liked_by_me ? "true" : "false");
 }
 
+/* 小红书式卡片：封面在上（首图，没图就用一句文字卡垫底）、标题两行、
+   底下一行作者 + 点赞。以前是"头像昵称在最上 + 整段正文 + 九宫格"，
+   一屏只能容两条，看着像时间线不像广场。 */
 function cmCardHTML(p, withId) {
-    const imgs = (p.images || []).length
-        ? '<div class="cm-grid">' + p.images.map(u =>
-            '<img src="' + escapeHtml(API_BASE + u) + '" alt="帖子配图" loading="lazy" onclick="viewPostImage(\'' +
-            escapeHtml(API_BASE + u).replace(/'/g, "%27") + '\')">').join("") + "</div>"
-        : "";
-    const mine = p.author && qsSameId(p.author.id, state.user && state.user.id);
+    const imgs = p.images || [];
+    const hasImg = imgs.length > 0;
+    // 没图时那张文字卡就是封面：标题（或正文）已经印在上面了，
+    // 下面那行再写一遍就成了"同一句话出现两次"（截图里最难看的就是这个）。
+    const cover = hasImg
+        ? '<img src="' + escapeHtml(API_BASE + imgs[0]) + '" alt="帖子配图" loading="lazy"'
+          + ' onclick="event.stopPropagation();viewPostImage(\'' +
+          escapeHtml(API_BASE + imgs[0]).replace(/'/g, "%27") + '\')"'
+          + ' ondblclick="dblLikePost(' + p.id + ',this)">'
+          + (imgs.length > 1 ? '<span class="cm-cover-more">' + imgs.length + ' 张图</span>' : "")
+        : '<span class="cm-cover-none">' + escapeHtml((p.title || p.body || "").slice(0, 60) || "这条只有一句话") + "</span>";
+    const line = hasImg ? (p.title || p.body || "") : (p.title ? (p.body || "") : "");
+    const titleLine = line ? '<button type="button" class="cm-title" onclick="openPostDetail(' + p.id + ')">'
+        + escapeHtml(line) + "</button>" : "";
     return '<article class="cm-card"' + (withId ? ' id="post-' + p.id + '"' : '') + ' data-post="' + p.id + '">'
-        + '<div class="cm-card-head">'
+        + '<button type="button" class="cm-cover" onclick="openPostDetail(' + p.id + ')" aria-label="打开这条帖子">' + cover + "</button>"
+        + '<div class="cm-card-main">' + titleLine
+        + '<div class="cm-card-foot">'
         + '<button type="button" class="cm-who-btn" onclick="openMemberHome(' + (p.author ? p.author.id : 0) + ')">'
-        + '<span class="cm-avatar">' + cmAvatarInner(p.author) + "</span>"
-        + '<span class="cm-who"><span class="cm-name">' + escapeHtml(cmName(p.author)) + "</span>"
-        + '<span class="cm-sub">' + cmRegionTag(p.region) + " · " + escapeHtml(cmAgo(p.created_at)) + "</span></span></button>"
-        + (mine ? "" : '<button type="button" class="cm-follow" aria-pressed="' + (p.followed_by_me ? "true" : "false") +
-            '" onclick="toggleFollow(' + (p.author ? p.author.id : 0) + ',this)">' +
-            (p.followed_by_me ? "已关注" : "关注") + "</button>")
-        + "</div>"
-        + '<div class="cm-body">' + escapeHtml(p.body) + "</div>" + imgs
-        + '<div class="cm-acts">'
+        + '<span class="cm-avatar sm">' + cmAvatarInner(p.author) + "</span>"
+        + '<span class="cm-name">' + escapeHtml(cmName(p.author)) + "</span></button>"
         + '<button type="button" class="cm-act" aria-pressed="' + (p.liked_by_me ? "true" : "false") + '" '
         + 'onclick="toggleLike(' + p.id + ',this)">❤ <b data-like>' + Number(p.like_count) + "</b></button>"
-        + '<button type="button" class="cm-act" onclick="openPostDetail(' + p.id + ')">💬 <b>' + Number(p.comment_count) + "</b></button>"
-        + '<button type="button" class="cm-act" aria-pressed="' + (p.favorited_by_me ? "true" : "false") + '" '
-        + 'onclick="toggleFavorite(' + p.id + ',this)">★ <b data-fav>' + Number(p.favorite_count || 0) + "</b></button>"
-        + (mine ? '<button type="button" class="cm-act" style="margin-left:auto" onclick="deletePost(' + p.id + ')">删除</button>' : "")
-        + "</div></article>";
+        + "</div></div></article>";
 }
 
 function renderFeed() {
@@ -919,13 +925,14 @@ function expandComposer() {
     if (c) c.hidden = true;
     if (o) o.hidden = false;
     syncComposerCount();
-    const t = cmEl("cm-post-text");
+    const t = cmEl("cm-post-title");
     if (t) t.focus();
 }
 
 function syncComposerCount() {
-    const t = cmEl("cm-post-text");
-    cmText("cm-post-count", ((t && t.value ? t.value.length : 0)) + " / " + CM_LIMITS.post);
+    const t = cmEl("cm-post-text"), h = cmEl("cm-post-title");
+    cmText("cm-post-count", ((h && h.value ? h.value.length : 0)) + " / " + CM_LIMITS.title
+        + " · " + ((t && t.value ? t.value.length : 0)) + " / " + CM_LIMITS.post);
 }
 
 function syncFeedbackCounters() {
@@ -942,7 +949,7 @@ async function attachPostImage(input) {
         const form = new FormData();
         form.append("file", file);
         const r = await rawPostApi("/api/community/media", form);
-        if (cm.images.length >= 6) cmState("cm-post-err", "一条帖子最多 6 张图，多余的没加进来");
+        if (cm.images.length >= CM_LIMITS.postImages) cmState("cm-post-err", "一条帖子最多 " + CM_LIMITS.postImages + " 张图，多余的没加进来");
         else cm.images.push({ name: r.name, url: r.url });
         renderThumbs();
         cmState("cm-post-err", "");
@@ -965,14 +972,17 @@ function renderThumbs() {
 function dropPostImage(i) { cm.images.splice(i, 1); renderThumbs(); }
 
 async function submitPost() {
-    const t = cmEl("cm-post-text");
+    const t = cmEl("cm-post-text"), h = cmEl("cm-post-title");
     const text = (t && t.value || "").trim();
-    if (!text && !cm.images.length) { cmState("cm-post-err", "正文和图片至少给一个"); return; }
+    const title = (h && h.value || "").trim();
+    if (!text && !title && !cm.images.length) { cmState("cm-post-err", "标题、正文和图片至少给一个"); return; }
     cmState("cm-post-err", "");
     try {
-        const r = await postApi("/api/community/posts", { text, images: cm.images.map(x => x.name) });
+        const r = await postApi("/api/community/posts",
+            { title, text, images: cm.images.map(x => x.name) });
         cm.images = []; renderThumbs();
         if (t) t.value = "";
+        if (h) h.value = "";
         syncComposerCount();
         const open = cmEl("cm-compose-open"), collapsed = cmEl("cm-compose-collapsed");
         if (open) open.hidden = true;
@@ -1059,16 +1069,22 @@ async function deleteJson(path) {
     return r.json().catch(() => ({}));
 }
 
-async function deletePost(id) {
-    if (!confirm("删掉这条帖子？删了就找不回来了。")) return;
-    try {
-        await deleteJson("/api/community/posts/" + id);
-        cm.items = cm.items.filter(x => x.id !== id);
-        renderFeed();
-        callNativeToast("已删除");
-    } catch (e) {
-        callNativeToast("没删掉：" + (e.message || "网络不通"));
-    }
+/** 把正文里 @昵称 换成可点的按钮。只替换服务端确认过的那几个人，前端不猜谁是用户。
+    一次扫完，不能逐个 split/join：两个人同名时，第二次替换会把第一颗按钮
+    再包一层，而 HTML 不许 button 套 button，浏览器会把外面那颗截成空按钮。 */
+function qsMentionHTML(escaped, mentions) {
+    const list = (mentions || []).filter(m => m && m.name)
+        .sort((a, b) => String(b.name).length - String(a.name).length);
+    if (!list.length) return escaped;
+    const map = {}, pattern = [];
+    list.forEach(function (m) {
+        const token = "@" + escapeHtml(m.name);
+        if (!(token in map)) map[token] = Number(m.id) || 0;
+        pattern.push(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    });
+    return String(escaped).replace(new RegExp(pattern.join("|"), "g"), function (token) {
+        return '<button type="button" class="pd-at" onclick="openMemberHome(' + map[token] + ')">' + token + "</button>";
+    });
 }
 
 function qsCommentHTML(c, isReply, postId) {
@@ -1085,14 +1101,23 @@ function qsCommentHTML(c, isReply, postId) {
             + (replyId ? '<button type="button" class="pd-reply-target" onclick="openMemberHome(' + replyId + ')">' + escapeHtml(replyName) + "</button>"
                 : escapeHtml(replyName)) + "）</span> "
         : "";
-    return '<div class="pd-cmt' + (isReply ? " pd-cmt-reply" : "") + '" data-comment="' + Number(c.id) + '">'
+    const imgs = (c.images || []).length
+        ? '<div class="pd-cmt-imgs">' + c.images.map(u => '<img src="' + escapeHtml(API_BASE + u)
+            + '" alt="评论配图" loading="lazy" onclick="viewPostImage(\''
+            + escapeHtml(API_BASE + u).replace(/'/g, "%27") + '\')">').join("") + "</div>"
+        : "";
+    const cid = Number(c.id);
+    return '<div class="pd-cmt' + (isReply ? " pd-cmt-reply" : "") + '" data-comment="' + cid + '">'
         + avatar + '<div class="pd-cmt-main"><button type="button" class="pd-cmt-name" aria-label="打开 ' + escapeHtml(name) + ' 的主页"'
         + ' onclick="openMemberHome(' + authorId + ')">' + escapeHtml(name) + "</button>"
-        + '<div class="pd-cmt-content">' + prefix + '<span class="pd-cmt-text">' + escapeHtml(c.body) + "</span></div>"
+        + '<div class="pd-cmt-content">' + prefix + '<span class="pd-cmt-text">'
+        + qsMentionHTML(escapeHtml(c.body), c.mentions) + "</span></div>" + imgs
         + '<div class="pd-cmt-meta"><span class="pd-cmt-time">' + cmRegionTag(c.region) + " · " + escapeHtml(cmAgo(c.created_at)) + "</span>"
-        + '<button type="button" class="pd-cmt-act" data-reply-id="' + Number(c.id) + '" data-reply-name="' + escapeHtml(name)
+        + '<button type="button" class="pd-cmt-act pd-cmt-like" aria-pressed="' + (c.liked_by_me ? "true" : "false") + '" '
+        + 'onclick="toggleCommentLike(' + cid + ',' + Number(postId) + ',this)">❤ <b>' + Number(c.like_count || 0) + "</b></button>"
+        + '<button type="button" class="pd-cmt-act" data-reply-id="' + cid + '" data-reply-name="' + escapeHtml(name)
         + '" onclick="setReplyTargetFromButton(this)">回复</button>'
-        + (c.deletable ? '<button type="button" class="pd-cmt-act pd-cmt-del" onclick="removeComment(' + Number(c.id) + ',' + Number(postId) + ')">删除</button>' : "")
+        + (c.deletable ? '<button type="button" class="pd-cmt-act pd-cmt-del" onclick="removeComment(' + cid + ',' + Number(postId) + ')">删除</button>' : "")
         + "</div></div></div>";
 }
 
@@ -1124,7 +1149,11 @@ function qsCommentsHTML(comments, postId) {
 
 /* 帖子详情：整页跳转（机主："帖子不要做成弹窗，跳转页面，参考微博"）。
    正文大一号、配图单独一块、时间退到分割线下面，评论区铺满，输入框固定在底部。 */
-async function qsRenderPost(id) {
+async function qsRenderPost(arg) {
+    // arg 可以是 12，也可以是 "12:34"——后者来自 @ 提醒，点进去要停在那条评论上
+    const seg = String(arg == null ? "" : arg).split(":");
+    const id = Number(seg[0]) || 0;
+    const focusCid = Number(seg[1]) || 0;
     const body = cmEl("pl-body");
     if (!body) return;
     qsSetFoot("");
@@ -1138,8 +1167,11 @@ async function qsRenderPost(id) {
     }
     const p = r.post;
     if (!p) { body.innerHTML = '<p class="cm-state">这条帖子已经不在了。</p>'; return; }
-    if (Number(cm.postId) !== Number(id)) cmReplyTo = null;
-    cm.postId = Number(id);
+    if (Number(cm.postId) !== id) {
+        // 换帖子必须把上一张的草稿丢掉，否则"我以为在给这条评论配图"其实是带着另一张的图发出去
+        cmReplyTo = null; cm.cmtImages = []; cm.cmtMentions = []; cm.atRows = []; cm.atQuery = "";
+    }
+    cm.postId = id;
     cmText("pl-title", cmName(p.author) + " 的帖子");
     const mine = p.author && qsSameId(p.author.id, state.user && state.user.id);
     const imgs = (p.images || []).length
@@ -1147,6 +1179,7 @@ async function qsRenderPost(id) {
             '<img src="' + escapeHtml(API_BASE + u) + '" alt="帖子配图" onclick="viewPostImage(\'' +
             escapeHtml(API_BASE + u).replace(/'/g, "%27") + '\')">').join("") + "</div>"
         : "";
+    const titleLine = p.title ? '<h2 class="pd-title">' + escapeHtml(p.title) + "</h2>" : "";
     // Keep replies under their parent and identify the person being answered.
     const comments = qsCommentsHTML(r.comments || [], p.id);
     body.innerHTML = '<article class="pd-post">'
@@ -1158,6 +1191,7 @@ async function qsRenderPost(id) {
             '" onclick="toggleFollow(' + (p.author ? p.author.id : 0) + ',this)">' +
             (p.followed_by_me ? "已关注" : "关注") + "</button>")
         + "</div>"
+        + titleLine
         + '<div class="pd-text">' + escapeHtml(p.body) + "</div>" + imgs
         + '<div class="pd-meta">' + escapeHtml(cmTime(p.created_at)) + " · " + cmRegionTag(p.region)
         + (p.edited_at ? " · 已编辑" : "") + "</div>"
@@ -1176,10 +1210,19 @@ async function qsRenderPost(id) {
         + "</div></article>"
         + '<h3 class="pd-sec">评论 ' + Number(p.comment_count) + "</h3>"
         + (comments || '<p class="td-empty">还没有人评论，说第一句。</p>');
-    qsSetFoot('<input id="cm-comment-text" type="text" maxlength="' + CM_LIMITS.comment +
-        '" placeholder="' + (cmReplyTo ? "回复 @" + escapeHtml(cmReplyTo.name) : "友善一点，好好说话") +
-        '" aria-label="评论内容" onkeydown="if(event.key===\'Enter\'){event.preventDefault();submitComment(' + p.id + ');}">'
-        + '<button type="button" class="td-btn" onclick="submitComment(' + p.id + ')">发送</button>');
+    qsSetFoot(cmtFootHTML(p.id));
+    syncCmtDraft();
+    if (focusCid) qsFocusComment(focusCid);
+}
+
+/** 从通知点进来时停在那条评论上：滚到中间、亮两秒。
+    找不到（已被删）就明说，不许静默停在帖子顶部让人自己找。 */
+function qsFocusComment(cid) {
+    const el = document.querySelector('[data-comment="' + Number(cid) + '"]');
+    if (!el) { callNativeToast("那条评论已经不在了"); return; }
+    el.classList.add("pd-cmt-flash");
+    try { el.scrollIntoView({ block: "center" }); } catch (e) { try { el.scrollIntoView(); } catch (e2) {} }
+    setTimeout(function () { el.classList.remove("pd-cmt-flash"); }, 2400);
 }
 
 function editPostFromDetail(id) {
@@ -1187,8 +1230,13 @@ function editPostFromDetail(id) {
     if (!art) return;
     const textEl = art.querySelector(".pd-text");
     if (!textEl || art.querySelector(".pd-editor")) return;
+    const titleEl = art.querySelector(".pd-title");
     const original = textEl.textContent || "";
-    textEl.outerHTML = '<div class="pd-editor"><textarea id="pd-edit-text" maxlength="1200" aria-label="编辑帖子">'
+    const originalTitle = titleEl ? titleEl.textContent : "";
+    textEl.outerHTML = '<div class="pd-editor">'
+        + '<input id="pd-edit-title" type="text" maxlength="' + CM_LIMITS.title + '" placeholder="标题（20 字内，可留空）" value="'
+        + escapeHtml(originalTitle) + '" aria-label="编辑标题">'
+        + '<textarea id="pd-edit-text" maxlength="' + CM_LIMITS.post + '" aria-label="编辑帖子">'
         + escapeHtml(original) + "</textarea>"
         + '<div class="pd-editor-acts"><button type="button" class="td-btn td-btn-quiet" onclick="qsRenderPost(' + id + ')">取消</button>'
         + '<button type="button" class="td-btn" onclick="savePostEdit(' + id + ')">保存</button></div></div>';
@@ -1197,13 +1245,14 @@ function editPostFromDetail(id) {
 }
 
 async function savePostEdit(id) {
-    const area = cmEl("pd-edit-text");
+    const area = cmEl("pd-edit-text"), titleEl = cmEl("pd-edit-title");
     const text = ((area && area.value) || "").trim();
-    if (!text) { callNativeToast("内容不能为空"); return; }
+    const title = ((titleEl && titleEl.value) || "").trim();
+    if (!text && !title) { callNativeToast("标题和正文不能都空着"); return; }
     try {
-        const r = await patchJson("/api/community/posts/" + id, { text: text });
+        const r = await patchJson("/api/community/posts/" + id, { title: title, text: text });
         const item = cm.items.find(x => x.id === id);
-        if (item && r.post) { item.body = r.post.body; item.edited_at = r.post.edited_at; }
+        if (item && r.post) { item.title = r.post.title; item.body = r.post.body; item.edited_at = r.post.edited_at; }
         renderFeed();
         qsRenderPost(id);
         callNativeToast("已保存");
@@ -1243,10 +1292,263 @@ async function removeComment(id, postId) {
     } catch (e) { callNativeToast("没删掉：" + (e.message || "网络不通")); }
 }
 
+/* ── 评论区输入区：表情 / @ 人 / 配图 / 我的动图 ────────────────────
+   形状照私信那一套（工具行 + 可展开面板 + 输入行），但状态是自己的：
+   评论的图发出去就清，私信的待发媒体跟着会话走，两者混用会出现"换了帖子
+   还把上一个帖子的草稿带过来"。 */
+function cmtFootHTML(postId) {
+    const emoji = DM_EMOJIS.map(function (group) {
+        return '<section class="dm-emoji-group"><h4>' + escapeHtml(group[0]) + "</h4>"
+            + '<div class="dm-emoji-grid">' + group[1].map(function (e) {
+                return '<button type="button" class="dm-emoji" aria-label="插入表情 ' + escapeHtml(e) +
+                    '" onclick="cmtInsert(\'' + e + '\')">' + e + "</button>";
+            }).join("") + "</div></section>";
+    }).join("");
+    const pid = Number(postId) || 0;
+    return '<div class="cmt-draft" id="cmt-draft" hidden></div>'
+        + '<div class="cmt-tools">'
+        + '<button type="button" class="dm-tool" id="cmt-emoji-btn" aria-label="表情面板" aria-expanded="false" onclick="toggleCmtPanel(\'emoji\')">☺</button>'
+        + '<button type="button" class="dm-tool" id="cmt-at-btn" aria-label="@ 谁" aria-expanded="false" onclick="toggleCmtPanel(\'at\')">@</button>'
+        + '<button type="button" class="dm-tool" id="cmt-gif-btn" aria-label="我的动图" aria-expanded="false" onclick="toggleCmtPanel(\'gif\')">动</button>'
+        + '<button type="button" class="dm-tool" id="cmt-img-btn" aria-label="配一张图" onclick="cmtPickImage()">🖼</button>'
+        + "</div>"
+        + '<div class="dm-panel" id="cmt-emoji-panel" hidden>' + emoji + "</div>"
+        + '<div class="dm-panel" id="cmt-at-panel" hidden><div class="cmt-at-list" id="cmt-at-list"></div></div>'
+        + '<div class="dm-panel" id="cmt-gif-panel" hidden><div class="cmt-gif-grid" id="cmt-gif-grid"></div></div>'
+        + '<div class="cmt-input-row">'
+        + '<input id="cm-comment-text" type="text" maxlength="' + CM_LIMITS.comment +
+        '" placeholder="' + (cmReplyTo ? "回复 @" + escapeHtml(cmReplyTo.name) : "友善一点，好好说话") +
+        '" aria-label="评论内容" oninput="onCmtInput()" onkeydown="if(event.key===\'Enter\'){event.preventDefault();submitComment(' + pid + ');;}">'
+        + '<button type="button" class="td-btn" onclick="submitComment(' + pid + ')">发送</button></div>'
+        + '<input type="file" id="cmt-image-file" accept="image/*" class="file-hidden" onchange="attachCommentImage(this)">';
+}
+
+function closeCmtPanel() {
+    ["emoji", "at", "gif"].forEach(function (k) {
+        const panel = cmEl("cmt-" + k + "-panel");
+        if (panel) panel.hidden = true;
+        const btn = cmEl("cmt-" + k + "-btn");
+        if (btn) btn.setAttribute("aria-expanded", "false");
+    });
+    cm.cmtPanel = "";
+}
+
+function toggleCmtPanel(which) {
+    const target = cmEl("cmt-" + which + "-panel");
+    if (!target) return;
+    const wasOpen = !target.hidden;
+    closeCmtPanel();
+    if (wasOpen) return;
+    target.hidden = false;
+    cm.cmtPanel = which;
+    const btn = cmEl("cmt-" + which + "-btn");
+    if (btn) btn.setAttribute("aria-expanded", "true");
+    if (which === "at") refreshAtList();
+    if (which === "gif") loadMyStickers();
+}
+
+function cmtInput() { return cmEl("cm-comment-text"); }
+
+function cmtInsert(text) {
+    const input = cmtInput();
+    if (!input) return;
+    const start = input.selectionStart == null ? input.value.length : input.selectionStart;
+    const end = input.selectionEnd == null ? input.value.length : input.selectionEnd;
+    input.value = input.value.slice(0, start) + text + input.value.slice(end);
+    input.focus();
+    const caret = start + text.length;
+    try { input.setSelectionRange(caret, caret); } catch (e) {}
+    syncCmtDraft();
+}
+
+/* 光标前正在打 @xxx 就把 @ 面板打开并跟着这个词搜人；打完空格就收起来。 */
+function atTokenAtCursor(value) {
+    const m = /@([^\s@]{0,16})$/.exec(value || "");
+    return m ? m[1] : null;
+}
+
+function onCmtInput() {
+    const input = cmtInput();
+    const value = (input && input.value) || "";
+    const term = atTokenAtCursor(value);
+    if (term !== null) {
+        if (cm.atQuery !== term) {
+            cm.atQuery = term;
+            const panel = cmEl("cmt-at-panel");
+            if (panel && panel.hidden) { closeCmtPanel(); panel.hidden = false; cm.cmtPanel = "at"; }
+            refreshAtList();
+        }
+    } else if (cm.atQuery) {
+        cm.atQuery = "";
+        if (cm.cmtPanel === "at") closeCmtPanel();
+    }
+    syncCmtDraft();
+}
+
+async function refreshAtList() {
+    const seq = ++cm.atSeq;
+    const term = String(cm.atQuery || "").trim().slice(0, 16);
+    try {
+        const r = term
+            ? await getJson("/api/community/search?q=" + encodeURIComponent(term))
+            : await getJson("/api/community/connections?kind=following&limit=24");
+        if (seq !== cm.atSeq) return;   // 只认最后一次输入的结果，早回来的旧搜索不许盖上来
+        cm.atRows = (r.items || []).filter(u => !qsSameId(u.id, state.user && state.user.id)).slice(0, 24);
+        renderAtList("");
+    } catch (e) {
+        if (seq !== cm.atSeq) return;
+        cm.atRows = [];
+        renderAtList("人没读到：" + (e.message || "网络不通"));
+    }
+}
+
+function renderAtList(errText) {
+    const host = cmEl("cmt-at-list");
+    if (!host) return;
+    if (errText) { host.innerHTML = '<p class="cm-state">' + escapeHtml(errText) + "</p>"; return; }
+    if (!cm.atRows.length) {
+        host.innerHTML = '<p class="td-empty">' + (String(cm.atQuery || "").trim()
+            ? "没搜到这个名字。昵称要完全对上才准，别人把你改名了就搜不到。"
+            : "你还没有关注的人。先在帖子或主页点「关注」，或直接在这里打 @ 搜昵称。") + "</p>";
+        return;
+    }
+    host.innerHTML = cm.atRows.map(function (u) {
+        // 一排全是"小田"时选错就 @ 错人，所以把轻塑号一起显示出来分辨
+        const sub = cmRegionTag(u.region) + (u.public_id ? " · #" + escapeHtml(String(u.public_id)) : "");
+        return '<button type="button" class="cmt-at-row" onclick="pickMention(' + Number(u.id) + ",'"
+            + escapeHtml(u.name || "").replace(/'/g, "%27") + "')\">"
+            + '<span class="cm-avatar sm">' + cmAvatarInner(u) + "</span>"
+            + '<span class="cmt-at-name">' + escapeHtml(u.name || "已注销用户") + "</span>"
+            + '<span class="cmt-at-sub">' + sub + "</span></button>";
+    }).join("");
+}
+
+function pickMention(uid, name) {
+    if (cm.cmtMentions.length >= 5 && !cm.cmtMentions.some(m => qsSameId(m.id, uid))) {
+        callNativeToast("一条评论最多 @ 五个人"); return;
+    }
+    const input = cmtInput();
+    // 把已经打了一半的 @xxx 换回完整的 @昵称，不然会留下 "@小" + "@小田" 这种半截
+    if (input) input.value = input.value.replace(/@([^\s@]{0,16})$/, "");
+    if (!cm.cmtMentions.some(m => qsSameId(m.id, uid))) cm.cmtMentions.push({ id: uid, name: name });
+    cm.atQuery = "";
+    closeCmtPanel();
+    cmtInsert("@" + name + " ");
+}
+
+function cmtPickImage() {
+    const f = cmEl("cmt-image-file");
+    if (f) f.click();
+}
+
+async function attachCommentImage(input) {
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    if (cm.cmtImages.length >= CM_LIMITS.cmtImages) {
+        callNativeToast("一条评论最多 " + CM_LIMITS.cmtImages + " 张图");
+        input.value = ""; return;
+    }
+    try {
+        const form = new FormData();
+        form.append("file", file);
+        const r = await rawPostApi("/api/community/media", form);
+        cm.cmtImages.push({ name: r.name, url: r.url, kind: r.kind || "image" });
+        syncCmtDraft();
+    } catch (e) {
+        callNativeToast("图没传上去：" + (e.message || "格式或大小不合适"));
+    } finally {
+        input.value = "";
+    }
+}
+
+async function loadMyStickers() {
+    const host = cmEl("cmt-gif-grid");
+    if (!host) return;
+    host.innerHTML = '<p class="cm-state">在读…</p>';
+    try {
+        const r = await getJson("/api/community/stickers");
+        cm.stickers = r.items || [];
+    } catch (e) { cm.stickers = []; }
+    host.innerHTML = (cm.stickers || []).length
+        ? cm.stickers.map(function (s) {
+            return '<button type="button" class="cmt-gif" aria-label="再用一次这张动图" onclick="pickSticker(\''
+                + escapeHtml(s.name) + "','" + escapeHtml(s.url).replace(/'/g, "%27") + "')\">"
+                + '<img src="' + escapeHtml(API_BASE + s.url) + '" alt="我的动图" loading="lazy"></button>';
+        }).join("")
+        : '<p class="td-empty">还没有你自己的动图。点 🖼 选一张 GIF 传上去，之后就能在这里一键再发。</p>';
+}
+
+function pickSticker(name, url) {
+    if (cm.cmtImages.some(x => x.name === name)) { closeCmtPanel(); return; }
+    if (cm.cmtImages.length >= CM_LIMITS.cmtImages) { callNativeToast("一条评论最多 " + CM_LIMITS.cmtImages + " 张图"); return; }
+    cm.cmtImages.push({ name: name, url: url, kind: "gif" });
+    closeCmtPanel();
+    syncCmtDraft();
+}
+
+function dropCmtImage(i) { cm.cmtImages.splice(i, 1); syncCmtDraft(); }
+function dropCmtMention(i) { cm.cmtMentions.splice(i, 1); syncCmtDraft(); }
+
+/** 待发区：图、@ 到的人、回复对象都摊开可见可撤。
+    藏在输入框后面不清不楚，就会出现"我以为没 @ 他，其实带着呢"。 */
+function syncCmtDraft() {
+    const host = cmEl("cmt-draft");
+    if (!host) return;
+    const chips = [];
+    if (cmReplyTo) chips.push('<span class="cmt-chip">回复 ' + escapeHtml(cmReplyTo.name)
+        + '<button type="button" aria-label="取消回复" onclick="cancelReply()">✕</button></span>');
+    cm.cmtMentions.forEach(function (m, i) {
+        chips.push('<span class="cmt-chip cmt-chip-at">@' + escapeHtml(m.name)
+            + '<button type="button" aria-label="取消提到这个人" onclick="dropCmtMention(' + i + ')">✕</button></span>');
+    });
+    cm.cmtImages.forEach(function (im, i) {
+        chips.push('<span class="cmt-thumb"><img src="' + escapeHtml(im.url.startsWith("http") ? im.url : API_BASE + im.url)
+            + '" alt="待发配图"' + (im.kind === "gif" ? ' data-gif="1"' : "")
+            + '><button type="button" aria-label="移除这张图" onclick="dropCmtImage(' + i + ')">✕</button></span>');
+    });
+    host.innerHTML = chips.join("");
+    host.hidden = !chips.length;
+}
+
+function cancelReply() { cmReplyTo = null; const i = cmtInput(); if (i) i.placeholder = "友善一点，好好说话"; syncCmtDraft(); }
+
+async function toggleCommentLike(cid, postId, btn) {
+    const on = btn.getAttribute("aria-pressed") === "true";
+    btn.setAttribute("aria-pressed", on ? "false" : "true");
+    try {
+        const r = await postApi("/api/community/comments/" + cid + "/like", { on: !on });
+        const b = btn.querySelector("b");
+        if (b) b.textContent = String(Number(r.like_count));
+        const row = document.querySelector('[data-comment="' + cid + '"]');
+        if (row && !on) { row.classList.remove("cmt-pop"); void row.offsetWidth; row.classList.add("cmt-pop"); }
+    } catch (e) {
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+        callNativeToast("点赞没生效：" + (e.message || "网络不通"));
+    }
+}
+
+/* 双击封面点赞（小红书那一下）：已经点过就只弹心，不再取消——
+   取消点赞是明确动作，交给那颗按钮，别让手滑把赞弄没。 */
+function dblLikePost(postId, node) {
+    const item = cm.items.find(x => x.id === Number(postId));
+    const btn = document.querySelector('#post-' + postId + " .cm-act");
+    if (item && !item.liked_by_me && btn) toggleLike(postId, btn);
+    if (node) {
+        node.classList.remove("cm-hearted");
+        void node.offsetWidth;
+        node.classList.add("cm-hearted");
+        setTimeout(function () { node.classList.remove("cm-hearted"); }, 700);
+    }
+}
+
 QS_PAGE_DEF.post = { title: "帖子详情", render: qsRenderPost };
 
-/* 旧入口保留成一行跳转，别的地方还在按老名字调它们 */
-function openPostDetail(id) { if (id) openPage("post", id); }
+/* 旧入口保留成一行跳转，别的地方还在按老名字调它们。
+   第二个参数是"进去要停在哪条评论"——@ 提醒与回复通知靠它定位。 */
+function openPostDetail(id, commentId) {
+    if (!id) return;
+    openPage("post", Number(commentId) ? Number(id) + ":" + Number(commentId) : Number(id));
+}
 function openThread(uid) { if (uid) openPage("dm", uid); }
 
 let cmReplyTo = null;
@@ -1255,6 +1557,7 @@ function setReplyTarget(id, name) {
     cmReplyTo = { id: id, name: name };
     const input = cmEl("cm-comment-text");
     if (input) { input.placeholder = "回复 @" + name; input.focus(); }
+    syncCmtDraft();
 }
 function setReplyTargetFromButton(button) {
     if (!button) return;
@@ -1264,19 +1567,25 @@ function setReplyTargetFromButton(button) {
 async function submitComment(postId) {
     const input = cmEl("cm-comment-text");
     const text = (input && input.value || "").trim();
-    if (!text) { callNativeToast("评论不能为空"); if (input) input.focus(); return; }
+    if (!text && !cm.cmtImages.length) { callNativeToast("评论写一句，或者配一张图"); if (input) input.focus(); return; }
     try {
-        await postApi("/api/community/posts/" + postId + "/comments",
-            { text, reply_to: cmReplyTo ? cmReplyTo.id : null });
+        const r = await postApi("/api/community/posts/" + postId + "/comments", {
+            text,
+            images: cm.cmtImages.map(x => x.name),
+            mentions: cm.cmtMentions.map(m => Number(m.id)),
+            reply_to: cmReplyTo ? cmReplyTo.id : null
+        });
         cmReplyTo = null;
-        callNativeToast("评论发出去了");
+        cm.cmtImages = []; cm.cmtMentions = []; cm.atQuery = "";
+        callNativeToast((r && r.comment && r.comment.mentions && r.comment.mentions.length)
+            ? "评论发出去了，也点到他们了" : "评论发出去了");
         if (input) input.value = "";
         qsRenderPost(postId);
         const item = cm.items.find(x => x.id === Number(postId));
         if (item) item.comment_count = Number(item.comment_count || 0) + 1;
         syncCardCounts(postId);
     } catch (e) {
-        callNativeToast(e.message || "评论没成功");
+        callNativeToast(e.message || "评论没成功，内容还留着");
     }
 }
 
@@ -1393,7 +1702,10 @@ function setMessageTab(which) {
     cm.msgTab = which;
     document.querySelectorAll("#panel-messages .td-seg-btn").forEach(b =>
         b.setAttribute("aria-selected", b.getAttribute("data-msg") === which ? "true" : "false"));
+    // 切类别必须补一次读：进「消息」页时只读了当前这一类（默认是私信），
+    // 光靠 renderMessages 画内存，第一次点「互动通知」就是空的——别人 @ 了你你也看不见。
     renderMessages();
+    loadMessages();
 }
 
 function paintNavBadge() {
@@ -1408,7 +1720,7 @@ function paintNavBadge() {
 
 async function loadMessages() {
     if (!state.token) { cmState("msg-state", "登录后才能看消息。"); return; }
-    if (cm.loadingMsg) return;
+    if (cm.loadingMsg) { cm.msgAgain = true; return; }
     cm.loadingMsg = true;
     try {
         if (cm.msgTab === "chats") {
@@ -1427,6 +1739,8 @@ async function loadMessages() {
         cmState("msg-state", "消息没读到：" + (e.message || "网络不通"));
     } finally {
         cm.loadingMsg = false;
+        // 这一趟在飞的时候用户又切了类别：不能把那次切换吞掉，否则停在旧类别的数据上
+        if (cm.msgAgain) { cm.msgAgain = false; loadMessages(); }
     }
 }
 
@@ -1446,13 +1760,16 @@ function renderMessages() {
         if (!cm.convs.length) cmState("msg-state", "还没有人跟你说过话。在帖子或主页上点「私信」就能开口。");
         else cmState("msg-state", "");
     } else {
-        const rows = cm.notices.map(n =>
-            '<div class="cm-row" style="cursor:default"><span class="cm-avatar">' + cmAvatarInner(n.actor) + "</span>"
-            + '<span class="cm-row-main"><span class="cm-row-title">' + escapeHtml(n.text || cmName(n.actor)) + "</span>"
-            + '<span class="cm-row-meta">' + escapeHtml(cmAgo(n.created_at)) + (n.read_at ? "" : " · 未读") + "</span></span>"
-            + (n.post_id ? '<span class="cm-row-side"><button type="button" class="td-btn td-btn-quiet" onclick="openPostDetail(' +
-                n.post_id + ')">看帖子</button></span>' : "") + "</div>"
-        ).join("");
+        const rows = cm.notices.map(n => {
+            // 整行可点：通知就是一条"去哪儿看"的路径，只让那颗小按钮可点太难按到
+            const go = n.post_id ? ' role="button" tabindex="0" onclick="openPostDetail(' + Number(n.post_id)
+                + "," + (Number(n.comment_id) || 0) + ')"' : ' style="cursor:default"';
+            const where = n.comment_id ? "看评论" : (n.post_id ? "看帖子" : "");
+            return '<div class="cm-row"' + go + '><span class="cm-avatar">' + cmAvatarInner(n.actor) + "</span>"
+                + '<span class="cm-row-main"><span class="cm-row-title">' + escapeHtml(n.text || cmName(n.actor)) + "</span>"
+                + '<span class="cm-row-meta">' + escapeHtml(cmAgo(n.created_at)) + (n.read_at ? "" : " · 未读") + "</span></span>"
+                + (where ? '<span class="cm-row-side">' + where + '<br><span class="td-chevron"></span></span>' : "") + "</div>";
+        }).join("");
         const markAll = (cm.unreadTotal || 0) > 0
             ? '<button type="button" class="td-btn td-btn-quiet cm-more" onclick="markNoticesRead()">全部标为已读（'
               + Number(cm.unreadTotal) + " 条未读）</button>"

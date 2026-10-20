@@ -202,6 +202,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .cm-compose-collapsed{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:0;border:0;background:none;font:inherit;color:#64748B;font-size:15px;text-align:left;cursor:pointer}
 .cm-compose-hint{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .cm-compose-open textarea{display:block;box-sizing:border-box;width:100%;min-height:96px;padding:10px 12px;border:1px solid #CBD5E1;border-radius:11px;background:#fff;font:inherit;font-size:15px;resize:vertical}
+/* 标题框：比正文高一点、字更重，一眼看出这是"那行标题"而不是又一个输入框 */
+.cm-compose-open input#cm-post-title,.pd-editor input#pd-edit-title{display:block;box-sizing:border-box;width:100%;
+  min-height:46px;margin:0 0 8px;padding:10px 12px;border:2px solid #CBD5E1;border-radius:11px;background:#fff;
+  font:inherit;font-size:16px;font-weight:700;color:#0F172A}
+.cm-compose-open input#cm-post-title::placeholder,.pd-editor input#pd-edit-title::placeholder{font-weight:600;color:#94A3B8}
 .cm-compose-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
 .cm-count{font-size:12px;color:#64748B;font-variant-numeric:tabular-nums}
 .cm-err{flex:1 1 auto;min-width:0;font-size:12.5px;color:#B91C1C}
@@ -211,25 +216,46 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .cm-thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .cm-thumb button{position:absolute;top:2px;right:2px;width:20px;height:20px;padding:0;border:0;border-radius:50%;background:rgba(15,23,42,.62);color:#fff;font-size:12px;line-height:18px;cursor:pointer}
 
-.cm-feed{display:grid;gap:10px}
-.cm-card{background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:13px 14px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
-.cm-card-head{display:flex;align-items:center;gap:9px}
+/* r160：广场卡片照小红书重排成双列卡——封面在上、标题两行、底下一行作者与点赞。
+   以前是"头像昵称在最上 + 整段正文 + 九宫格"，一屏只容得下两条，像时间线不像广场。 */
+.cm-feed{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
+.cm-card{display:flex;flex-direction:column;min-width:0;background:#fff;border:1px solid #E2E8F0;border-radius:14px;overflow:hidden;padding:0;box-shadow:0 1px 3px rgba(15,23,42,.05)}
+.cm-cover{position:relative;display:block;width:100%;padding:0;border:0;background:#F1F5F9;font:inherit;cursor:pointer;line-height:0}
+.cm-cover img{display:block;width:100%;aspect-ratio:3/4;object-fit:cover;background:#EDF1F5}
+/* 没配图的帖子占位：给一块浅色文字卡，比留白或灰框好看，也不假装是图 */
+.cm-cover-none{display:flex;align-items:center;justify-content:center;width:100%;aspect-ratio:4/3;padding:12px;
+  background:linear-gradient(150deg,#ECFDF5 0%,#F1F5F9 100%);color:#334155;font-size:13.5px;font-weight:600;
+  line-height:1.6;text-align:center;overflow:hidden}
+.cm-cover-more{position:absolute;right:7px;bottom:7px;padding:2px 7px;border-radius:999px;background:rgba(15,23,42,.62);
+  color:#fff;font-size:11px;font-weight:700;line-height:1.5}
+.cm-card-main{display:flex;flex-direction:column;gap:8px;flex:1 1 auto;min-width:0;padding:9px 10px 10px}
+.cm-title{display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  padding:0;border:0;background:none;text-align:left;font:inherit;font-size:14px;font-weight:700;
+  line-height:1.4;color:#0F172A;cursor:pointer;overflow-wrap:anywhere}
+.cm-card-foot{display:flex;align-items:center;gap:6px;margin-top:auto}
 .cm-avatar{flex:0 0 34px;width:34px;height:34px;border-radius:50%;object-fit:cover;background:#ECFDF5;color:#047857;font-size:14px;font-weight:800;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .cm-avatar.sm{flex-basis:30px;width:30px;height:30px;font-size:13px}
 .cm-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+/* 卡片底部的作者行要更轻：头像小一号、名字退成次级色，视觉重心留给封面和标题 */
+.cm-card-foot .cm-avatar{flex-basis:22px;width:22px;height:22px;font-size:10px}
+.cm-card-foot .cm-name{font-size:12px;font-weight:600;color:#64748B}
+.cm-card-foot .cm-act{margin-left:auto}
 .cm-who-btn{display:flex;align-items:center;gap:9px;flex:1 1 auto;min-width:0;border:0;background:none;font:inherit;padding:0;cursor:pointer;text-align:left;color:inherit}
 .cm-who{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
 .cm-name{display:block;font-size:14px;font-weight:700;color:#0F172A;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .cm-sub{display:block;font-size:11.5px;color:#94A3B8;margin-top:1px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .cm-follow{flex:0 0 auto;min-height:30px;padding:0 12px;border:1px solid #A7F3D0;border-radius:999px;background:#ECFDF5;color:#047857;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer}
 .cm-follow[aria-pressed="true"]{border-color:#E2E8F0;background:#F1F5F9;color:#64748B}
-.cm-body{margin:10px 0 0;font-size:15px;line-height:1.62;color:#0F172A;white-space:pre-wrap;overflow-wrap:anywhere}
-.cm-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px}
-.cm-grid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:#F1F5F9;display:block}
-.cm-acts{display:flex;align-items:center;gap:14px;margin-top:11px;padding-top:10px;border-top:1px solid #EEF2F6}
 .cm-act{display:inline-flex;align-items:center;gap:5px;border:0;background:none;font:inherit;font-size:13px;color:#64748B;cursor:pointer;padding:2px 0;min-height:30px}
 .cm-act[aria-pressed="true"]{color:#DC2626;font-weight:700}
 .cm-act b{font-variant-numeric:tabular-nums;font-weight:700}
+/* 双击封面那一下的心：纯装饰，不改变任何数字 */
+.cm-hearted{position:relative}
+.cm-hearted::after{content:"❤";position:absolute;left:50%;top:50%;font-size:46px;line-height:1;color:#EF4444;
+  opacity:0;transform:translate(-50%,-50%) scale(.5);animation:cmHeart .68s ease-out}
+@keyframes cmHeart{0%{opacity:.95;transform:translate(-50%,-50%) scale(.5)}
+  70%{opacity:.8;transform:translate(-50%,-50%) scale(1.25)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(1.5)}}
 .cm-state{margin:14px 0 2px;text-align:center;font-size:13px;color:#64748B;overflow-wrap:anywhere}
 .cm-state:empty{display:none}
 .cm-more{display:block;width:100%;margin-top:4px}
@@ -553,3 +579,56 @@ body.desktop-view .ex-detail{max-width:min(500px,calc(100vw - 24px))}
 .td-btn,.td-btn-quiet,.td-btn-danger,.td-mini,.me-copy,.btn-primary,.btn-secondary,
 .btn-outline,.btn-log-meal,.btn-upload-photo,.btn-web-action{touch-action:manipulation}
 .tool-dialog .td-close{width:40px;height:40px;min-width:40px;min-height:40px}
+
+/* ============================================================
+   r160：评论区的表情 / @ / 配图 / 动图，帖子标题，@ 定位
+   ============================================================ */
+/* 宽屏三列必须写在 r149 那条 @media(min-width:760px) 的两列规则之后：
+   两条选择器权重相同，谁在后面谁说话——放在上面会被静默盖掉（浏览器实测抓出来的）。 */
+@media (min-width:900px){.cm-feed{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}}
+/* 评论输入区是竖排（待发条 + 工具行 + 面板 + 输入行），跟私信一个形状 */
+.pl-foot.cmt-foot{flex-direction:column;align-items:stretch;padding:8px 10px 10px;gap:8px}
+.cmt-tools{display:flex;align-items:center;gap:8px}
+.cmt-tools .dm-tool{font-size:17px;font-weight:700}
+.cmt-input-row{display:flex;align-items:center;gap:8px}
+.cmt-input-row input{flex:1 1 auto;min-width:0;min-height:40px;padding:8px 12px;border:2px solid #E2E8F0;
+  border-radius:999px;background:#F8FAFC;font:inherit;font-size:15px;color:#0F172A}
+.cmt-input-row input:focus{outline:none;border-color:#A7F3D0;background:#fff}
+.cmt-input-row .td-btn{flex:0 0 auto;min-width:64px;min-height:38px;padding:7px 15px;font-size:13.5px}
+.cmt-draft{display:flex;flex-wrap:wrap;gap:7px}
+.cmt-draft[hidden]{display:none}
+.cmt-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 6px 4px 10px;border:1px solid #A7F3D0;
+  border-radius:999px;background:#ECFDF5;color:#047857;font-size:12.5px;font-weight:700}
+.cmt-chip button{width:18px;height:18px;padding:0;border:0;border-radius:50%;background:rgba(4,120,87,.14);
+  color:#047857;font-size:11px;line-height:17px;cursor:pointer}
+.cmt-draft .cmt-thumb img[data-gif="1"]{outline:2px solid #A7F3D0;outline-offset:-2px}
+.cmt-at-list{display:flex;flex-direction:column;gap:2px}
+.cmt-at-row{display:flex;align-items:center;gap:9px;width:100%;min-height:46px;padding:6px 4px;border:0;
+  border-bottom:1px solid #F1F5F9;background:none;font:inherit;text-align:left;cursor:pointer;color:inherit}
+.cmt-at-row:last-child{border-bottom:0}
+.cmt-at-row:hover{background:#F8FAFC}
+.cmt-at-row .cm-avatar{flex:0 0 30px;width:30px;height:30px;font-size:12px}
+.cmt-at-name{flex:1 1 auto;min-width:0;font-size:14px;font-weight:700;color:#0F172A;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis}
+.cmt-at-sub{flex:0 0 auto;font-size:11.5px;color:#94A3B8}
+.cmt-gif-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.cmt-gif{padding:0;border:1px solid #E2E8F0;border-radius:11px;background:#F8FAFC;overflow:hidden;cursor:pointer;line-height:0}
+.cmt-gif img{display:block;width:100%;aspect-ratio:1;object-fit:cover}
+.cmt-gif:active{border-color:#A7F3D0}
+
+/* 帖子标题：详情页大一号（编辑框的样式在发帖器那一节里一起给了） */
+.pd-title{margin:12px 0 0;font-size:19px;font-weight:800;line-height:1.4;color:#0F172A;overflow-wrap:anywhere}
+
+/* 评论里的 @ 与配图 */
+.pd-at{display:inline;border:0;background:none;padding:0;font:inherit;font-weight:700;color:#047857;cursor:pointer}
+.pd-at:hover{text-decoration:underline}
+.pd-cmt-imgs{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.pd-cmt-imgs img{width:96px;height:96px;object-fit:cover;border-radius:10px;border:1px solid #E2E8F0;
+  background:#F1F5F9;display:block;cursor:zoom-in}
+.pd-cmt-like[aria-pressed="true"]{color:#DC2626;font-weight:700}
+/* 从通知点进来要能看出"就是这条"：亮两秒再退回常态。
+   用 inset 阴影描边而不是加 padding/边框——那两种都会让这一行在亮起的瞬间抖一下。 */
+.pd-cmt-flash{background:#FFFBEB;border-radius:10px;box-shadow:inset 0 0 0 2px #FDE68A}
+.cmt-pop{animation:cmtPop .34s ease-out}
+@keyframes cmtPop{0%{transform:scale(.985)}45%{transform:scale(1.012)}100%{transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.cmt-pop,.cm-hearted::after{animation:none}}

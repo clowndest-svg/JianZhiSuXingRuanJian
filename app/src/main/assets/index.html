@@ -1011,6 +1011,9 @@
                     <span class="cm-compose-hint">分享你的减脂日常…</span>
                 </button>
                 <div class="cm-compose-open" id="cm-compose-open" hidden>
+                    <input id="cm-post-title" type="text" maxlength="20"
+                           placeholder="加个标题（20 字内，别人在广场上看到的第一行）"
+                           oninput="syncComposerCount()" aria-label="发帖标题">
                     <textarea id="cm-post-text" rows="4" maxlength="1000"
                               placeholder="今天吃了什么、练了什么、卡在哪儿…"
                               oninput="syncComposerCount()" aria-label="发帖正文"></textarea>

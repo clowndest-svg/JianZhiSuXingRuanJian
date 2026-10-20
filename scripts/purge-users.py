@@ -1,9 +1,13 @@
-"""按显式 id 清掉测试账号，连所有指向 users 的子表一起删，删前删后都留证据。
+"""按显式 id 清掉测试账号，连所有会因此变成孤儿的行一起删，删前删后都留证据。
 
 为什么不用"所有含 user_id 的列"这一条规则扫：社区那批表里
 follows(follower_id/followee_id)、messages(from_id/to_id)、user_blocks(blocker/blocked)、
 content_reports(reporter) 都不叫 user_id，漏一张就会外键报错，或者更糟——留下孤儿行。
-这里改成从建表语句里的 FOREIGN KEY ... REFERENCES users 现读。
+
+为什么要连"他的帖子 → 帖子下的评论 → 评论上的点赞/@ "这条链一起算：删一个人时，他帖子下
+**别人**写的评论、别人给他评论点的赞，都不带他的 user_id，只按用户列扫根本扫不到；留着它们，
+commit 时外键会把整笔删除顶回去（r154 在后台删号时就是这么 500 的）。所以先把"他的帖子"和
+"他帖子下的评论"算成两个临时集合，再按 user / post / comment 三类引用列一起判。
 
 用法：
     python3 scripts/purge-users.py --ids 184,185            # 先看
@@ -17,22 +21,31 @@ import sys
 # 只有这种命名的账号才是自动化夹具建的；不匹配就得 --force，防手滑删真人的号
 FIXTURE_PATTERN = ("uqa", "usbqa", "releasecheck_", "layprobe", "aitest", "selftest")
 
+# 有些表没写 FOREIGN KEY（notifications、follows 这类），只能按列名认
+USERISH = ("user_id", "follower_id", "followee_id", "from_id", "to_id",
+           "blocker", "blocked", "reporter", "actor_id", "a_id", "b_id",
+           "last_from", "owner_id")
 
-def user_refs(conn):
-    """所有外键指向 users 的 (表, 列)；顺带把常见的用户列名也收进来。"""
-    pairs = []
-    for table in [r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()]:
-        cols = conn.execute("PRAGMA table_info(%s)" % table).fetchall()
-        fks = conn.execute("PRAGMA foreign_key_list(%s)" % table).fetchall()
-        wanted = {fk[3] for fk in fks if fk[2] == "users"}
-        wanted |= {c[1] for c in cols if c[1] in (
-            "user_id", "follower_id", "followee_id", "from_id", "to_id",
-            "blocker", "blocked", "reporter", "actor_id", "a_id", "b_id",
-            "last_from", "owner_id")}
-        for col in sorted(wanted):
-            pairs.append((table, col))
-    return pairs
+
+def all_tables(conn):
+    return [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()]
+
+
+def ref_columns(conn):
+    """{表: {"user": [...], "post": [...], "comment": [...]}}，外键现读 + 常见列名兜底。"""
+    out = {}
+    for table in all_tables(conn):
+        cols = {c[1] for c in conn.execute("PRAGMA table_info(%s)" % table).fetchall()}
+        by_parent = {}
+        for fk in conn.execute("PRAGMA foreign_key_list(%s)" % table).fetchall():
+            by_parent.setdefault(fk[2], set()).add(fk[3])
+        out[table] = {
+            "user": sorted(by_parent.get("users", set()) | {c for c in cols if c in USERISH}),
+            "post": sorted(by_parent.get("posts", set()) | {c for c in cols if c == "post_id"}),
+            "comment": sorted(by_parent.get("comments", set()) | {c for c in cols if c == "comment_id"}),
+        }
+    return out
 
 
 def main():
@@ -48,8 +61,9 @@ def main():
         raise SystemExit("没给 id，拒绝执行")
     conn = sqlite3.connect(args.db)
     conn.execute("PRAGMA foreign_keys=ON")
+    ph = ",".join("?" * len(ids))
     rows = {r[0]: r[1] for r in conn.execute(
-        "SELECT id, username FROM users WHERE id IN (%s)" % ",".join("?" * len(ids)), ids).fetchall()}
+        "SELECT id, username FROM users WHERE id IN (%s)" % ph, ids).fetchall()}
     missing = [i for i in ids if i not in rows]
     if missing:
         raise SystemExit("这些 id 不在库里，说明清单和库不一致：%s" % missing)
@@ -58,29 +72,38 @@ def main():
         if bad:
             raise SystemExit("这些账号不像测试夹具，要删请加 --force：%s" % bad)
 
-    pairs = user_refs(conn)
-    by_table = {}
-    for table, col in pairs:
-        by_table.setdefault(table, []).append(col)
+    # 他的帖子、他帖子下的评论（含别人写的）。comments 不引用 comments，帖子集合不会因
+    # 收了新评论再长大，所以两轮一定收敛——写成循环是为了以后加"评论引用评论"也不用改这里。
+    conn.execute("CREATE TEMP TABLE _dp(id INTEGER PRIMARY KEY)")
+    conn.execute("CREATE TEMP TABLE _dc(id INTEGER PRIMARY KEY)")
+    conn.execute("INSERT OR IGNORE INTO _dp SELECT id FROM posts WHERE user_id IN (%s)" % ph, ids)
+    for _ in range(2):
+        conn.execute("INSERT OR IGNORE INTO _dc SELECT id FROM comments "
+                     "WHERE user_id IN (%s) OR post_id IN (SELECT id FROM _dp)" % ph, ids)
 
-    def predicate(cols):
-        # 一张表可能有好几个指向 users 的列（messages 的 from_id/to_id、conversations 的
-        # a_id/b_id/last_from）。按列分别数会把同一行数好几遍，"任一列命中"才是真实行数。
-        return " OR ".join("%s IN (%s)" % (c, ",".join("?" * len(ids))) for c in cols)
+    specs = {t: s for t, s in ref_columns(conn).items()
+             if t != "users" and (s["user"] or s["post"] or s["comment"])}
 
-    def bound(cols):
-        return [v for _ in cols for v in ids]
+    def predicate(spec):
+        # 一张表可能有好几个指向同一父表的列（messages 的 from_id/to_id、mentions 的
+        # user_id/actor_id）。按列分别数会把同一行数好几遍，"任一列命中"才是真实行数。
+        parts = []
+        if spec["user"]:
+            parts.append("(" + " OR ".join("%s IN (%s)" % (c, ph) for c in spec["user"]) + ")")
+        if spec["post"]:
+            parts.append("(" + " OR ".join("%s IN (SELECT id FROM _dp)" % c for c in spec["post"]) + ")")
+        if spec["comment"]:
+            parts.append("(" + " OR ".join("%s IN (SELECT id FROM _dc)" % c for c in spec["comment"]) + ")")
+        return " OR ".join(parts)
 
-    before = {}
-    for table, cols in by_table.items():
-        try:
-            before[table] = conn.execute(
-                "SELECT COUNT(*) FROM %s WHERE %s" % (table, predicate(cols)), bound(cols)).fetchone()[0]
-        except sqlite3.OperationalError:
-            before[table] = 0
-    keep_before = {t: conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t in by_table}
-
-    print(json.dumps({"将删除的账号": rows, "各表行数": {k: v for k, v in before.items() if v},
+    plans = {t: predicate(s) for t, s in specs.items()}
+    before = {t: conn.execute("SELECT COUNT(*) FROM %s WHERE %s" % (t, w)).fetchone()[0]
+              for t, w in plans.items()}
+    keep_before = {t: conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t in plans}
+    print(json.dumps({"将删除的账号": rows,
+                      "他的帖子数": conn.execute("SELECT COUNT(*) FROM _dp").fetchone()[0],
+                      "要收回的评论数": conn.execute("SELECT COUNT(*) FROM _dc").fetchone()[0],
+                      "各表行数": {k: v for k, v in before.items() if v},
                       "合计子表行": sum(before.values())}, ensure_ascii=False))
     if not args.apply:
         print("预演模式，什么都没删。确认无误再加 --apply")
@@ -89,12 +112,9 @@ def main():
     # 删除顺序天然会撞外键：清 posts 的时候 comments 还指着它。把外键检查推到 commit——
     # 整个事务跑完仍然自洽才落盘，不自洽就整笔回滚，不会留下"删了一半"的库。
     conn.execute("PRAGMA defer_foreign_keys=ON")
-    for table, cols in by_table.items():
-        try:
-            conn.execute("DELETE FROM %s WHERE %s" % (table, predicate(cols)), bound(cols))
-        except sqlite3.OperationalError:
-            pass
-    conn.execute("DELETE FROM users WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)
+    for table, where in plans.items():
+        conn.execute("DELETE FROM %s WHERE %s" % (table, where))
+    conn.execute("DELETE FROM users WHERE id IN (%s)" % ph, ids)
     try:
         conn.commit()
     except sqlite3.IntegrityError as error:
@@ -103,15 +123,14 @@ def main():
 
     left = [r[0] for r in conn.execute("SELECT id FROM users ORDER BY id").fetchall()]
     orphans = {}
-    for table, col in pairs:
-        try:
-            n = conn.execute("SELECT COUNT(*) FROM %s WHERE %s IS NOT NULL AND %s NOT IN "
-                             "(SELECT id FROM users)" % (table, col, col)).fetchone()[0]
-            if n:
-                orphans["%s.%s" % (table, col)] = n
-        except sqlite3.OperationalError:
-            pass
-    keep_after = {t: conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t in by_table}
+    for table, spec in specs.items():
+        for kind, parent in (("user", "users"), ("post", "posts"), ("comment", "comments")):
+            for col in spec[kind]:
+                n = conn.execute("SELECT COUNT(*) FROM %s WHERE %s IS NOT NULL AND %s NOT IN "
+                                 "(SELECT id FROM %s)" % (table, col, col, parent)).fetchone()[0]
+                if n:
+                    orphans["%s.%s" % (table, col)] = n
+    keep_after = {t: conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t in plans}
     leaked = {t: (keep_before[t], keep_after[t], before[t]) for t in keep_before
               if keep_before[t] - keep_after[t] != before[t]}
     print(json.dumps({
