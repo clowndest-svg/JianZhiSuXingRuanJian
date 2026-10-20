@@ -2616,6 +2616,85 @@ def main():
           "if (cm.loadingMsg) { cm.msgAgain = true; return; }" in _b_js
           and "if (cm.msgAgain) { cm.msgAgain = false; loadMessages(); }" in _b_js, "")
 
+    # ---- r160：删号脚本要真跑得起来（这一版一开始是 ProgrammingError，连预演都进不去）----
+    _sbx = os.path.join(ROOT, "_audit_sandbox")
+    if not os.path.isdir(_sbx):
+        os.makedirs(_sbx)
+    _pg = os.path.join(_sbx, "purge-gate.py")
+    _pdb = os.path.join(_sbx, "purge-gate.db")
+    io.open(_pg, "w", encoding="utf-8").write(_repo_file("scripts/purge-users.py"))
+    if os.path.exists(_pdb):
+        os.remove(_pdb)
+    _pc = sqlite3.connect(_pdb)
+    _pc.executescript("""
+        CREATE TABLE users(id INTEGER PRIMARY KEY, username TEXT, nickname TEXT);
+        CREATE TABLE posts(id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT, body TEXT,
+                           FOREIGN KEY(user_id) REFERENCES users(id));
+        CREATE TABLE comments(id INTEGER PRIMARY KEY, post_id INTEGER, user_id INTEGER, body TEXT,
+                           FOREIGN KEY(post_id) REFERENCES posts(id), FOREIGN KEY(user_id) REFERENCES users(id));
+        CREATE TABLE comment_likes(comment_id INTEGER, user_id INTEGER,
+                           FOREIGN KEY(comment_id) REFERENCES comments(id), FOREIGN KEY(user_id) REFERENCES users(id));
+        CREATE TABLE mentions(id INTEGER PRIMARY KEY, post_id INTEGER, comment_id INTEGER, user_id INTEGER, actor_id INTEGER,
+                           FOREIGN KEY(comment_id) REFERENCES comments(id));
+        CREATE TABLE messages(a_id INTEGER, b_id INTEGER, body TEXT);
+        CREATE TABLE notifications(user_id INTEGER, kind TEXT, dedup TEXT);
+        INSERT INTO users VALUES(1,'uqagate','夹具'),(2,'真人甲','真人');
+        INSERT INTO posts  VALUES(10,1,'夹具的帖子','x'),(11,2,'真人的帖子','y');
+        INSERT INTO comments VALUES(20,10,2,'别人在夹具帖下评论'),(21,11,1,'夹具在真人帖下评论');
+        INSERT INTO comment_likes VALUES(20,1),(21,2);
+        INSERT INTO mentions VALUES(30,10,20,2,1);
+        INSERT INTO messages VALUES(1,2,'你好'),(2,1,'回你');
+        INSERT INTO notifications VALUES(1,'mention','mention:20'),(2,'comment','comment:21');
+    """)
+    _pc.commit()
+    _pc.close()
+
+    def _purge(extra):
+        r = subprocess.run([sys.executable, _pg, "--db", _pdb, "--ids", "1"] + extra,
+                           capture_output=True, cwd=ROOT)
+        return r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
+
+    def _purge_json(out):
+        got = {}
+        for line in out.splitlines():
+            if line.startswith("{"):
+                got = json.loads(line)
+        return got
+
+    _code, _out, _err = _purge([])
+    _dry = _purge_json(_out)
+    check("删号脚本真跑得起预演（一张表多个用户列时 SQL 绑定数要配得上）",
+          _code == 0 and "预演" in _out and _dry.get("合计子表行", 0) >= 8, (_code, _err[:220], _dry))
+    _pc = sqlite3.connect(_pdb)
+    check("预演模式一行都没删",
+          _pc.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 2
+          and _pc.execute("SELECT COUNT(*) FROM comments").fetchone()[0] == 2, "")
+    _pc.close()
+    _code, _out, _err = _purge(["--apply"])
+    _rep = _purge_json(_out)
+    check("真删：夹具没了、真人还在、没有孤儿行、外键与完整性都自洽",
+          _code == 0 and _rep.get("剩余账号") == [2] and _rep.get("孤儿行") == {}
+          and _rep.get("foreign_key_check") == 0 and _rep.get("integrity_check") == "ok"
+          and _rep.get("删掉的行数与逐表对不上") == {}, (_code, _rep, _err[:220]))
+    _pc = sqlite3.connect(_pdb)
+    check("连「他帖子下别人的评论」和「那些评论上的赞/@/私信」一起收回，真人的帖子原样留着",
+          _pc.execute("SELECT COUNT(*) FROM comments").fetchone()[0] == 0
+          and _pc.execute("SELECT COUNT(*) FROM comment_likes").fetchone()[0] == 0
+          and _pc.execute("SELECT COUNT(*) FROM mentions").fetchone()[0] == 0
+          and _pc.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
+          and _pc.execute("SELECT id,username FROM users").fetchall() == [(2, "真人甲")]
+          and _pc.execute("SELECT title,body FROM posts WHERE id=11").fetchone() == ("真人的帖子", "y"),
+          json.dumps({t: _pc.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0]
+                      for t in ("users", "posts", "comments", "comment_likes", "mentions", "messages")},
+                     ensure_ascii=False)
+          + " users=" + str(_pc.execute("SELECT id,username FROM users").fetchall())
+          + " 帖11=" + str(_pc.execute("SELECT title,body FROM posts WHERE id=11").fetchone()))
+    _pc.close()
+    _code, _out, _err = subprocess.run(
+        [sys.executable, _pg, "--db", _pdb, "--ids", "2"], capture_output=True, cwd=ROOT
+    ).returncode, "", ""
+    check("不给 --force 就不许删不像夹具的账号", _code != 0, _code)
+
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (
         "变异样本(HEAD 改动前)" if mutant else "当前源码",

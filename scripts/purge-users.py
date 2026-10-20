@@ -9,6 +9,9 @@ content_reports(reporter) 都不叫 user_id，漏一张就会外键报错，或�
 commit 时外键会把整笔删除顶回去（r154 在后台删号时就是这么 500 的）。所以先把"他的帖子"和
 "他帖子下的评论"算成两个临时集合，再按 user / post / comment 三类引用列一起判。
 
+id 一律先 int() 过再拼进 SQL（不用 ? 占位符）：一张表可能有两个用户列，
+占位符个数就翻倍，execute 时少带一组直接 ProgrammingError——预演跑不起来等于这脚本从没验过。
+
 用法：
     python3 scripts/purge-users.py --ids 184,185            # 先看
     python3 scripts/purge-users.py --ids 184,185 --apply     # 再删
@@ -59,11 +62,11 @@ def main():
     ids = sorted({int(x) for x in args.ids.split(",") if x.strip()})
     if not ids:
         raise SystemExit("没给 id，拒绝执行")
+    ph = ",".join(str(i) for i in ids)   # 已经是 int，拼进 SQL 没有注入面
     conn = sqlite3.connect(args.db)
     conn.execute("PRAGMA foreign_keys=ON")
-    ph = ",".join("?" * len(ids))
     rows = {r[0]: r[1] for r in conn.execute(
-        "SELECT id, username FROM users WHERE id IN (%s)" % ph, ids).fetchall()}
+        "SELECT id, username FROM users WHERE id IN (%s)" % ph).fetchall()}
     missing = [i for i in ids if i not in rows]
     if missing:
         raise SystemExit("这些 id 不在库里，说明清单和库不一致：%s" % missing)
@@ -76,10 +79,10 @@ def main():
     # 收了新评论再长大，所以两轮一定收敛——写成循环是为了以后加"评论引用评论"也不用改这里。
     conn.execute("CREATE TEMP TABLE _dp(id INTEGER PRIMARY KEY)")
     conn.execute("CREATE TEMP TABLE _dc(id INTEGER PRIMARY KEY)")
-    conn.execute("INSERT OR IGNORE INTO _dp SELECT id FROM posts WHERE user_id IN (%s)" % ph, ids)
+    conn.execute("INSERT OR IGNORE INTO _dp SELECT id FROM posts WHERE user_id IN (%s)" % ph)
     for _ in range(2):
         conn.execute("INSERT OR IGNORE INTO _dc SELECT id FROM comments "
-                     "WHERE user_id IN (%s) OR post_id IN (SELECT id FROM _dp)" % ph, ids)
+                     "WHERE user_id IN (%s) OR post_id IN (SELECT id FROM _dp)" % ph)
 
     specs = {t: s for t, s in ref_columns(conn).items()
              if t != "users" and (s["user"] or s["post"] or s["comment"])}
@@ -114,7 +117,7 @@ def main():
     conn.execute("PRAGMA defer_foreign_keys=ON")
     for table, where in plans.items():
         conn.execute("DELETE FROM %s WHERE %s" % (table, where))
-    conn.execute("DELETE FROM users WHERE id IN (%s)" % ph, ids)
+    conn.execute("DELETE FROM users WHERE id IN (%s)" % ph)
     try:
         conn.commit()
     except sqlite3.IntegrityError as error:
@@ -130,7 +133,7 @@ def main():
                                  "(SELECT id FROM %s)" % (table, col, col, parent)).fetchone()[0]
                 if n:
                     orphans["%s.%s" % (table, col)] = n
-    keep_after = {t: conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t in plans}
+    keep_after = {t: conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t in keep_before}
     leaked = {t: (keep_before[t], keep_after[t], before[t]) for t in keep_before
               if keep_before[t] - keep_after[t] != before[t]}
     print(json.dumps({
