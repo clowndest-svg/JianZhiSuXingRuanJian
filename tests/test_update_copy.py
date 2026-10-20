@@ -37,7 +37,8 @@ class UpdateCopyTest(unittest.TestCase):
         src.mkdir(parents=True)
         shutil.copy2(ROOT / "app" / "src" / "main" / "java" / "com" / "fitcoach" / "shapemaster"
                      / "UpdateCopy.java", src / "UpdateCopy.java")
-        io.open(str(src / "UpdateCopyHarness.java"), "w", encoding="utf-8").write(HARNESS)
+        with io.open(str(src / "UpdateCopyHarness.java"), "w", encoding="utf-8") as handle:
+            handle.write(HARNESS)
         out = Path(cls.tmp) / "out"
         out.mkdir()
         done = subprocess.run(["javac", "-encoding", "UTF-8", "-d", str(out),
