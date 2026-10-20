@@ -39,7 +39,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(WEB_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(DB_DIR, "qingsu.db")
-SITE_BASE = os.environ.get("QINGSU_SITE_BASE", "https://124.220.54.64").rstrip("/")
+SITE_BASE = os.environ.get("QINGSU_SITE_BASE", "https://scientificexploration.art").rstrip("/")
 
 app = FastAPI(title="轻塑·减脂塑形严管伴侣 API", version="5.0.0")
 
@@ -67,7 +67,7 @@ async def response_policy(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     # 前端全部走 Authorization 头，不用 cookie，所以不需要也不应该带 credentials
-    allow_origins=[SITE_BASE, "https://appassets.androidplatform.net"],
+    allow_origins=list(dict.fromkeys([SITE_BASE, "https://124.220.54.64", "https://appassets.androidplatform.net"])),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -256,6 +256,7 @@ def render_index_html():
         ('src="app.js"', 'src="app.js?v=%s"', "app.js"),
         ('src="features.js"', 'src="features.js?v=%s"', "features.js"),
         ('href="features.css"', 'href="features.css?v=%s"', "features.css"),
+        ('src="companion.js"', 'src="companion.js?v=%s"', "companion.js"),
         ('href="/qingsu.apk"', 'href="/qingsu.apk?v=%s"', "qingsu.apk"),
     ]
     for old, fmt, name in pairs:
@@ -3008,12 +3009,18 @@ def synthesize(q, items, mem, terms=None):
 # 必须 no-cache——这条要是被缓存住，用户会永远停在旧版还以为自己最新。
 # 内容不在代码里写死，由 make_version_json.py 从 build.gradle 与 qingsu.apk 现算生成。
 @app.get("/version.json")
-def version_json():
+def version_json(request: Request):
     path = os.path.join(WEB_DIR, "version.json")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="版本清单还没发布")
     with io.open(path, "r", encoding="utf-8") as f:
         raw = f.read()
+    # Installed clients <=44 only accept the IP as a download host. Keep their
+    # IP manifest usable while the canonical domain advertises domain URLs.
+    if request.url.hostname == "124.220.54.64":
+        data = json.loads(raw)
+        data['apk_url'] = 'https://124.220.54.64/qingsu.apk'
+        raw = json.dumps(data, ensure_ascii=False)
     return Response(content=raw, media_type="application/json", headers=_no_cache())
 
 
@@ -3320,7 +3327,7 @@ def download_apk(v: str = None):
     apk_path = os.path.join(WEB_DIR, "qingsu.apk")
     if os.path.exists(apk_path):
         return FileResponse(apk_path, media_type="application/vnd.android.package-archive",
-                             filename="轻塑减脂塑形_v5.0.apk", headers=_asset_headers(apk_path, v))
+                             filename="轻塑.apk", headers=_asset_headers(apk_path, v))
     raise HTTPException(status_code=404, detail="APK not found")
 
 @app.get("/qr.svg")
@@ -3336,6 +3343,18 @@ def root_dashboard():
     if content is not None:
         return HTMLResponse(content, media_type="text/html", headers=_no_cache())
     return HTMLResponse("<h3>轻塑系统正在启动中...</h3>")
+
+@app.get('/about')
+def about_page():
+    return FileResponse(os.path.join(WEB_DIR, 'about.html'), media_type='text/html', headers=_no_cache())
+
+@app.get('/robots.txt')
+def robots():
+    return Response('User-agent: *\nDisallow: /api/\nDisallow: /u/\nDisallow: /uploads/\nDisallow: /ops/\nDisallow: /admin/\nDisallow: /auth/\nDisallow: /items/\nSitemap: https://scientificexploration.art/sitemap.xml\n', media_type='text/plain')
+
+@app.get('/sitemap.xml')
+def sitemap():
+    return Response('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://scientificexploration.art/about</loc></url></urlset>', media_type='application/xml')
 
 @app.get("/u/{username}", response_class=HTMLResponse)
 def public_user_dashboard(username: str, k: Optional[str] = None, request: Request = None):
@@ -3469,6 +3488,7 @@ def health():
     finally: conn.close()
     info = release_identity()
     info["status"] = "ok"
+    info["site_base"] = SITE_BASE
     info["min_build"] = min_build_required()
     # 门是不是被人工刹住，必须一眼看得见：抬门抬不动时最怕的就是"以为生效了"
     info["build_override"] = os.path.exists(min_build_file())
@@ -3536,6 +3556,10 @@ def delete_record(kind:str,record_id:int,user:dict=Depends(get_current_user)):
 
 from app_modules.features import install as install_features
 install_features(app,globals())
+from app_modules.companion import install as install_companion
+install_companion(app, globals())
+from app_modules.webpush import install as install_webpush
+install_webpush(app, globals())
 
 
 def extension_asset(name):
@@ -3552,7 +3576,7 @@ def extension_asset(name):
 ASSET_MEDIA = {"js": "application/javascript", "css": "text/css", "svg": "image/svg+xml",
                "png": "image/png", "webmanifest": "application/manifest+json",
                "json": "application/json"}
-PUBLIC_ASSETS = ("features.js", "features.css", "sw.js", "manifest.webmanifest",
+PUBLIC_ASSETS = ("features.js", "features.css", "companion.js", "sw.js", "manifest.webmanifest",
                  "app-icon.png", "guidance.json")
 # 扩展名没登记类型就要在启动时炸，不能等到用户请求才发现是 500：
 # app-icon.png 换图标那次正是这么静默上线的，页面只是不显示图标，没人会去点它。
