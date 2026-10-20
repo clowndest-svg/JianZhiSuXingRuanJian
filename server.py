@@ -1202,6 +1202,13 @@ def update_profile(req: ProfileUpdateReq, user: dict = Depends(get_current_user)
 
 # ============ 账号中心：个人中心 / 换头像 / 改密 / 邮箱找回 / 定位与忌口 ============
 
+# 昵称是对外展示名，登录名才是账号本身；两者在界面上分开，长度也单独卡在这里，
+# 不然 500 字的全局串长上限会让"昵称"变成一屏广告。
+NICKNAME_MAX = 20
+
+class NicknameReq(ValidatedModel):
+    nickname: str
+
 class PasswordChangeReq(ValidatedModel):
     old_password: str
     new_password: str
@@ -1302,7 +1309,9 @@ def _account_payload(conn, user):
     return {
         "code": 0,
         "user": {"id": user["id"], "username": user["username"], "nickname": user.get("nickname"),
-                 "public_id": user.get("public_id") or ""},
+                 "public_id": user.get("public_id") or "",
+                 # 身份卡要说"哪年加入的"，前端不必再发一次 /api/community/stats
+                 "created_at": user.get("created_at") or ""},
         "email_masked": mask_email(p.get("email")),
         "email_bound": bool(p.get("email")),
         "email_verified": bool(p.get("email_verified_at")),
@@ -1379,6 +1388,27 @@ async def upload_avatar(photo: UploadFile = File(None), user: dict = Depends(get
     finally:
         conn.close()
     return {"code": 0, "msg": "头像已更新", "avatar_url": signed_photo(url)}
+
+
+@app.post("/api/account/nickname")
+def save_nickname(req: NicknameReq, user: dict = Depends(get_current_user)):
+    """改的是昵称，登录名（username）是账号本身不能改：界面上两者必须分开显示，
+    所以这里也不做任何"顺手把用户名也改掉"的动作。"""
+    nick = (req.nickname or "").strip()
+    if not nick:
+        raise HTTPException(status_code=400, detail="昵称不能是空的")
+    if len(nick) > NICKNAME_MAX:
+        raise HTTPException(status_code=400,
+                            detail="昵称最长 %d 字，你现在写了 %d 字" % (NICKNAME_MAX, len(nick)))
+    if re.search(r"[\x00-\x1f\x7f]", nick):
+        raise HTTPException(status_code=400, detail="昵称里不能有换行或控制字符")
+    conn = get_db()
+    try:
+        conn.execute("UPDATE users SET nickname=? WHERE id=?", (nick, user["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"code": 0, "nickname": nick, "msg": "昵称已改成「%s」" % nick}
 
 
 @app.post("/api/account/email/send")

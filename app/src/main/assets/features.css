@@ -20,7 +20,7 @@
 .td-status[data-err="1"]{color:#B91C1C}
 
 /* ---------- 分组列表 ---------- */
-.td-group{margin:0 0 14px;border:1px solid #E2E8F0;border-radius:14px;background:#fff;overflow:hidden}
+.td-group{margin:0 0 14px;border:2px solid #E2E8F0;border-radius:14px;background:#fff;overflow:hidden}
 .td-group+.td-group-label,.td-group-label{margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:.04em;color:#94A3B8;text-transform:uppercase}
 .td-row{display:flex;align-items:center;gap:12px;padding:11px 14px;border-top:1px solid #EEF2F6;min-height:52px}
 .td-row:first-child{border-top:0}
@@ -45,11 +45,19 @@
 .tool-dialog button,.account-tools button,#public-view button{font:inherit;cursor:pointer;min-height:44px;border-radius:12px}
 .td-btn{flex:1 1 0;min-width:0;padding:11px 16px;border:0;background:linear-gradient(135deg,#10B981,#059669);color:#fff;font-weight:700;font-size:15px;line-height:1.3}
 .td-btn:active{transform:scale(.99)}
-.td-btn-quiet{flex:1 1 0;min-width:0;padding:11px 16px;border:1px solid #CBD5E1;background:#fff;color:#334155;font-weight:600;font-size:15px;line-height:1.3}
-.td-btn-danger{flex:1 1 0;min-width:0;padding:11px 16px;border:1px solid #FECACA;background:#FEF2F2;color:#B91C1C;font-weight:600;font-size:15px;line-height:1.3}
+.td-btn-quiet{flex:1 1 0;min-width:0;padding:11px 16px;border:2px solid #CBD5E1;background:#fff;color:#334155;font-weight:600;font-size:15px;line-height:1.3}
+.td-btn-danger{flex:1 1 0;min-width:0;padding:11px 16px;border:2px solid #FECACA;background:#FEF2F2;color:#B91C1C;font-weight:600;font-size:15px;line-height:1.3}
 .td-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:10px}
-/* 弹窗动作按钮按内容收窄：以前 flex:1 会把"上传头像/保存忌口"拉成整行巨块 */
-.td-actions>.td-btn,.td-actions>.td-btn-quiet,.td-actions>.td-btn-danger{flex:0 1 auto;min-width:88px;min-height:40px;padding:8px 16px;font-size:14px;line-height:1.2;border-radius:999px}
+/* 弹窗动作按钮按内容收窄：以前 flex:1 会把"上传头像/保存忌口"拉成整行巨块。
+   机主第二轮还是嫌大，再收一档：64×34 / 13 字，描边统一 2px 让主次两颗一样重
+   （1.5px 会被浏览器归整成 1px，等于没加粗）。 */
+.td-actions>.td-btn,.td-actions>.td-btn-quiet,.td-actions>.td-btn-danger{flex:0 1 auto;min-width:64px;min-height:34px;padding:6px 13px;font-size:13px;line-height:1.25;border-radius:999px;border-width:2px;border-style:solid}
+/* 组内那排按钮要和上面输入框右缘对齐：输入框在 .td-field-row 里左右各缩 14px，
+   动作区原来贴着组的边框，等于比输入框多出 14px 直接顶到边线上。 */
+.td-group .td-actions{padding:0 14px;margin-top:12px}
+.td-group>.td-actions:last-child,.td-group>.td-status:last-child{padding-bottom:12px}
+.td-group .td-status,.td-group .td-note{padding-left:14px;padding-right:14px}
+.td-group .td-note{padding-bottom:12px}
 .td-actions[hidden]{display:none}
 .td-actions .td-btn[aria-pressed="true"]{background:#F1F5F9;color:#475569;font-weight:600;box-shadow:inset 0 0 0 1px #CBD5E1}
 .td-mini{flex:0 0 auto;min-height:36px;padding:6px 12px;border:1px solid #CBD5E1;border-radius:9px;background:#fff;color:#065F46;font-size:13px;font-weight:600}
@@ -74,7 +82,7 @@
 .td-field-row .td-field-hint{display:block;margin:4px 0 0;font-size:12px;line-height:1.5;color:#64748B}
 .td-field{display:block;margin:0 0 12px}
 .td-field-label{display:block;margin-bottom:6px;font-size:13px;font-weight:600;color:#334155}
-.td-field input:not([type=checkbox]),.td-row input:not([type=checkbox]),.td-row select,.td-row textarea,.td-field-row input:not([type=checkbox]),.td-field-row select,.td-field-row textarea,.tool-dialog input[type=number],.tool-dialog input[type=date],.tool-dialog input[type=time],.tool-dialog select,.tool-dialog textarea{display:block;box-sizing:border-box;width:100%;min-height:46px;padding:10px 12px;border:1px solid #CBD5E1;border-radius:11px;background:#fff;color:#0F172A;font:inherit;font-size:15px}
+.td-field input:not([type=checkbox]),.td-row input:not([type=checkbox]),.td-row select,.td-row textarea,.td-field-row input:not([type=checkbox]),.td-field-row select,.td-field-row textarea,.tool-dialog input[type=number],.tool-dialog input[type=date],.tool-dialog input[type=time],.tool-dialog select,.tool-dialog textarea{display:block;box-sizing:border-box;width:100%;min-height:46px;padding:10px 12px;border:2px solid #CBD5E1;border-radius:11px;background:#fff;color:#0F172A;font:inherit;font-size:15px}
 .td-field input[type=number]{font-variant-numeric:tabular-nums}
 .td-inline{display:flex;align-items:center;gap:10px}
 .td-inline input{flex:0 0 96px;width:96px}
@@ -134,8 +142,20 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .td-meal-src{margin:6px 0 0;font-size:12px;line-height:1.6;color:#64748B;overflow-wrap:anywhere}
 
 /* ============ 个人中心与推荐：头像、点单顺序卡 ============ */
-.td-avatar-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.td-avatar{width:64px;height:64px;border-radius:50%;object-fit:cover;border:1px solid #E2E8F0;background:#F1F5F9;flex:0 0 auto}
+/* 头像左边、身份信息右边并排；原来头像右边只剩一个文件选择行，
+   机器主嫌"旁边啥都没有"——这里补昵称/登录名/轻塑号/加入时间/签名。 */
+.td-identity{display:flex;align-items:flex-start;gap:12px;padding:12px 14px}
+.td-avatar-cell{flex:0 0 auto;display:flex}
+.td-identity-main{flex:1 1 auto;min-width:0}
+.td-identity-name{font-size:16px;font-weight:800;line-height:1.35;color:#0F172A;overflow-wrap:anywhere}
+.td-identity-meta{margin-top:4px;font-size:12px;line-height:1.55;color:#64748B;overflow-wrap:anywhere}
+.td-identity-meta b{color:#334155;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.3px}
+.td-identity-bio{margin-top:5px;font-size:12.5px;line-height:1.55;color:#475569;overflow-wrap:anywhere}
+.td-id-tag{display:inline-block;margin-right:6px;padding:1px 7px;border:1px solid #E2E8F0;border-radius:999px;background:#F8FAFC;
+  font-size:10.5px;font-weight:700;letter-spacing:.03em;color:#94A3B8;vertical-align:1px}
+.td-id-tag-warn{border-color:#FDE68A;background:#FFFBEB;color:#B45309}
+.td-id-login{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:#334155;overflow-wrap:anywhere}
+.td-avatar{width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid #E2E8F0;background:#F1F5F9;flex:0 0 auto}
 .td-avatar-empty{display:flex;align-items:center;justify-content:center;font-size:11px;color:#94A3B8;width:64px;height:64px}
 .tav-meta{font-size:12.5px;color:#475569;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:6px 10px;margin-bottom:8px}
 .tav-group{font-size:12px;font-weight:800;color:#047857;margin:10px 0 2px}
@@ -248,6 +268,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .me-avatar img{width:100%;height:100%;object-fit:cover;display:block}
 .me-hero-main{flex:1 1 auto;min-width:0}
 .me-name{font-size:18px;font-weight:800;color:#0F172A;overflow-wrap:anywhere}
+/* 登录名要和昵称在形状上就分开：昵称是大字，登录名是等宽小标签，
+   以前两者都往 me-name 这一个位置塞，看着像"用户名改不掉"。 */
+.me-line .me-login-name{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;font-weight:600;
+  color:#475569;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:7px;padding:1px 6px;overflow-wrap:anywhere}
 .me-line{margin-top:3px;font-size:12.5px;color:#64748B;overflow-wrap:anywhere}
 .me-line b{font-variant-numeric:tabular-nums;color:#0F172A;letter-spacing:.4px}
 .me-copy{margin-left:6px;border:1px solid #E2E8F0;background:#F8FAFC;border-radius:7px;font:inherit;font-size:11.5px;color:#475569;padding:1px 7px;cursor:pointer;min-height:24px}
@@ -262,9 +286,19 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 /* 底部导航与桌面顶栏里的"我的"用头像点，不用通用小人图标——
    机主嫌的就是那个蓝色剪影，同一个软件里不该两种人格符号并存。 */
 .nav-avatar,.dnav-avatar{border-radius:50%;background:linear-gradient(135deg,#10B981 0%,#059669 100%);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;overflow:hidden;flex:0 0 auto}
-.nav-avatar{width:22px;height:22px;font-size:11px;line-height:1}
+.nav-avatar{width:26px;height:26px;font-size:12px;line-height:1}
 .dnav-avatar{width:18px;height:18px;font-size:10px;display:inline-flex;vertical-align:-3px}
 .nav-avatar img,.dnav-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* r159：底部五项对齐。emoji 和头像点各按自己的字高排，导航栏又是 align-items:center，
+   五项高度不同 → 标签一行上跳一行下掉；active 那颗还额外 scale(1.15)，更乱。
+   收成同一个 26px 图标盒 + 等高格子，选中态只变色，不放大。 */
+.bottom-nav{align-items:stretch}
+.bottom-nav .nav-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:8px 2px 6px}
+.bottom-nav .nav-item .nav-icon{display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:26px;height:26px;
+  margin-bottom:0;font-size:18px;line-height:1}
+.bottom-nav .nav-item>span:not(.nav-icon){line-height:1.15}
+.nav-item.active .nav-icon{transform:none}
 
 /* ============================================================
    r150 机主实拍第二轮：形状统一、弹窗居中、文本可选中、整页跳转
@@ -280,14 +314,14 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .td-btn,.td-btn-quiet,.td-mini,.cm-follow,.btn-primary,.btn-secondary,.btn-outline,
 .btn-log-meal,.btn-upload-photo,.btn-web-action,.btn-copy-remark,.btn-copy-url,
 .btn-cheer-chip,.header-download-btn,.btn-exd-ctl,.cm-compose-collapsed,.me-copy{border-radius:999px}
-.td-btn-quiet,.td-mini,.btn-secondary,.btn-outline,.me-copy{background:#ECFDF5;color:#047857;border:1px solid #A7F3D0}
-.td-btn.td-btn-quiet{background:#ECFDF5;color:#047857;border:1px solid #A7F3D0}
+.td-btn-quiet,.td-mini,.btn-secondary,.btn-outline,.me-copy{background:#ECFDF5;color:#047857;border:2px solid #A7F3D0}
+.td-btn.td-btn-quiet{background:#ECFDF5;color:#047857;border:2px solid #A7F3D0}
 .td-btn-quiet:hover,.td-btn.td-btn-quiet:hover,.td-mini:hover,.btn-secondary:hover,.btn-outline:hover,.me-copy:hover,
 .td-btn:hover,.btn-primary:hover,.btn-log-meal:hover,.btn-upload-photo:hover,.btn-web-action:hover,
 .btn-copy-remark:hover,.btn-copy-url:hover,.cm-follow:hover,.header-download-btn:hover{
   background:#059669;border-color:#059669;color:#fff}
 .td-btn,.btn-primary,.btn-log-meal,.btn-upload-photo,.btn-web-action{
-  background:linear-gradient(135deg,#10B981,#059669);border:1px solid transparent;color:#fff}
+  background:linear-gradient(135deg,#10B981,#059669);border:2px solid transparent;color:#fff}
 .td-btn:hover,.btn-primary:hover,.btn-log-meal:hover,.btn-upload-photo:hover,.btn-web-action:hover{
   background:linear-gradient(135deg,#059669,#047857)}
 .td-btn:active,.btn-primary:active,.btn-secondary:active,.td-mini:active{transform:scale(.98)}
@@ -469,7 +503,7 @@ body.qs-page-open{overflow:hidden}
 /* 文件选择：不把浏览器原生控件露给用户 */
 .file-hidden{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 .td-file-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px}
-.td-file-line .td-btn{flex:0 0 auto;min-width:0;min-height:36px;padding:7px 14px;font-size:13.5px;border-radius:999px}
+.td-file-line .td-btn{flex:0 0 auto;min-width:0;min-height:32px;padding:5px 12px;font-size:12.5px;line-height:1.25;border-radius:999px}
 .td-file-name{font-size:13px;color:#64748B;overflow-wrap:anywhere}
 /* 徽标语义色：已开启是好事，不该用危险红 */
 .td-badge[data-tone="on"]{background:#ECFDF5;color:#047857}

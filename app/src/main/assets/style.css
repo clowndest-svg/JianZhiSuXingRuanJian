@@ -741,8 +741,10 @@ body {
     font-weight: 700;
 }
 
+/* 选中态只变色不放大：以前给图标 scale(1.15)，五个导航项的图标盒高度不一致，
+   下面那排标签就跟着一高一低（features.css r159 统一成 26px 等高的格子）。 */
 .nav-item.active .nav-icon {
-    transform: scale(1.15);
+    transform: none;
 }
 
 .nav-item.highlight {

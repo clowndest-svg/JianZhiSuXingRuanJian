@@ -532,6 +532,31 @@ class Integration(unittest.TestCase):
         self.assertEqual(r.status_code, 200, '夹具注册失败: %s' % r.text)
         return r.json(), {'Authorization': 'Bearer ' + r.json()['token']}
 
+    def test_nickname_is_self_service_and_login_name_never_moves(self):
+        """昵称可以自己改，登录名不能。注册没填昵称时服务端把登录名当昵称存了，
+        这是线上真实存在的状态，所以「昵称==登录名」要能测出来，改完两处显示都得跟上。"""
+        acc = self.c.get('/api/account', headers=self.auth).json()
+        self.assertEqual(acc['user']['nickname'], 'owner', '注册没填昵称时昵称就是登录名')
+        self.assertTrue(str(acc['user']['created_at'])[:4].isdigit(), '身份卡要显示哪年加入的')
+        self.assertEqual(self.c.post('/api/account/nickname', headers=self.auth,
+                                     json={'nickname': '  小田要瘦十斤  '}).status_code, 200)
+        acc = self.c.get('/api/account', headers=self.auth).json()
+        self.assertEqual(acc['user']['nickname'], '小田要瘦十斤', '前后空格要剪掉再存')
+        self.assertEqual(acc['user']['username'], 'owner', '改昵称不许顺手把登录名也改掉')
+        # 别人那一侧看到的必须是新名字，否则就是"自己改了、别人还看旧的"
+        hit = self.c.get('/api/community/search', headers=self.auth, params={'q': '小田要瘦十斤'}).json()['items']
+        self.assertEqual([u['name'] for u in hit], ['小田要瘦十斤'])
+        home = self.c.get('/api/community/users/小田要瘦十斤', headers=self.auth).json()
+        self.assertEqual(home['user']['name'], '小田要瘦十斤')
+        for bad in ('', '   ', '一' * 21, '两行\n昵称'):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.c.post('/api/account/nickname', headers=self.auth,
+                                             json={'nickname': bad}).status_code, 400)
+        self.assertEqual(self.c.get('/api/account', headers=self.auth).json()['user']['nickname'],
+                         '小田要瘦十斤', '被拒的那几次不能把已经存好的昵称顺带清空')
+        self.assertEqual(self.c.post('/api/account/nickname',
+                                     json={'nickname': '匿名'}).status_code, 401)
+
     def test_public_id_assigned_and_unique(self):
         """轻塑号：主页要展示、搜索要精确命中，所以注册就得有，且不能是内部自增 id。"""
         me = self.signup

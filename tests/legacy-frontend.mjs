@@ -1864,6 +1864,69 @@ try {
   check("r152 判据块本身跑通了", false, String(e && e.message));
 }
 
+// ===== r159：底部导航那颗真头像（真的调用函数，不是查字符串）=====
+try {
+  const F159_REL = "app/src/main/assets/features.js";
+  const feat159 = MUTANT ? execFileSync("git", ["show", MUT_REF + ":" + F159_REL],
+      { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 24 })
+    : fs.readFileSync(path.join(ROOT, F159_REL), "utf8");
+  const h159 = makeCtx();
+  loadJs(h159.context);
+  run(h159.context, feat159.replace(/^\s*let localGuidanceRows\s*=\s*\[\s*\]\s*;\s*$/m, "/* 由 app.js 声明 */"));
+  const r159 = code => String(run(h159.context, code));
+
+  r159('state.user={id:"2",username:"tiangang",nickname:"田刚"};');
+  r159('paintMeAvatars("/uploads/av.jpg?expires=1700000000&signature=abc");');
+  const nav159 = r159('document.getElementById("nav-me-avatar").innerHTML');
+  const dnav159 = r159('document.getElementById("dnav-me-avatar").innerHTML');
+  check("带头像时底部那颗和桌面那颗都换成真图片，不是字母章",
+        nav159.indexOf("<img src=") >= 0 && nav159.indexOf("av.jpg") >= 0
+          && dnav159.indexOf("<img src=") >= 0, nav159.slice(0, 120));
+  check("头像链接带上签名参数（过期链接不能拼成裸文件名）",
+        nav159.indexOf("expires=1700000000") >= 0 && nav159.indexOf("signature=abc") >= 0, nav159.slice(0, 160));
+  r159('paintMeAvatars("");');
+  const noAv = r159('document.getElementById("nav-me-avatar").innerHTML');
+  check("没有头像时才回落字母章，取的是昵称首字",
+        noAv.indexOf("<img") < 0 && noAv.trim() === "田", noAv);
+  const cell159 = r159('typeof qsAvatarCell==="function"?qsAvatarCell():"missing"');
+  check("头像那一格能整格重画，没头像时留明确占位",
+        cell159.indexOf("td-avatar-empty") >= 0 && cell159.indexOf("还没头像") >= 0, cell159.slice(0, 120));
+
+  // 「我的」主页大字该写谁：真跑一遍 loadMe，别只查源码里有没有那行字
+  const meRound = async (nickVal) => {
+    h159.sandbox.__fetchHandler = (url) => {
+      const u = String(url);
+      const body = u.indexOf("/api/community/stats") >= 0
+        ? { code: 0, public_id: "34003457", posts: 1, followers: 2, following: 3,
+            likes_received: 4, region: "浙江", bubble_theme: "green" }
+        : u.indexOf("/api/account") >= 0
+        ? { code: 0, user: { id: "2", username: "tiangang", nickname: nickVal, public_id: "34003457",
+                             created_at: "2026-10-01 09:00:00" },
+            avatar_url: "/uploads/nav.jpg?expires=1700000009&signature=zz", bio: "慢慢来", region: "浙江", discoverable: 1 }
+        : { code: 0, items: [] };
+      return Promise.resolve({ ok: true, status: 200, json: async () => body });
+    };
+    run(h159.context, `state.token="tk-me";`);
+    run(h159.context, `loadMe();`);
+    await drain(12);
+    return { name: String(r159('document.getElementById("me-name").textContent')),
+             login: String(r159('document.getElementById("me-login").innerHTML')),
+             nav: String(r159('document.getElementById("nav-me-avatar").innerHTML')) };
+  };
+  const withNick = await meRound("田刚");
+  check("设过昵称：主页大字是昵称", withNick.name === "田刚", withNick.name);
+  check("读完「我的」页之后底部那颗仍是真头像，不会被字母章抹回去",
+        withNick.nav.indexOf("nav.jpg") >= 0 && withNick.nav.indexOf("signature=zz") >= 0,
+        withNick.nav.slice(0, 140));
+  const noNick = await meRound("");
+  check("没设昵称：主页明说还没设置，登录名挪到单独一行",
+        noNick.name === "还没设置昵称" && noNick.login.indexOf("tiangang") >= 0
+          && noNick.login.indexOf("me-login-name") >= 0,
+        noNick.name + " / " + noNick.login.slice(0, 120));
+} catch (e) {
+  check("r159 判据块本身跑通了", false, String(e && e.message));
+}
+
 const bad = R.filter(x => !x[1]);
 console.log(`\n=== ${MUTANT ? "变异样本(HEAD 改动前)" : "当前源码"}：${R.length} 条，绿 ${R.length - bad.length}，红 ${bad.length} ===`);
 for (const [name, ok, detail] of R) console.log(`  ${ok ? "绿" : "红"} ${name}${ok ? "" : "  -> " + detail}`);

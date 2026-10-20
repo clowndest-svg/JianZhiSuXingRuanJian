@@ -2389,9 +2389,9 @@ def main():
     check("弹窗动作区允许换行并右对齐",
           ".td-actions{display:flex;flex-wrap:wrap;justify-content:flex-end" in _fcss, "")
     check("弹窗动作按钮按内容收窄（不再 flex:1 拉成整行巨块）",
-          ".td-actions>.td-btn,.td-actions>.td-btn-quiet,.td-actions>.td-btn-danger{flex:0 1 auto;min-width:88px;min-height:40px" in _fcss, "")
+          ".td-actions>.td-btn,.td-actions>.td-btn-quiet,.td-actions>.td-btn-danger{flex:0 1 auto;min-width:64px;min-height:34px" in _fcss, "")
     check("文件选择行里的按钮也是紧凑尺寸",
-          ".td-file-line .td-btn{flex:0 0 auto;min-width:0;min-height:36px" in _fcss, "")
+          ".td-file-line .td-btn{flex:0 0 auto;min-width:0;min-height:32px" in _fcss, "")
     check("上传头像并进文件选择行，不再单独占一整行",
           "td-file-upload" in _fjs and "td-file-line" in _fjs
           and '<div class="td-actions"><button type="button" class="td-btn" onclick="uploadAvatar()">上传头像</button></div>' not in _fjs, "")
@@ -2458,6 +2458,63 @@ def main():
     check("更新弹窗不再用默认 setMessage 塞整段说明", ".setMessage(" not in _up, _up[:120])
     check("更新说明按要点分行（一条一行，不是一整段）",
           'parts.extend("• " + b for b in bullets' in _vj, "")
+
+    # ---- r159：底部导航头像与对齐、个人中心按钮与身份卡、昵称/登录名分开 ----
+    _a_css = _repo_file("app/src/main/assets/features.css")
+    _a_js = _repo_file("app/src/main/assets/features.js")
+    _a_html = _repo_file("app/src/main/assets/index.html")
+    _a_style = _repo_file("app/src/main/assets/style.css")
+    check("底部五项等高对齐：导航条 stretch，图标统一 26px 方盒",
+          ".bottom-nav{align-items:stretch}" in _a_css
+          and ".bottom-nav .nav-item .nav-icon{display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:26px;height:26px" in _a_css, "")
+    _nav_act = (_a_style.split(".nav-item.active .nav-icon {")[1].split("}")[0]
+                if ".nav-item.active .nav-icon {" in _a_style else "")
+    check("选中态不再放大图标（scale 会让那一格比另外四格高，标签跟着错位）",
+          ".nav-item.active .nav-icon{transform:none}" in _a_css and "scale" not in _nav_act,
+          _nav_act.strip()[:60])
+    check("底部那颗「我的」放的是真头像，不是字母章",
+          "function paintMeAvatars(avatarUrl)" in _a_js
+          and 'cmAvatarInner({ name: u.nickname || u.username, avatar: url })' in _a_js
+          and "paintMeAvatars(acc && acc.avatar_url)" in _a_js, "")
+    check("弹窗动作按钮再收一档并统一 2px 描边（1.5px 会被浏览器归整成 1px）",
+          "min-width:64px;min-height:34px;padding:6px 13px;font-size:13px" in _a_css
+          and "border-width:2px;border-style:solid" in _a_css
+          and ".td-group{margin:0 0 14px;border:2px solid #E2E8F0" in _a_css, "")
+    check("组内按钮和上面输入框右缘齐平：左右各缩 14px，不顶到卡片边线",
+          ".td-group .td-actions{padding:0 14px" in _a_css
+          and ".td-group .td-status,.td-group .td-note{padding-left:14px;padding-right:14px}" in _a_css, "")
+    check("个人中心头像旁边是身份卡（昵称/登录名/轻塑号/加入时间/签名）",
+          '<div class="td-identity">' in _a_js and 'class="td-avatar-cell" id="td-avatar-cell"' in _a_js
+          and "td-identity-name" in _a_js and "轻塑号 <b>" in _a_js
+          and "usr.created_at" in _a_js and ".td-identity{display:flex;align-items:flex-start" in _a_css, "")
+    check("昵称能自己改：服务端有接口并卡长度与控制字符",
+          '@app.post("/api/account/nickname")' in srv_txt and "NICKNAME_MAX = 20" in srv_txt
+          and 're.search(r"[\\x00-\\x1f\\x7f]", nick)' in srv_txt
+          and 'class NicknameReq(ValidatedModel)' in srv_txt, "")
+    check("昵称接口只改昵称，不动登录名",
+          "UPDATE users SET nickname=? WHERE id=?" in srv_txt
+          and "UPDATE users SET nickname=?, username=" not in srv_txt, "")
+    check("个人中心有昵称输入框并真发这个接口",
+          'id="nick-input" maxlength="20"' in _a_js and "async function saveNickname()" in _a_js
+          and "postApi('/api/account/nickname',{nickname:nick})" in _a_js, "")
+    check("主页大字只放昵称，没设过时明说，不拿登录名顶替",
+          'cmText("me-name", nick || "还没设置昵称")' in _a_js
+          and 'cmText("me-name", u.nickname || u.username || "未登录")' not in _a_js, "")
+    check("登录名单独一行且写成等宽标签，和昵称形状上就分开",
+          "'登录名 <b class=\"me-login-name\">'" in _a_js
+          and 'id="me-login"' in _a_html
+          and ".me-line .me-login-name{font-family:ui-monospace" in _a_css
+          and ".td-id-login{" in _a_css, "")
+    check("昵称和登录名撞车时给出可执行的提示（注册默认把登录名当昵称）",
+          "const sameNick=!!nick&&nick===String(usr.username||'').trim()" in _a_js
+          and "现在昵称和登录名一模一样" in _a_js, "")
+    check("账号回执带注册日期，身份卡不用为了显示它多发一次请求",
+          '"created_at": user.get("created_at") or ""' in srv_txt, "")
+    check("头像那一格整格重画：第一张头像上传完也能立刻看见",
+          "function qsAvatarCell()" in _a_js and "cell.innerHTML=qsAvatarCell()" in _a_js
+          and "img.src=API_BASE+accountCache.avatar_url" not in _a_js, "")
+    check("上传头像仍然并进文件选择行（没退回成一整行巨块）",
+          '<div class="td-actions"><button type="button" class="td-btn" onclick="uploadAvatar()">上传头像</button></div>' not in _a_js, "")
 
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (

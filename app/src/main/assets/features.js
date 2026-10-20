@@ -368,18 +368,34 @@ async function openAccountCenter(){
     // 服务端那句 why 本身已经写了"邮件通道未接入：…"，这里再拼一次前缀就成了结巴
     const mailLine=a.mail==='up'?'邮件通道已接入，可以绑定邮箱找回密码'
                                  :(a.mail_why||'邮件通道未接入');
+    const usr=a.user||{};
+    const nick=String(usr.nickname||'').trim();
+    // 注册时没填昵称，服务端会把登录名直接当昵称存下来；这两种情况要提醒，
+    // 否则用户看到主页那串英文账号，会以为"昵称根本改不动"。
+    const sameNick=!!nick&&nick===String(usr.username||'').trim();
     toolDialog('个人中心',`
-      <p class="td-lead">头像、密码、邮箱找回、所在城市与忌口都在这。忌口会真的改变外卖与食谱的推荐顺序；城市是按坐标就近认的粗匹配，不对就手改。</p>
-      <div class="td-group-label">头像</div>
+      <p class="td-lead">头像、昵称、密码、邮箱找回、所在城市与忌口都在这。忌口会真的改变外卖与食谱的推荐顺序；城市是按坐标就近认的粗匹配，不对就手改。</p>
+      <div class="td-group-label">头像与昵称</div>
       <div class="td-group">
-        <div class="td-avatar-row">
-          ${a.avatar_url?`<img class="td-avatar" src="${escapeHtml(API_BASE+a.avatar_url)}" alt="当前头像">`:'<span class="td-avatar td-avatar-empty">还没头像</span>'}
-          <div class="td-field-row"><span class="td-field-label">头像图片（JPEG / PNG / WebP，4MB 内）</span>
+        <div class="td-identity">
+          <div class="td-avatar-cell" id="td-avatar-cell">${qsAvatarCell()}</div>
+          <div class="td-identity-main">
+            <div class="td-identity-name">${escapeHtml(nick||'还没设置昵称')}${nick?'':'<span class="td-id-tag td-id-tag-warn">未设置</span>'}</div>
+            <div class="td-identity-meta"><span class="td-id-tag">登录名</span><span class="td-id-login">${escapeHtml(usr.username||'—')}</span></div>
+            <div class="td-identity-meta">轻塑号 <b>${escapeHtml(usr.public_id||'—')}</b> · ${escapeHtml(String(usr.created_at||'').slice(0,10))||'—'} 加入 · ${(a.region||'').trim()?'属地 '+escapeHtml(a.region.trim()):'属地未知'}</div>
+            <div class="td-identity-bio">${escapeHtml((a.bio||'').trim()||'还没有签名，到「我的」页点编辑签名')}</div>
+          </div>
+        </div>
+        <label class="td-field-row"><span class="td-field-label">昵称（20 字内，主页与帖子旁显示的就是它）</span>
+          <input id="nick-input" maxlength="20" placeholder="例：小田要瘦十斤" value="${escapeHtml(nick)}">
+          <span class="td-field-hint">${sameNick?'现在昵称和登录名一模一样。登录名改不了也不用给别人看，把昵称改成一个好记的名字。':'登录名是账号本身，不能改；主页大字位置只显示昵称，不会再拿登录名顶替。'}</span></label>
+        <div class="td-actions"><button type="button" class="td-btn" onclick="saveNickname()">保存昵称</button></div>
+        <p id="nick-status" class="td-status" role="status"></p>
+        <div class="td-field-row"><span class="td-field-label">头像图片（JPEG / PNG / WebP，4MB 内）</span>
             <input type="file" id="avatar-file" accept="image/*" class="file-hidden" onchange="qsPickAvatarName(this)">
             <span class="td-file-line"><button type="button" class="td-btn td-btn-quiet" onclick="document.getElementById('avatar-file').click()">选择图片</button>
             <span class="td-file-name" id="avatar-file-name">未选择</span>
             <button type="button" class="td-btn td-file-upload" onclick="uploadAvatar()">上传头像</button></span></div>
-        </div>
         <p id="avatar-status" class="td-status" role="status"></p>
         <p class="td-note">上传前会去掉照片里的位置等隐藏信息，并压到 512 像素。</p>
       </div>
@@ -394,9 +410,9 @@ async function openAccountCenter(){
         <p id="city-status" class="td-status" role="status">${a.loc_updated_at?'上次定位：'+escapeHtml(a.loc_updated_at):'还没有定位记录'}</p>
       </div>
       <div class="td-group-label">忌口（影响外卖与食谱推荐）</div>
-      <div class="td-group">${AVOID_TAGS.map(k=>tdToggleRow('avoid-'+k,(a.avoid_tags||[]).indexOf(k)>=0,AVOID_CN[k][0],AVOID_CN[k][1])).join('')}</div>
-      <div class="td-actions"><button type="button" class="td-btn" onclick="saveAvoidTags()">保存忌口</button></div>
-      <p id="avoid-status" class="td-status" role="status"></p>
+      <div class="td-group">${AVOID_TAGS.map(k=>tdToggleRow('avoid-'+k,(a.avoid_tags||[]).indexOf(k)>=0,AVOID_CN[k][0],AVOID_CN[k][1])).join('')}
+        <div class="td-actions"><button type="button" class="td-btn" onclick="saveAvoidTags()">保存忌口</button></div>
+        <p id="avoid-status" class="td-status" role="status"></p></div>
       <div class="td-group-label">邮箱与找回密码</div>
       <div class="td-group">
         ${tdValueRow('已绑邮箱',a.email_bound?a.email_masked+(a.email_verified?'（已验证）':'（未验证）'):'未绑定')}
@@ -424,6 +440,30 @@ async function openAccountCenter(){
     `);
 }
 
+/** 个人中心头像那一格：有头像放图，没有留明确占位，重画时整格替换，
+    这样"第一张头像上传成功"也能立刻看见，不必重开弹窗。 */
+function qsAvatarCell(){
+    const url=accountCache&&accountCache.avatar_url;
+    return url?`<img class="td-avatar" src="${escapeHtml(API_BASE+url)}" alt="当前头像">`
+              :'<span class="td-avatar td-avatar-empty">还没头像</span>';
+}
+
+async function saveNickname(){
+    const box=document.getElementById('nick-input');
+    const nick=(box&&box.value||'').trim();
+    if(!nick){tdStatus('nick-status','昵称不能是空的',true);return;}
+    try{
+        const r=await postApi('/api/account/nickname',{nickname:nick});
+        tdStatus('nick-status',r.msg||'昵称已更新');
+        await refreshAccount();
+        const nameEl=document.querySelector('.td-identity-name');
+        if(nameEl)nameEl.textContent=nick;
+        // 「我的」页那张卡片就在弹窗后面，改完不重画就成了"说改了但看到的还是旧的"
+        const me=document.getElementById('me-name');
+        if(me)me.textContent=nick;
+    }catch(e){tdStatus('nick-status',e.message||'昵称没改掉',true);}
+}
+
 async function uploadAvatar(){
     const input=document.getElementById('avatar-file');
     const file=input&&input.files&&input.files[0];
@@ -435,8 +475,8 @@ async function uploadAvatar(){
         const r=await postApi('/api/account/avatar',fd);
         tdStatus('avatar-status',r.msg||'头像已更新');
         await refreshAccount();
-        const img=document.querySelector('.td-avatar');
-        if(img&&accountCache&&accountCache.avatar_url)img.src=API_BASE+accountCache.avatar_url;
+        const cell=document.getElementById('td-avatar-cell');
+        if(cell)cell.innerHTML=qsAvatarCell();
     }catch(e){tdStatus('avatar-status',e.message||'头像上传失败',true);}
 }
 
@@ -2012,7 +2052,14 @@ async function loadMe() {
                                             getJson("/api/account").catch(() => null)]);
         cm.stats = s;
         const u = (acc && acc.user) || state.user || {};
-        cmText("me-name", u.nickname || u.username || "未登录");
+        // 大字只放昵称。登录名是账号本身，过去 nickname||username 一起兜底，
+        // 没设过昵称的人主页上显示的就是自己的登录名，看着像"昵称改不动"。
+        const nick = String(u.nickname || "").trim();
+        cmText("me-name", nick || "还没设置昵称");
+        const loginLine = cmEl("me-login");
+        if (loginLine) loginLine.innerHTML = '登录名 <b class="me-login-name">'
+            + escapeHtml(u.username || "—") + '</b>'
+            + (nick ? "" : '<button type="button" class="me-copy" onclick="openAccountCenter()">去设置昵称</button>');
         cmText("me-public-id", s.public_id || u.public_id || "—");
         const bio = acc && acc.profile && acc.profile.bio;
         cmText("me-bio", (acc && acc.bio) || bio || "还没有签名，点下面的「编辑签名」写一句");
@@ -2028,7 +2075,7 @@ async function loadMe() {
             slot.innerHTML = url ? '<img src="' + escapeHtml(API_BASE + url) + '" alt="我的头像">'
                 : cmAvatarInner({ name: u.nickname || u.username });
         }
-        paintMeAvatars();
+        paintMeAvatars(acc && acc.avatar_url);
         cm.myTheme = s.bubble_theme || "green";
         const meId = (state.user && state.user.id) || 0;
         const stats = [["posts", "帖子", s.posts], ["followers", "粉丝", s.followers],
@@ -2046,9 +2093,12 @@ async function loadMe() {
     }
 }
 
-function paintMeAvatars() {
+function paintMeAvatars(avatarUrl) {
     const u = state.user || {};
-    const inner = cmAvatarInner({ name: u.nickname || u.username });
+    // 不传就用个人中心那次回读的结果。以前这里只取名字不取头像，
+    // 于是"我的"页一重画就把底部导航的真头像抹回字母章。
+    const url = typeof avatarUrl === "string" ? avatarUrl : ((accountCache && accountCache.avatar_url) || "");
+    const inner = cmAvatarInner({ name: u.nickname || u.username, avatar: url });
     ["nav-me-avatar", "dnav-me-avatar"].forEach(id => {
         const el = cmEl(id);
         if (el) el.innerHTML = inner;
