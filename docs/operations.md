@@ -48,7 +48,11 @@ r161 预留域名为 `scientificexploration.art`，当前受腾讯云备案校�
 
 ### 邮件配置
 
-在 `/ops/` 的「邮件接入」填写服务商 SMTP 配置。服务器文件为 `/opt/qingsu/mail.json`，由root写入、qingsu只读；不进入Git或运维审计。服务读取配置变更无需重启。界面检查只建立可信TLS连接并认证，不发邮件，不代表收件箱已收到验证码；真实投递必须另行验证。用户目前未提供账号，因此初始状态保持未配置。
+在 `/ops/` 的「邮件接入」填写服务商 SMTP 配置。服务器文件为 `/opt/qingsu/mail.json`，由root写入、qingsu只读；不进入Git或运维审计。服务读取配置变更无需重启。界面检查只建立可信TLS连接并认证，不发邮件，不代表收件箱已收到验证码；真实投递必须另行验证。
+
+当前状态（2026-10-20 接入）：QQ 邮箱个人账号，`smtp.qq.com:465`，`tls=ssl`，发件人与登录账号同为 `2379323670@qq.com`，密码为 16 位 SMTP 授权码（只存在于服务器 `mail.json`，权限 `640 root:qingsu`，不进仓库、不进日志）。已用 qingsu 账号以 `app_modules/mailer.send` 真实投递一封测试邮件成功，`/api/account/recovery-status` 由 `down` 变为 `up`。
+
+限制与后续：QQ 免费邮箱有每日发信量上限，只够验证码/找回密码这类事务邮件，不可用于群发，超限或投诉会停用 SMTP 权限；发件域名是 `qq.com`，用户可能怀疑真伪。域名 `scientificexploration.art` 接入通过后，建议换阿里云邮件推送（免费额度每日 200 封，需配置 SPF/DKIM），送达率更好。腾讯云出站 25 端口封锁，只走 465/587。
 
 IP证书路径 `/etc/letsencrypt/live/124.220.54.64`，Certbot运行时 `/opt/qingsu/certbot-env`。HTTP 80 保留 `/.well-known/acme-challenge/` 与已有 `latest.json`、`latest-extensions.json`；轻塑入口跳转HTTPS。443容器 `qingsu-tls` 的证书挂载只读。
 
