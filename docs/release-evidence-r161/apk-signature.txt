@@ -1,0 +1,17 @@
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer #1 certificate DN: CN=QingSu Release, O=QingSu, C=CN
+Signer #1 certificate SHA-256 digest: c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f
+Signer #1 certificate SHA-1 digest: 794dc3174bce389b025d099a8df0d799bee6af77
+Signer #1 certificate MD5 digest: 971f4fb2ba5315dc662087297a4e5105
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 4096
+Signer #1 public key SHA-256 digest: dcc827faf0304fd6bd33df2c053afa67e6638758e668d2dd5bc535b52f0e886f
+Signer #1 public key SHA-1 digest: dbaca1b62481a03d28ffa814eef9c290172b2769
+Signer #1 public key MD5 digest: 7286a60f420abfdeb9d36f6ec96bb673

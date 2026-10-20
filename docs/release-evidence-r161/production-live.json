@@ -1,0 +1,71 @@
+{
+  "checked_at": 1792493455,
+  "release": {
+    "release": "r39408620022",
+    "source_revision": "64c590141ec3b1960583d531329a49e1310c0c65",
+    "backup": "/opt/qingsu/backups/release-20261020-184519"
+  },
+  "admin_release": {
+    "source_revision": "97e3cbea3ee1c89dd80c6f3392b4a22df5db4603",
+    "backup": "/opt/qingsu/backups/admin-console-ci-39408628840-412d8f5a46ab",
+    "run_id": "39408628840"
+  },
+  "version_code": 45,
+  "version_name": "2.2.0",
+  "apk_size": 5408933,
+  "apk_sha256": "c94a3886569fb39ff9b7e498863c2f7e584343248fb5752f1f930601b39b7cad",
+  "site_base": "https://124.220.54.64",
+  "min_build": 0,
+  "build_override": true,
+  "keys_regenerated": [],
+  "http": {
+    "/": 200,
+    "/about": 200,
+    "/companion.js": 200,
+    "/manifest.webmanifest": 200,
+    "/sw.js": 200,
+    "/qr.svg": 200,
+    "/sitemap.xml": 200,
+    "/robots.txt": 200
+  },
+  "apk_web_assets_equal": [
+    "app.js",
+    "companion.js",
+    "about.html",
+    "style.css"
+  ],
+  "unrelated_http_manifest_hashes": {
+    "/latest.json": "c89f7f616f8e6687ada79400d63be069c658242a605b774ac15a20c77d5c044d",
+    "/latest-extensions.json": "327efa0318b005552a6a113dcc6ee13dc24c74c261ed3554317cacece3d6398c"
+  },
+  "units": {
+    "qingsu": "active",
+    "qingsu-ops": "active",
+    "qingsu-llama": "active",
+    "qingsu-backup.timer": "active",
+    "qingsu-cert-renew.timer": "active",
+    "qingsu-monitor.timer": "active",
+    "qingsu-push.timer": "active"
+  },
+  "qa_inactive": true,
+  "qa_config_removed": true,
+  "monitor": {
+    "checked_at": 1792493455,
+    "qingsu": "active",
+    "qingsu-llama": "active",
+    "qingsu-backup.timer": "active",
+    "qingsu-cert-renew.timer": "active",
+    "ready": 200,
+    "free_disk_mb": 30999,
+    "backup_age_hours": 0.0,
+    "certificate_hours_left": 152.4,
+    "requests": 68,
+    "errors_5xx": 0,
+    "p95_ms": 2.6,
+    "sqlite_lock_errors": 0,
+    "cache_degraded": 0,
+    "problems": []
+  },
+  "domain": "pending_tencent_icp_validation",
+  "smtp": "not_configured"
+}

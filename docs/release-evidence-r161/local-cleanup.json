@@ -1,0 +1,43 @@
+{
+  "method": "recoverable_archive",
+  "archive": "D:\\RuanJian\\ShuJuChunChu\\qingsu-cleanup-archive\\r161-20261020",
+  "items": [
+    {
+      "path": "_audit_sandbox",
+      "removed_from_project": true,
+      "recoverable": true
+    },
+    {
+      "path": "_shot",
+      "removed_from_project": true,
+      "recoverable": true
+    },
+    {
+      "path": "release.tar",
+      "removed_from_project": true,
+      "recoverable": true
+    },
+    {
+      "path": "qingsu.apk.idsig",
+      "removed_from_project": true,
+      "recoverable": true
+    },
+    {
+      "path": "_mutant.apk.idsig",
+      "removed_from_project": true,
+      "recoverable": true
+    },
+    {
+      "path": "app/build/outputs/apk/debug",
+      "removed_from_project": true,
+      "recoverable": true
+    },
+    {
+      "path": "app/build/outputs/apk/androidTest",
+      "removed_from_project": true,
+      "recoverable": true
+    }
+  ],
+  "preview_python_processes_remaining": 0,
+  "source_current_apk_private_backups_external_keys_preserved": true
+}
