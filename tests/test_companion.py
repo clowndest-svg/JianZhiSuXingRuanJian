@@ -133,10 +133,12 @@ class Companion(unittest.TestCase):
         c.close()
 
     def test_legacy_ip_manifest_remains_upgradeable(self):
+        self.m.SITE_BASE = 'https://scientificexploration.art'
         p = self.root / 'WEB/version.json'
         p.write_text(json.dumps({'version_code': 45, 'apk_url': 'https://scientificexploration.art/qingsu.apk'}))
         self.assertEqual(self.c.get('/version.json', headers={'Host': '124.220.54.64'}).json()['apk_url'], 'https://124.220.54.64/qingsu.apk')
         self.assertEqual(self.c.get('/version.json', headers={'Host': 'scientificexploration.art'}).json()['apk_url'], 'https://scientificexploration.art/qingsu.apk')
+        self.assertEqual(self.c.get('/version.json', headers={'Host': '124.220.54.64', 'X-App-Build': '45'}).json()['apk_url'], 'https://scientificexploration.art/qingsu.apk')
 
 
 if __name__ == '__main__':

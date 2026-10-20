@@ -2,18 +2,20 @@
 import json,re,shutil,subprocess,time,urllib.request,ssl
 from pathlib import Path
 root=Path('/opt/qingsu');problems=[];report={'checked_at':int(time.time())}
+public_base=(root/'site-base').read_text().strip() if (root/'site-base').is_file() else 'https://124.220.54.64'
+if public_base not in ('https://124.220.54.64','https://scientificexploration.art'):raise SystemExit('Invalid active public site')
 for unit in ('qingsu','qingsu-llama','qingsu-backup.timer','qingsu-cert-renew.timer'):
     state=subprocess.run(['systemctl','is-active',unit],capture_output=True,text=True).stdout.strip();report[unit]=state
     if state!='active':problems.append(unit)
 try:
-    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open('https://scientificexploration.art/health/ready',timeout=10) as r:report['ready']=r.status
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(public_base+'/health/ready',timeout=10) as r:report['ready']=r.status
 except Exception:problems.append('https_readiness')
 report['free_disk_mb']=shutil.disk_usage(root).free//1024//1024
 if report['free_disk_mb']<512:problems.append('low_disk')
 backups=list((root/'backups/scheduled').glob('bundle-*.p7m'))
 report['backup_age_hours']=round((time.time()-max((x.stat().st_mtime for x in backups),default=0))/3600,1)
 if report['backup_age_hours']>26:problems.append('stale_backup')
-expiry=subprocess.run(['openssl','x509','-enddate','-noout','-in','/etc/letsencrypt/live/scientificexploration.art/cert.pem'],capture_output=True,text=True).stdout.strip()
+expiry=subprocess.run(['openssl','x509','-enddate','-noout','-in','/etc/letsencrypt/live/'+public_base.split('://')[1]+'/cert.pem'],capture_output=True,text=True).stdout.strip()
 from email.utils import parsedate_to_datetime
 report['certificate_hours_left']=round((parsedate_to_datetime(expiry.split('=',1)[1]).timestamp()-time.time())/3600,1)
 if report['certificate_hours_left']<48:problems.append('certificate_expiring')

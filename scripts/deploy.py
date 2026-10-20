@@ -6,6 +6,8 @@ p=argparse.ArgumentParser();p.add_argument('--stage',required=True);p.add_argume
 p.add_argument('--release',default=None,help='发布标签；默认取 --stage 目录名（例如 releases/r132 -> r132）')
 args=p.parse_args()
 root=Path('/opt/qingsu');stage=Path(args.stage).resolve()
+public_base=(root/'site-base').read_text().strip() if (root/'site-base').is_file() else 'https://124.220.54.64'
+if public_base not in ('https://124.220.54.64','https://scientificexploration.art'):raise SystemExit('Invalid active public site')
 if os.geteuid()!=0 or stage.parent!=root/'releases' or not (stage/'server.py').is_file():raise SystemExit('Expected root and a prepared release directory')
 RELEASE=args.release or stage.name
 if not RELEASE.startswith('r'):raise SystemExit('无法确定发布标签，请显式传 --release')
@@ -76,8 +78,8 @@ try:
     config=re.sub(r'--forwarded-allow-ips=\S+','--forwarded-allow-ips='+','.join(ips),config)
     if 'QINGSU_CACHE_NAMESPACE=' not in config:config=config.replace('Environment=TZ=', 'Environment=QINGSU_CACHE_NAMESPACE=qingsu-prod\nEnvironment=TZ=')
     if 'Environment=QINGSU_SITE_BASE=' in config:
-        config=re.sub(r'Environment=QINGSU_SITE_BASE=.*', 'Environment=QINGSU_SITE_BASE=https://scientificexploration.art', config)
-    else:config=config.replace('[Service]', '[Service]\nEnvironment=QINGSU_SITE_BASE=https://scientificexploration.art')
+        config=re.sub(r'Environment=QINGSU_SITE_BASE=.*', 'Environment=QINGSU_SITE_BASE='+public_base, config)
+    else:config=config.replace('[Service]', '[Service]\nEnvironment=QINGSU_SITE_BASE='+public_base)
     unit.write_text(config);restart()
     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
     for _ in range(20):
@@ -97,7 +99,7 @@ try:
     gzip_types application/json application/javascript text/css image/svg+xml;''')
     tls.write_text(new_tls);run('docker','exec','qingsu-tls','nginx','-t');run('docker','exec','qingsu-tls','nginx','-s','reload')
     # Preserve the unrelated release manifests and the ACME challenge route on port 80.
-    redirected=re.sub(r'    location / \{.*?\n    \}', '    location / { return 308 https://scientificexploration.art$request_uri; }',old_http,flags=re.S)
+    redirected=re.sub(r'    location / \{.*?\n    \}', '    location / { return 308 '+public_base+'$request_uri; }',old_http,flags=re.S)
     if 'location = /version.json' not in redirected:
         redirected=redirected.replace('    location / {', '''    # Public update bootstrap for old Java HTTP clients that do not follow HTTPS redirects.
     location = /version.json { proxy_pass http://172.17.0.1:8000/version.json; }
@@ -105,7 +107,7 @@ try:
     if 'access_log off;' not in redirected:redirected=redirected.replace('server {','server {\n    access_log off;',1)
     http_file=root/'tls-http.conf';http_file.write_text(redirected)
     run('docker','cp',str(http_file),'xiaoye-release:/etc/nginx/conf.d/default.conf');run('docker','exec','xiaoye-release','nginx','-t');run('docker','exec','xiaoye-release','nginx','-s','reload')
-    with opener.open('https://scientificexploration.art/health/ready',timeout=10) as r:live=json.load(r)
+    with opener.open(public_base+'/health/ready',timeout=10) as r:live=json.load(r)
     assert live.get('source_revision')==args.revision,'线上提交与本次部署不符: %s'%live
     assert live.get('release')==RELEASE,'线上发布标签与本次部署不符: %s'%live
     for kind,text in {'service':'''[Unit]

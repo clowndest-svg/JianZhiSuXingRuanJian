@@ -14,7 +14,7 @@ function openInstallGuide(){
       <p>苹果手机：在 Safari 打开本网站，点分享，再选「添加到主屏幕」。</p>
       <p>安卓或电脑：在浏览器菜单中寻找「安装应用」或「添加到主屏幕」。菜单没有出现时，可以先收藏网址。</p>
       <p class="td-note">断网后可以查看本机缓存并保存餐食、训练草稿；重新联网后请同步核对。浏览器通知是否可用取决于设备、浏览器和网络。</p>
-      <p><a href="https://scientificexploration.art/about">软件介绍与使用教程</a></p>`);
+      <p><a href="${escapeHtml(API_BASE)}/about">软件介绍与使用教程</a></p>`);
 }
 async function installBrowserApp(){
     if(!installPrompt)return;

@@ -29,7 +29,9 @@ ROOT = Path("/opt/qingsu")
 INCOMING = ROOT / "ci-incoming"
 RELEASES = ROOT / "releases"
 BACKUPS = ROOT / "backups"
-PUBLIC_BASE = "https://scientificexploration.art"
+PUBLIC_BASE = (ROOT / 'site-base').read_text().strip() if (ROOT / 'site-base').is_file() else 'https://124.220.54.64'
+if PUBLIC_BASE not in ('https://124.220.54.64', 'https://scientificexploration.art'):
+    raise RuntimeError('Invalid active public site')
 
 
 def run(label, *command, env=None, check=True):

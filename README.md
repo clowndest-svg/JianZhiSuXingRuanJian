@@ -2,12 +2,13 @@
 
 当前版本：r161 / Android **2.2.0（45）**。
 
-- 网页：https://scientificexploration.art/
-- 介绍与教程：https://scientificexploration.art/about
-- 安装包：https://scientificexploration.art/qingsu.apk
-- 版本与指纹：https://scientificexploration.art/version.json
-- 就绪检查：https://scientificexploration.art/health/ready
-- 兼容入口：https://124.220.54.64/ （保留旧客户端升级）
+- 网页：https://124.220.54.64/
+- 介绍与教程：https://124.220.54.64/about
+- 安装包：https://124.220.54.64/qingsu.apk
+- 版本与指纹：https://124.220.54.64/version.json
+- 就绪检查：https://124.220.54.64/health/ready
+
+域名 `scientificexploration.art` 已解析到服务器，但公网 HTTP 被腾讯云重定向到备案拦截页，证书验证无法完成。本轮保留有效的 HTTPS IP 入口。备案/接入校验通过后运行 `scripts/enable-domain.py`，经可信TLS验证再启用域名、www跳转及分享/下载链接，旧客户端继续保留IP升级通道。
 
 r161 增加最近7天/30天回顾与图片导出、最多8人的共同目标、网页安装与更新引导、可选的浏览器后台消息提醒。共同目标只公开组内昵称与达成天数；推送订阅与登录会话绑定，退出或撤销会话后停止。通知不含正文或身体数据，送达取决于浏览器推送服务、网络与系统设置；安卓原生后台私信推送尚未接入厂商通道。
 
@@ -40,7 +41,7 @@ python make_version_json.py
 python scripts/package-release.py --output release.tar
 ```
 
-生产 API 默认使用 `https://scientificexploration.art`；隔离 QA 可通过 Gradle 属性 `qingsuApiBase` 指定完整入口，**QA 包不得作为正式安装包发布**。网页使用同源 API，支持服务端配置的隔离路径。
+生产 API 当前使用 `https://124.220.54.64`；隔离 QA 可通过 Gradle 属性 `qingsuApiBase` 指定完整入口，**QA 包不得作为正式安装包发布**。网页使用同源 API，支持服务端配置的隔离路径。
 
 ## 数据、隐私与运维
 

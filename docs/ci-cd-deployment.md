@@ -1,6 +1,6 @@
 # GitHub Actions 自动部署
 
-r161 起在生产发布任务开始时先验证正式域名的可信 HTTPS；未通过则拒绝切换。首次启用域名需要先在服务器执行 `scripts/enable-domain.py`，它复用 ACME webroot、备份现有代理配置并保留后台、WebSocket及 IP 升级入口。不要把解析控制台的「正常」当成证书已经签发。
+r161 起在生产发布任务开始时先验证当前有效入口的可信 HTTPS。域名备案拦截尚未解除时，当前入口保留为 IP。首次启用域名需要先在服务器执行 `scripts/enable-domain.py`，它复用 ACME webroot、备份现有代理配置并保留后台、WebSocket及 IP 升级入口；可信TLS验证完成后写入 `/opt/qingsu/site-base` 并更新服务配置。后续部署沿用该已验证入口。不要把解析控制台的「正常」当成证书已经签发。
 
 主应用仓库在推送 `main` 后会依次构建 Android、运行现有后端与前端集成检查，全部通过后才进入生产部署。Pull request 只构建和检查，不读取生产环境密钥。
 

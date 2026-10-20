@@ -19,7 +19,7 @@ await Promise.all([run('postApi("/api/workout/complete",{duration_minutes:20})')
 h.sandbox.__fetchHandler=async()=>{throw Error('offline');};run('window.__PUBLIC_USER__="owner";');await run('refreshPublicNow()');assert.match(h.mkEl('public-refresh-stamp').textContent,/刷新失败/);
 h.sandbox.__fetchHandler=()=>ok({code:0});run('state.currentWeightJin=150;state.dashboardLoaded=true;');await run('logoutUser()');assert.equal(run('state.currentWeightJin'),0);assert.equal(run('state.dashboardLoaded'),false);
 const browser=makeCtx();browser.sandbox.window.location={protocol:'https:',hostname:'example.test',origin:'https://example.test'};loadJs(browser.context);assert.equal(vm.runInContext('API_BASE',browser.context),'https://example.test');
-const apk=makeCtx();apk.sandbox.window.location={protocol:'https:',hostname:'appassets.androidplatform.net',origin:'https://appassets.androidplatform.net'};loadJs(apk.context);assert.equal(vm.runInContext('API_BASE',apk.context),'https://scientificexploration.art');
+const apk=makeCtx();apk.sandbox.window.location={protocol:'https:',hostname:'appassets.androidplatform.net',origin:'https://appassets.androidplatform.net'};loadJs(apk.context);assert.equal(vm.runInContext('API_BASE',apk.context),'https://124.220.54.64');
 console.log('PASS: share, checklist, water, concurrent writes, offline refresh, logout, browser/APK routing');
 
 const f=makeCtx();loadJs(f.context,true);const feature=x=>vm.runInContext(x,f.context);

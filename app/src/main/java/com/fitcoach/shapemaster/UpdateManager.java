@@ -60,6 +60,7 @@ public final class UpdateManager {
             c.setConnectTimeout(8000);
             c.setReadTimeout(8000);
             c.setRequestProperty("Cache-Control", "no-cache");
+            c.setRequestProperty("X-App-Build", String.valueOf(BuildConfig.VERSION_CODE));
             c.setRequestMethod("GET");
             if (c.getResponseCode() != 200) {
                 return null;

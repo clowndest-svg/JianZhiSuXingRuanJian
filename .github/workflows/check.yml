@@ -100,13 +100,24 @@ jobs:
     timeout-minutes: 60
     environment:
       name: production
-      url: https://scientificexploration.art/
+      url: https://124.220.54.64/
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Verify canonical HTTPS before changing production
-        run: curl --fail --silent --show-error --max-time 20 https://scientificexploration.art/health/ready
+      - name: Verify the active public HTTPS entry before changing production
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+          with opener.open('https://124.220.54.64/health/ready',timeout=20) as r:
+              base=json.load(r).get('site_base','https://124.220.54.64')
+          if base not in ('https://124.220.54.64','https://scientificexploration.art'):
+              raise SystemExit('Unexpected active public entry')
+          with opener.open(base+'/health/ready',timeout=20) as r:
+              assert json.load(r)['status']=='ok'
+          print('Verified active public entry:',base)
+          PY
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'

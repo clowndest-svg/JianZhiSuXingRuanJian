@@ -1,4 +1,5 @@
 import csv
+from functools import lru_cache
 import hmac
 import math
 import uuid
@@ -39,7 +40,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(WEB_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(DB_DIR, "qingsu.db")
-SITE_BASE = os.environ.get("QINGSU_SITE_BASE", "https://scientificexploration.art").rstrip("/")
+SITE_BASE = os.environ.get("QINGSU_SITE_BASE", "https://124.220.54.64").rstrip("/")
 
 app = FastAPI(title="轻塑·减脂塑形严管伴侣 API", version="5.0.0")
 
@@ -3017,10 +3018,13 @@ def version_json(request: Request):
         raw = f.read()
     # Installed clients <=44 only accept the IP as a download host. Keep their
     # IP manifest usable while the canonical domain advertises domain URLs.
-    if request.url.hostname == "124.220.54.64":
-        data = json.loads(raw)
-        data['apk_url'] = 'https://124.220.54.64/qingsu.apk'
-        raw = json.dumps(data, ensure_ascii=False)
+    try:
+        legacy = int(request.headers.get('X-App-Build', '0')) < 45
+    except ValueError:
+        legacy = True
+    data = json.loads(raw)
+    data['apk_url'] = ('https://124.220.54.64' if request.url.hostname == '124.220.54.64' and legacy else SITE_BASE) + '/qingsu.apk'
+    raw = json.dumps(data, ensure_ascii=False)
     return Response(content=raw, media_type="application/json", headers=_no_cache())
 
 
@@ -3332,10 +3336,15 @@ def download_apk(v: str = None):
 
 @app.get("/qr.svg")
 def get_qr_svg(v: str = None):
-    path = os.path.join(WEB_DIR, "qr.svg")
-    if os.path.exists(path):
-        return FileResponse(path, media_type="image/svg+xml", headers=_asset_headers(path, v))
-    raise HTTPException(status_code=404, detail="qr.svg not found")
+    return Response(download_qr(), media_type='image/svg+xml', headers=_no_cache())
+
+@lru_cache(maxsize=1)
+def download_qr():
+    import qrcode
+    import qrcode.image.svg
+    out=io.BytesIO()
+    qrcode.make(SITE_BASE+'/qingsu.apk', image_factory=qrcode.image.svg.SvgPathImage, box_size=8, border=4).save(out)
+    return out.getvalue()
 
 @app.get("/", response_class=HTMLResponse)
 def root_dashboard():
@@ -3350,11 +3359,11 @@ def about_page():
 
 @app.get('/robots.txt')
 def robots():
-    return Response('User-agent: *\nDisallow: /api/\nDisallow: /u/\nDisallow: /uploads/\nDisallow: /ops/\nDisallow: /admin/\nDisallow: /auth/\nDisallow: /items/\nSitemap: https://scientificexploration.art/sitemap.xml\n', media_type='text/plain')
+    return Response('User-agent: *\nDisallow: /api/\nDisallow: /u/\nDisallow: /uploads/\nDisallow: /ops/\nDisallow: /admin/\nDisallow: /auth/\nDisallow: /items/\nSitemap: '+SITE_BASE+'/sitemap.xml\n', media_type='text/plain')
 
 @app.get('/sitemap.xml')
 def sitemap():
-    return Response('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://scientificexploration.art/about</loc></url></urlset>', media_type='application/xml')
+    return Response('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>'+html_escape(SITE_BASE)+'/about</loc></url></urlset>', media_type='application/xml')
 
 @app.get("/u/{username}", response_class=HTMLResponse)
 def public_user_dashboard(username: str, k: Optional[str] = None, request: Request = None):

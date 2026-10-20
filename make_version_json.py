@@ -142,7 +142,7 @@ def main():
         # 默认策略就是"只许最新版"；要放行旧版得在服务器上放一个 min_build 文件踩刹车，
         # 这样"忘了抬门"不会变成静默失效。
         "min_version_code": code,
-        "apk_url": "https://scientificexploration.art/qingsu.apk",
+        "apk_url": "https://124.220.54.64/qingsu.apk",
         "size": len(blob),
         "md5": hashlib.md5(blob).hexdigest(),
         "sha256": hashlib.sha256(blob).hexdigest(),

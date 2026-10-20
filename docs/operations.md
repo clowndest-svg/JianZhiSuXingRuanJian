@@ -40,7 +40,7 @@
 
 ## TLS
 
-r161 正式域名为 `scientificexploration.art`，`www` 经 HTTPS 308 跳转主域名；IP 的独立证书和升级清单继续保留。使用 `python3 scripts/enable-domain.py` 申请含主域名与www的证书并切换代理，失败保留原配置。域名证书位于 `/etc/letsencrypt/live/scientificexploration.art/`，与 IP 证书共同由现有续期 timer 管理；部署钩子重载 TLS 容器。迁移后监控优先检查域名。
+r161 预留域名为 `scientificexploration.art`，当前受腾讯云备案校验拦截，继续使用 HTTPS IP 入口。备案/腾讯云接入通过后，使用 `python3 scripts/enable-domain.py` 申请含主域名与www的证书并切换代理，失败保留原配置。成功后www经HTTPS 308跳转主域名，并将验证通过的入口写入 `/opt/qingsu/site-base`；服务的分享链接、下载二维码、运维监控与后续部署沿用它。域名证书位于 `/etc/letsencrypt/live/scientificexploration.art/`，与 IP 证书共同由现有续期 timer 管理；部署钩子重载 TLS 容器。IP独立证书和旧客户端升级清单继续保留。
 
 ### 浏览器消息提醒
 

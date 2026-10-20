@@ -6,3 +6,4 @@ Pillow==12.3.0
 redis==5.2.1
 websockets==17.2
 pywebpush==2.5.0
+qrcode==8.2

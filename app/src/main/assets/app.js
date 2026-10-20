@@ -4,7 +4,7 @@
 // ==========================================
 
 const API_BASE = window.AndroidBridge && window.AndroidBridge.getApiBase ? window.AndroidBridge.getApiBase() : window.location.protocol.startsWith("http") && window.location.hostname !== "appassets.androidplatform.net"
-    ? window.location.origin+(window.__API_PATH__||'') : "https://scientificexploration.art";
+    ? window.location.origin+(window.__API_PATH__||'') : "https://124.220.54.64";
 
 const TOKEN_KEY = "QINGSU_AUTH_TOKEN";
 const USER_KEY = "QINGSU_AUTH_USER";
