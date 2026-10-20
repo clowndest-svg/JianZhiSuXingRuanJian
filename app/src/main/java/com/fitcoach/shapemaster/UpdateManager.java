@@ -7,6 +7,8 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.TypedValue;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import org.json.JSONObject;
@@ -121,12 +123,17 @@ public final class UpdateManager {
                 || !"124.220.54.64".equals(downloadUri.getHost())) return;
         String mb = size > 0 ? String.format(java.util.Locale.CHINA, "%.1f MB", size / 1048576.0) : "未知大小";
         final int r = remote;
+        TextView body = new TextView(act);
+        body.setText(UpdateCopy.body(mine, r, mb, notes));
+        body.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f);
+        body.setTextColor(0xFF0F172A);
+        float density = act.getResources().getDisplayMetrics().density;
+        body.setLineSpacing(6f * density, 1.08f);
+        body.setPadding((int) (24 * density), (int) (10 * density),
+                (int) (24 * density), (int) (6 * density));
         new android.app.AlertDialog.Builder(act)
                 .setTitle("发现新版本 " + (name.isEmpty() ? r : name))
-                .setMessage("你现在的是 " + mine + "，线上是 " + r + "。安装包约 " + mb
-                        + "，服务器带宽实测约 0.33 MB/s，下载可能要几分钟。\n\n"
-                        + (notes.isEmpty() ? "" : "更新内容：" + notes)
-                        + "\n\n点下载会交给系统浏览器，安装仍要你自己在设置里放行。")
+                .setView(body)
                 .setPositiveButton("去下载", (d, w) -> {
                     try {
                         Intent it = new Intent(Intent.ACTION_VIEW, Uri.parse(url));

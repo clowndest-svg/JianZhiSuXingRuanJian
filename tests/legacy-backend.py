@@ -2398,6 +2398,14 @@ def main():
     check("窄屏评论占位文案不再被截断",
           '"友善一点，好好说话"' in _fjs and len("友善一点，好好说话") <= 10, "")
     # ---- r157：私聊图片/视频/表情 ----
+    def _repo_file(rel):
+        """仓库里的文件也要跟着 --mutant 走：磁盘直读会让旧版反样本永远绿，
+        等于判据从来没被标定过（r157 的 nginx 那条一开始就栽在这）。"""
+        if not mutant:
+            return io.open(os.path.join(ROOT, *rel.split("/")), encoding="utf-8").read()
+        r = subprocess.run(["git", "show", MUT_REF + ":" + rel], cwd=ROOT, capture_output=True)
+        return r.stdout.decode("utf-8") if r.returncode == 0 else ""
+
     check("私信消息表能区分文字/表情/图片/视频",
           '("kind", "TEXT NOT NULL DEFAULT \'text\'")' in srv_txt
           and '("media_name", "TEXT NOT NULL DEFAULT \'\'")' in srv_txt, "")
@@ -2427,8 +2435,29 @@ def main():
           "dm-media-img" in _fjs and "dm-media-video" in _fjs and "dm-sticker" in _fjs
           and ".cm-bubble.media" in _fcss and ".cm-bubble .dm-sticker" in _fcss, "")
     check("nginx 上传上限容得下 30MB 视频",
-          "client_max_body_size 40m;" in io.open(os.path.join(ROOT, "scripts", "qingsu-tls.conf"),
-                                                   encoding="utf-8").read(), "")
+          "client_max_body_size 40m;" in _repo_file("scripts/qingsu-tls.conf"), "")
+    # ---- r158：更新弹窗排版与说明文字 ----
+    _vj = _repo_file("make_version_json.py")
+    check("更新说明去 Markdown 记号（弹窗里不许出现 ** 和反引号）",
+          'def _plain(' in _vj and 'text.replace("**", "").replace("`", "")' in _vj, "")
+    check("更新说明只取当前版，且不夹带验收/判据这些内部话",
+          'internal = ("消息存法", "判据", "验收方式"' in _vj
+          and "bullets = [b for b in bullets if not any(word in b for word in internal)]" in _vj, "")
+    _up = _repo_file("app/src/main/java/com/fitcoach/shapemaster/UpdateManager.java")
+    check("更新弹窗改用自定义正文（有行距与字号，不再是一坨默认小字）",
+          "setView(body)" in _up and "COMPLEX_UNIT_SP, 15f" in _up
+          and "setLineSpacing(" in _up, "")
+    check("更新弹窗不硬编没量过的下载速度",
+          "0.33 MB/s" not in _up and "UpdateCopy.body(" in _up, "")
+    check("弹窗文案抽成纯 Java 类，能脱离 Android 运行时真跑",
+          "class UpdateCopy" in _repo_file("app/src/main/java/com/fitcoach/shapemaster/UpdateCopy.java")
+          and os.path.isfile(os.path.join(ROOT, "tests", "test_update_copy.py")), "")
+    check("更新弹窗正文不重复标题里的版本号",
+          'matches("^r\\\\d+\\\\s*/.*")' in _repo_file("app/src/main/java/com/fitcoach/shapemaster/UpdateCopy.java"),
+          "")
+    check("更新弹窗不再用默认 setMessage 塞整段说明", ".setMessage(" not in _up, _up[:120])
+    check("更新说明按要点分行（一条一行，不是一整段）",
+          'parts.extend("• " + b for b in bullets' in _vj, "")
 
     bad = [r for r in RESULTS if not r[1]]
     print("\n=== %s：%d 条，绿 %d，红 %d ===" % (

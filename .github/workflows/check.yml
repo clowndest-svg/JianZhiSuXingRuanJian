@@ -83,6 +83,7 @@ jobs:
       - run: mkdir -p _audit_sandbox
       - run: python tests/test_integration.py
       - run: python tests/test_ai_contract.py
+      - run: python tests/test_update_copy.py
       - run: python tests/legacy-backend.py
       - run: node --check app/src/main/assets/app.js
       - run: node --check app/src/main/assets/features.js

@@ -56,31 +56,71 @@ def read_gradle_version():
     return int(code.group(1)), name.group(1)
 
 
-def latest_release_note():
-    """更新说明现读 CHANGELOG 最新一条。
+def _plain(text: str) -> str:
+    """把 CHANGELOG 里的 Markdown 记号去掉：弹窗是纯文本，`**` 和反引号会被原样印给用户。"""
+    text = text.replace("**", "").replace("`", "")
+    text = re.sub(r"[ \t]+", " ", text)
+    return text.strip()
 
-    以前这里是手写的一串字，换包时忘了改，手机上弹的"新版本说明"讲的就不是这一版。
+
+def latest_release_note():
+    """更新说明现读 CHANGELOG 最新一条，并且只留"给用户看的那部分"。
+
+    以前这里把整段原文塞进清单，结果更新弹窗里满屏 `**`、反引号，
+    还带着"验收方式""判据"这些工程内部话——用户不需要看这些。
     """
     text = io.open(os.path.join(ROOT, "CHANGELOG.md"), encoding="utf-8").read()
     NL = chr(10)
     lines = text.split(NL)
-    head = body = ""
+    start = None
     for i, line in enumerate(lines):
-        if line.startswith("## ") and not head:
-            head = line[3:].strip()
-            # 正文截到下一个 "## " 为止：CHANGELOG 里各节之间不一定有空行，
-            # 按空行切会把上一版的说明一起塞进更新弹窗。
-            rest = []
-            for later in lines[i + 1:]:
-                if later.startswith("## "):
-                    break
-                rest.append(later)
-            body = NL.join(rest).strip()
+        if line.startswith("## "):
+            start = i
             break
-    if not head or not body:
+    if start is None:
         raise SystemExit("CHANGELOG.md 里找不到最新版本条目，拒绝生成没有说明的版本清单")
-    note = head + "：" + body.replace(NL, " ")
-    return note[:600]
+    title = _plain(lines[start][3:])
+    section = []
+    for later in lines[start + 1:]:
+        if later.startswith("## "):
+            break
+        section.append(later)
+
+    summary = ""
+    bullets = []
+    index = 0
+    while index < len(section):
+        line = section[index].strip()
+        if line and not summary:
+            summary = _plain(line)
+        if line.startswith("- "):
+            piece = [line[2:]]
+            index += 1
+            while index < len(section):
+                nxt = section[index]
+                if not nxt.strip() or nxt.strip().startswith("- ") or nxt.strip().startswith("**"):
+                    break
+                piece.append(nxt.strip())
+                index += 1
+            bullets.append(_plain(" ".join(piece)))
+            continue
+        index += 1
+
+    # 工程内部话不进用户弹窗：表结构、网关配置、验收方式这些不是给机主看的
+    internal = ("消息存法", "判据", "验收方式", "nginx", "外键", "签名链接")
+    bullets = [b for b in bullets if not any(word in b for word in internal)]
+
+    parts = [title]
+    if summary:
+        parts.append(summary)
+    if bullets:
+        parts.append("")
+        parts.append("更新内容：")
+        parts.extend("• " + b for b in bullets[:6])
+    note = NL.join(parts).strip()
+    if len(note) > 600:
+        note = note[:600].rstrip() + "…"
+    return note
 
 def main():
     code, name = read_gradle_version()

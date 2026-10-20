@@ -18,6 +18,7 @@ python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements-dev.txt
 .venv/Scripts/python tests/test_integration.py
 .venv/Scripts/python tests/test_ai_contract.py
+.venv/Scripts/python tests/test_update_copy.py
 .venv/Scripts/python tests/legacy-backend.py
 node tests/legacy-frontend.mjs
 node tests/frontend-integration.mjs
