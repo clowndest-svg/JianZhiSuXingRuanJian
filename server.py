@@ -3946,9 +3946,20 @@ def create_post(req: PostReq, request: Request, user: dict = Depends(get_current
                 return {"code": 0, "duplicate": True, "post": _post_card(conn, row, user)}
         stamp = _now()
         region = region_for(_ip(request))
-        cur = conn.execute("INSERT INTO posts(user_id,title,body,images,region,request_id,created_at)"
-                           " VALUES (?,?,?,?,?,?,?)",
-                           (user["id"], title, body, community.images_json(images), region, key, stamp))
+        try:
+            cur = conn.execute("INSERT INTO posts(user_id,title,body,images,region,request_id,created_at)"
+                               " VALUES (?,?,?,?,?,?,?)",
+                               (user["id"], title, body, community.images_json(images), region, key, stamp))
+        except sqlite3.IntegrityError:
+            # 双击或弱网重发时，两个请求会同时穿过上面那道 SELECT，UNIQUE(user_id,request_id)
+            # 把后到的那个顶回来。这不是错误，是"已经发过了"——回同一篇帖子，
+            # 而不是把 IntegrityError 甩成 500 让用户以为发帖失败。
+            conn.rollback()
+            row = conn.execute("SELECT * FROM posts WHERE user_id=? AND request_id=?",
+                               (user["id"], key)).fetchone() if key else None
+            if row:
+                return {"code": 0, "duplicate": True, "post": _post_card(conn, row, user)}
+            raise
         # 解析不出来的那一次不许把已有属地洗掉：走代理或换网络时属地说没就没了，
         # 用户看到的是"我明明有属地"，很难解释。帖子本身照实记空串。
         if region:
@@ -4241,10 +4252,20 @@ def create_comment(post_id: int, req: CommentReq, request: Request,
             if not parent:
                 raise HTTPException(status_code=400, detail="要回复的那条评论不在了")
         targets = _resolve_mentions(conn, body, req.mentions, user["id"])
-        cur = conn.execute("INSERT INTO comments(post_id,user_id,reply_to,body,images,region,request_id,created_at)"
-                           " VALUES (?,?,?,?,?,?,?,?)",
-                           (post_id, user["id"], req.reply_to, body, community.images_json(images),
-                            region, key, stamp))
+        try:
+            cur = conn.execute("INSERT INTO comments(post_id,user_id,reply_to,body,images,region,request_id,created_at)"
+                               " VALUES (?,?,?,?,?,?,?,?)",
+                               (post_id, user["id"], req.reply_to, body, community.images_json(images),
+                                region, key, stamp))
+        except sqlite3.IntegrityError:
+            # 同一条评论被双击：UNIQUE(user_id,request_id) 顶回后到的那个。
+            # 回 duplicate + 已有 id，不能 500——否则用户看到"评论失败"又去发一遍。
+            conn.rollback()
+            hit = conn.execute("SELECT id FROM comments WHERE user_id=? AND request_id=?",
+                               (user["id"], key)).fetchone() if key else None
+            if hit:
+                return {"code": 0, "duplicate": True, "comment": {"id": int(hit["id"])}}
+            raise
         conn.execute("UPDATE posts SET comment_count = comment_count + 1 WHERE id=?", (post_id,))
         # 界面上写的是"发一次帖子或评论就会带上属地"，评论这条也得真的落库才算话
         if region:
@@ -4657,10 +4678,20 @@ def _deliver(conn, sender, to_id, body, request_id, kind="text", media_name=""):
             return _message_dict(hit), True
     ck = chat.conv_key(sender["id"], to_id)
     stamp = _now()
-    cur = conn.execute(
-        "INSERT INTO messages(conv_key,from_id,to_id,body,request_id,created_at,kind,media_name,"
-        "media_mime,media_size,media_w,media_h) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        (ck, sender["id"], to_id, body, key, stamp, kind, media_name, mime, size, width, height))
+    try:
+        cur = conn.execute(
+            "INSERT INTO messages(conv_key,from_id,to_id,body,request_id,created_at,kind,media_name,"
+            "media_mime,media_size,media_w,media_h) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (ck, sender["id"], to_id, body, key, stamp, kind, media_name, mime, size, width, height))
+    except sqlite3.IntegrityError:
+        # WS 和 HTTP 兜底可能同时投同一条：UNIQUE(from_id,request_id) 顶回后到的那个。
+        # 回到"已存在"这条路，别让用户看到一条发送失败的红字。
+        conn.rollback()
+        hit = conn.execute("SELECT * FROM messages WHERE from_id=? AND request_id=?",
+                           (sender["id"], key)).fetchone() if key else None
+        if hit:
+            return _message_dict(hit), True
+        raise
     lo, hi = ck.split(chat.CONV_SEP)
     conn.execute("INSERT OR IGNORE INTO conversations(conv_key,a_id,b_id,created_at) VALUES (?,?,?,?)",
                  (ck, int(lo), int(hi), stamp))

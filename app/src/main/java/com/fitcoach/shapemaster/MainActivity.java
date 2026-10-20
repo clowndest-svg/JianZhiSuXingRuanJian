@@ -19,6 +19,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
+import android.webkit.WebResourceError;
 import androidx.webkit.WebViewAssetLoader;
 import android.widget.Toast;
 
@@ -112,6 +113,17 @@ public class MainActivity extends Activity {
                     try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); } catch (Exception ignored) { }
                 }
                 return true;
+            }
+            // 断网时 WebView 会自己画一张"网页无法打开"，同样把内置页地址（appassets…）当标题写出来。
+            // 换成应用自己的离线页：说人话、给重试，也不把内部地址露给用户。
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                if (request == null || !request.isForMainFrame()) return;
+                String failed = String.valueOf(request.getUrl());
+                // 离线页自己都加载失败时别再套娃，否则会无限重定向
+                if (failed.contains("/assets/offline.html")) return;
+                view.loadUrl("https://appassets.androidplatform.net/assets/offline.html?retry="
+                        + Uri.encode(failed));
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {

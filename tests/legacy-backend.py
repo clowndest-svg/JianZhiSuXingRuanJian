@@ -625,6 +625,17 @@ def main():
     check("不回退到系统那套带网址的弹窗",
           "super.onJsPrompt" not in act and "super.onJsAlert" not in act
           and "super.onJsConfirm" not in act, "")
+    # 断网错误页同理：系统那张「网页无法打开」也把 appassets 地址写在标题上
+    off = os.path.join(ROOT, "app", "src", "main", "assets", "offline.html")
+    check("离线页真的在包里", os.path.exists(off), off)
+    if os.path.exists(off):
+        off_txt = io.open(off, encoding="utf-8").read()
+        check("离线页不写内部地址", "appassets" not in off_txt and "androidplatform" not in off_txt, "")
+        check("离线页给得出重试", 'id="retry"' in off_txt and "location.replace" in off_txt, "")
+    check("接管加载失败并换成离线页",
+          "onReceivedError(WebView view, WebResourceRequest request" in act
+          and "/assets/offline.html?retry=" in act, "")
+    check("离线页自己失败时不套娃", 'contains("/assets/offline.html")' in act, "")
     mf = io.open(os.path.join(ROOT, "app", "src", "main", "AndroidManifest.xml"), encoding="utf-8").read()
     for perm in ("ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"):
         check("清单声明了 " + perm, perm in mf, perm)
