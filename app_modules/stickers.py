@@ -38,6 +38,8 @@ CACHE_LIMIT = 128
 OPENMOJI_BASE = "https://raw.githubusercontent.com/hfg-gmuend/openmoji/17.0.0/"
 OPENMOJI_CATALOG = OPENMOJI_BASE + "data/openmoji.json"
 _openmoji = (0, ())
+MEME_API = 'https://api.memegen.link/templates'
+_memes = (0, ())
 
 _MEDIA_HOSTS = frozenset(("upload.wikimedia.org", "thumb.wikimedia.org"))
 _RASTER_MIMES = frozenset((
@@ -98,6 +100,11 @@ def _https_parts(url, hosts):
 
 def _media_url(url):
     """Exact hosts/path, HTTPS:443, no userinfo; remove all tracking queries."""
+    if isinstance(url, str) and url.startswith('https://api.memegen.link/'):
+        parts = _https_parts(url, frozenset(('api.memegen.link',)))
+        if not re.fullmatch(r'/images/[a-z0-9-]{1,64}\.jpg', parts.path):
+            raise InvalidSticker()
+        return urlunsplit(('https', parts.hostname, parts.path, '', ''))
     if isinstance(url, str) and url.startswith(OPENMOJI_BASE):
         parts = _https_parts(url, frozenset(('raw.githubusercontent.com',)))
         if not re.fullmatch(r'/hfg-gmuend/openmoji/17\.0\.0/color/72x72/[A-F0-9]+(?:-[A-F0-9]+)*\.png', parts.path):
@@ -121,9 +128,9 @@ def _read_url(url, limit, *, image=False, opener=None):
     if image:
         url = _media_url(url)
     else:
-        parts = _https_parts(url, frozenset(("commons.wikimedia.org", "raw.githubusercontent.com")))
+        parts = _https_parts(url, frozenset(("commons.wikimedia.org", "raw.githubusercontent.com", 'api.memegen.link')))
         if not ((parts.hostname == 'commons.wikimedia.org' and parts.path == '/w/api.php')
-                or url == OPENMOJI_CATALOG):
+                or url in (OPENMOJI_CATALOG, MEME_API)):
             raise InvalidSticker()
     response = None
     deadline = time.monotonic() + TIMEOUT
@@ -433,6 +440,14 @@ def search_commons(q, uid, secret, *, opener=None):
 
 def import_media(id, uid, secret, *, opener=None):
     """Verify a user-bound ID, re-fetch its current licence/URL, then download."""
+    if isinstance(id, str) and id.startswith('mg.'):
+        key = hmac.digest(_identity(uid, secret), b'memegen-v1', 'sha256')
+        wanted = _verify(id[3:], uid, key)
+        record = next((r for r in _meme_records(opener) if _meme_id(r['slug']) == wanted), None)
+        if record is None:
+            raise InvalidSticker()
+        blob = _read_url(record['preview_url'], MEDIA_LIMIT, image=True, opener=opener)
+        return blob, {f: record[f] for f in ('title', 'source_url', 'license', 'author')}
     if isinstance(id, str) and id.startswith('om.'):
         key = hmac.digest(_identity(uid, secret), b'openmoji-v1', 'sha256')
         index = _verify(id[3:], uid, key) - 1
@@ -486,6 +501,21 @@ def _openmoji_records(opener=None):
 
 
 def search(q, uid, secret, *, opener=None, provider='openmoji'):
+    if provider == 'memegen':
+        key = hmac.digest(_identity(uid, secret), b'memegen-v1', 'sha256')
+        _search_terms(q)  # shared input limits/control-character validation
+        aliases = {'梗图':'', '热门':'', '全部':'', '猫咪':'cat', '狗狗':'dog', '猫':'cat', '狗':'dog',
+            '疑惑':'confused', '困惑':'confused', '黑人问号':'confused', '德雷克':'drake',
+            '拒绝':'drake', '分心':'distracted', '女友':'distracted', '外星人':'aliens',
+            '吃瓜':'popcorn', '成功':'success', '生气':'angry', '无语':'really', '失败':'fail'}
+        terms = q.lower().strip()
+        for word in sorted(aliases, key=len, reverse=True):
+            terms = terms.replace(word, ' ' + aliases[word] + ' ')
+        words = terms.split()
+        items = [dict(id='mg.' + _sign(_meme_id(r['slug']), uid, key),
+            **{f:r[f] for f in ('title', 'source_url', 'license', 'author', 'preview_url')})
+            for r in _meme_records(opener) if all(w in r['terms'] for w in words)][:RESULT_LIMIT]
+        return {'items':items, 'provider':'Memegen 网络梗图模板'}
     if provider == 'commons':
         return dict(search_commons(q, uid, secret, opener=opener), provider='Wikimedia Commons')
     if provider != 'openmoji':
@@ -500,3 +530,48 @@ def search(q, uid, secret, *, opener=None, provider='openmoji'):
             if len(out) >= RESULT_LIMIT:
                 break
     return {'items': out, 'provider': 'OpenMoji'}
+
+
+def _meme_id(slug):
+    return (int.from_bytes(hashlib.sha256(slug.encode()).digest()[:8], 'big') & (2 ** 63 - 1)) or 1
+
+
+def _meme_records(opener=None):
+    global _memes
+    with _cache_lock:
+        until, records = _memes
+    if until > time.monotonic():
+        return records
+    raw = _read_url(MEME_API, API_LIMIT, opener=opener)
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, list) or len(data) > 1000:
+            raise ValueError()
+        records = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            slug = item.get('id', '')
+            if not isinstance(slug, str) or not re.fullmatch(r'[a-z0-9-]{1,64}', slug):
+                continue
+            try:
+                image = _media_url(item.get('blank'))
+            except InvalidSticker:
+                continue
+            if image != 'https://api.memegen.link/images/' + slug + '.jpg':
+                continue
+            source = str(item.get('source') or '').replace('http://knowyourmeme.com/', 'https://knowyourmeme.com/')
+            if not source.startswith('https://knowyourmeme.com/memes/') or re.search(r'[\x00-\x20<>"\\]', source):
+                source = 'https://github.com/jacebrowning/memegen/tree/main/templates/' + slug
+            records.append(dict(slug=slug, title=_plain(item.get('name'), 200),
+                preview_url=image, source_url=source, author='原图作者见来源',
+                license='原图许可未声明，请查看来源',
+                terms=' '.join((slug, str(item.get('name', '')), str(item.get('keywords', [])))).lower()))
+        if not records:
+            raise ValueError()
+        records = tuple(records)
+    except (ValueError, TypeError, AttributeError, InvalidSticker):
+        raise ProviderUnavailable() from None
+    with _cache_lock:
+        _memes = (time.monotonic() + 300, records)
+    return records

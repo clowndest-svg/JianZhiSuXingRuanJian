@@ -164,6 +164,24 @@ class ChatMedia(unittest.TestCase):
 
 
 class ProviderSecurity(unittest.TestCase):
+    def test_meme_catalog_search_import_and_source_boundaries(self):
+        catalog = json.dumps([{'id':'cat','name':'Classic Cat','blank':'https://api.memegen.link/images/cat.jpg',
+            'keywords':['cat'],'source':'http://knowyourmeme.com/memes/cat'}]).encode()
+        image=io.BytesIO();Image.new('RGB',(10,10)).save(image,format='JPEG')
+        def opener(request,timeout):
+            url=request.full_url;r=io.BytesIO(catalog if url==stickers.MEME_API else image.getvalue())
+            r.headers={'Content-Type':'application/json' if url==stickers.MEME_API else 'image/jpeg'}
+            r.getcode=lambda:200;r.geturl=lambda:url;return r
+        with patch.object(stickers,'_memes',(0,())):
+            result=stickers.search('猫',1,b'key',provider='memegen',opener=opener)
+            self.assertEqual(len(result['items']),1)
+            token=result['items'][0]['id'];blob,meta=stickers.import_media(token,1,b'key',opener=opener)
+            self.assertEqual(blob,image.getvalue());self.assertIn('未声明',meta['license'])
+            self.assertTrue(meta['source_url'].startswith('https://knowyourmeme.com/'))
+            with self.assertRaises(stickers.InvalidSticker):stickers.import_media(token,2,b'key',opener=opener)
+        for url in ['https://api.memegen.link/images/../../secret.jpg','https://api.memegen.link.evil.test/images/cat.jpg','https://api.memegen.link/images/cat.jpg/extra']:
+            with self.assertRaises(stickers.InvalidSticker):stickers._media_url(url)
+
     def test_openmoji_catalog_import_and_user_binding(self):
         catalog = json.dumps([{'hexcode': '1F600', 'annotation': 'grinning face', 'tags': 'happy smile', 'openmoji_author': 'Test artist'}]).encode()
         image = io.BytesIO(); Image.new('RGB', (10, 10)).save(image, format='PNG')

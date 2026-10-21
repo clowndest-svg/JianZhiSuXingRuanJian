@@ -92,6 +92,13 @@ try:
         status, sent = api('/api/chat/send', dict(to=b['id'], kind='sticker', media_name=up['name']), a['token'])
         assert status == 200 and sent['message']['sticker_meta']['license'] == 'CC BY-SA 4.0'
         checks.append('LIVE OpenMoji search/import/send with attribution')
+        status, result = api('/api/chat/stickers/search?provider=memegen&q=cat', token=a['token'])
+        assert status == 200 and result['available'] and result['items'], (status, result)
+        status, up = api('/api/chat/stickers/import', dict(id=result['items'][0]['id']), a['token'])
+        assert status == 200, (status, up)
+        status, sent = api('/api/chat/send', dict(to=b['id'], kind='sticker', media_name=up['name']), a['token'])
+        assert status == 200 and sent['message']['sticker_meta']['source_url']
+        checks.append('LIVE Memegen meme search/import/send with original source')
     print(json.dumps({'passed': checks, 'build': build}, ensure_ascii=False))
 finally:
     conn = sqlite3.connect(db_path)

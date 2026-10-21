@@ -2045,7 +2045,7 @@ function dmFootHTML() {
         + [['official','轻小团'],['emoji','普通表情'],['network','网络表情'],['local','本地表情']].map(t => '<button type="button" role="tab" id="dm-tab-' + t[0]
             + '" aria-controls="dm-sticker-content" aria-selected="' + (t[0] === 'official') + '" onclick="dmSelectStickerTab(\'' + t[0] + '\')">' + t[1] + '</button>').join('')
         + '</div><form class="dm-sticker-search" id="dm-sticker-search" onsubmit="event.preventDefault();dmSearchStickers()">'
-        + '<select id="dm-provider" aria-label="网络表情来源" hidden onchange="dmUi.searchSeq++;dmUi.results=[]"><option value="openmoji">OpenMoji</option><option value="commons">Commons</option></select>'
+        + '<select id="dm-provider" aria-label="网络表情来源" hidden onchange="dmUi.searchSeq++;dmUi.results=[]"><option value="memegen">网络梗图</option><option value="openmoji">OpenMoji</option><option value="commons">Commons</option></select>'
         + '<input id="dm-sticker-query" type="search" maxlength="60" aria-label="搜索表情" placeholder="搜名称、拼音或关键词" oninput="dmFilterOfficial()">'
         + '<button type="submit">搜索</button></form><div id="dm-sticker-content" role="tabpanel" aria-labelledby="dm-tab-official">'
         + '<p class="dm-panel-note" role="status">正在读取轻小团…</p></div></section>'
@@ -2115,7 +2115,7 @@ function dmFilterOfficial() {
 function dmSelectStickerTab(tab) {
     if (!["official", "emoji", "network", "local"].includes(tab)) return;
     dmUi.tab = tab; dmUi.searchSeq++; dmUi.results = []; dmUi.query = "";
-    const input = cmEl("dm-sticker-query"); if (input) { input.value = ""; input.placeholder = tab === "network" ? "输入关键词，手动搜索 Commons" : "搜名称、拼音或关键词"; }
+    const input = cmEl("dm-sticker-query"); if (input) { input.value = ""; input.placeholder = tab === "network" ? "搜梗图名称、猫、狗，或输入“梗图”看热门" : "搜名称、拼音或关键词"; }
     const form = cmEl("dm-sticker-search"); if (form) form.hidden = tab === "local" || tab === "emoji";
     const providerPicker = cmEl('dm-provider'); if (providerPicker) providerPicker.hidden = tab !== 'network';
     ["official", "emoji", "network", "local"].forEach(k => cmEl("dm-tab-" + k)?.setAttribute("aria-selected", String(k === tab)));
@@ -2128,7 +2128,7 @@ function dmSelectStickerTab(tab) {
         return;
     }
     host.innerHTML = tab === "network"
-        ? '<p class="dm-panel-note">搜索 OpenMoji 或 Commons 公开表情素材，选择后预览，确认发送时才转存。不是全网梗图搜索。</p><p class="dm-panel-note" role="status">输入关键词后点搜索。</p>'
+        ? '<p class="dm-panel-note">网络梗图来自 Memegen 模板库，可切换 OpenMoji 表情或 Commons。选择后预览，确认发送才转存；素材许可见原始来源。不是全网图片搜索。</p><p class="dm-panel-note" role="status">输入关键词后点搜索。</p>'
         : '<div class="dm-local-sticker"><button type="button" onclick="document.getElementById(\'dm-sticker-file\').click()">选择本地表情</button><p class="dm-panel-note">GIF、PNG、WEBP 或 JPEG；只上传你有权使用的图片。不需要互关。</p></div>';
 }
 function dmExternalURL(value) {

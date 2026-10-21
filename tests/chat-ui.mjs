@@ -100,6 +100,12 @@ try {
     const sent=await api('/api/chat/send',{to:bid,kind:'sticker',media_name:up.name,request_id:'ui-live-network'},a.token);
     assert.equal(sent.message.sticker_meta.license,'CC BY-SA 4.0');
     checks.push('LIVE OpenMoji Chinese search, remote PNG import, attributed message persisted');
+    const memes=await api('/api/chat/stickers/search?provider=memegen&q='+encodeURIComponent('梗图'),null,a.token);
+    assert.ok(memes.items.length>0);assert.match(memes.provider,/Memegen/);
+    const meme=await api('/api/chat/stickers/import',{id:memes.items[0].id},a.token);
+    const delivered=await api('/api/chat/send',{to:bid,kind:'sticker',media_name:meme.name,request_id:'ui-live-meme'},a.token);
+    assert.match(delivered.message.sticker_meta.license,/未声明/);
+    checks.push('LIVE network meme catalog search/import/send with original source');
   }
   await page.evaluate(()=>dmCleanup());
   assert.equal(await page.evaluate(()=>dmUi.record===null&&dmUi.draft===null),true);
@@ -109,6 +115,10 @@ try {
   assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(folder,'result.json'),JSON.stringify({checks,errors},null,2));
   console.log(JSON.stringify({folder,checks,errors},null,2));
+} catch (error) {
+  const page=browser?.contexts()[0]?.pages()[0];
+  if(page)await page.screenshot({path:path.join(folder,'failure.png')}).catch(()=>{});
+  throw error;
 } finally {
   if(browser)await browser.close();
   if(child.exitCode===null){child.kill();await new Promise(r=>child.once('exit',r));}log.end();
