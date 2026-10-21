@@ -1,0 +1,29 @@
+{
+  "release": "r39641027806",
+  "source_revision": "a0a384a7c90f8c092edae555ab46ae955d43e217",
+  "status": "ok",
+  "build": 57,
+  "version_name": "2.2.12",
+  "apk_sha256": "1622c98c47ec591484d7e6a3772c317d3a188d717a52cff0989f65df63f6eeb8",
+  "apk_size": 5451286,
+  "apk_certificate_sha256": "c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f",
+  "chat_turn": true,
+  "public": {
+    "build": 57,
+    "checks": [
+      "new-build registration requires an email code on production",
+      "profile weight update reaches the dashboard (140 -> 137.5)",
+      "avatar is cached as a data URL for an instant cold start",
+      "feed thumbnails: 65800B original vs 15485B thumb (24%)",
+      "quote reply shows and persists the original message",
+      "meme search paginates (page0 12 items, page1 12 items)",
+      "call page mute/minimize/restore and hangup on production"
+    ],
+    "thumb": {
+      "original": 65800,
+      "thumbnail": 15485
+    }
+  },
+  "rate_store": "redis",
+  "min_build_override": 0
+}

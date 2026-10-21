@@ -1,0 +1,19 @@
+{
+  "release": "r39641027806",
+  "source_revision": "a0a384a7c90f8c092edae555ab46ae955d43e217",
+  "backup": "/opt/qingsu/backups/release-20261022-011518",
+  "units": {
+    "qingsu": "active",
+    "qingsu-llama": "active",
+    "coturn": "active",
+    "qingsu-asr": "active",
+    "qingsu-qa": "inactive"
+  },
+  "counter_audit": {
+    "ok": true,
+    "drift": [],
+    "count": 0
+  },
+  "ci_incoming": "empty; tar archived at /opt/qingsu/ci-archive/r173-20261022",
+  "note": "两次部署在候选自检阶段被新版邮箱注册门拦下（自检脚本未带邮箱验证码），修复自检后第三次部署成功；站点未受影响。"
+}

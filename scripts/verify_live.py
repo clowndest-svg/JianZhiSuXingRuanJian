@@ -35,9 +35,15 @@ def new_code(email,purpose='register'):
     这样注册路径走的是真实的"邮箱验证码"校验，而不是绕过它。"""
     import sys
     from pathlib import Path
-    sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+    db=Path(os.environ.get('QINGSU_VERIFY_DB','/opt/qingsu/data/qingsu.db')).resolve()
+    for candidate in (Path(__file__).resolve().parents[1],db.parent.parent,Path('/opt/qingsu')):
+        if (candidate/'server.py').is_file():
+            sys.path.insert(0,str(candidate))
+            break
+    else:
+        raise SystemExit('server.py not found for code provisioning')
     import server as srv
-    conn=sqlite3.connect(os.environ.get('QINGSU_VERIFY_DB','/opt/qingsu/data/qingsu.db'))
+    conn=sqlite3.connect(str(db))
     try:
         conn.row_factory=sqlite3.Row
         return srv._issue_email_code(conn,email,purpose)

@@ -1,0 +1,13 @@
+{
+  "id": 39641027806,
+  "head_sha": "a0a384a7c90f8c092edae555ab46ae955d43e217",
+  "status": "completed",
+  "conclusion": "success",
+  "jobs": {
+    "android": "success",
+    "integration": "success",
+    "deploy": "success"
+  },
+  "signed_apk": "CI built and signed build 57",
+  "note": "run 1/2 的 deploy 在候选自检被邮箱注册门拦下（自检未带邮箱验证码），修复后 run 3 成功"
+}

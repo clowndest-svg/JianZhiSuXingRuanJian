@@ -48,9 +48,16 @@ def upload(path, blob, mime, token, target=None):
 def new_code(email, purpose='register'):
     """自检自己往目标库签发验证码：夹具不需要真的收信，注册仍走真实校验。"""
     import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    root = Path(__file__).resolve().parents[1]
+    db = Path(db_path).resolve()
+    for candidate in (root, db.parent.parent, Path('/opt/qingsu')):
+        if (candidate / 'server.py').is_file():
+            sys.path.insert(0, str(candidate))
+            break
+    else:
+        raise SystemExit('server.py not found for code provisioning')
     import server as srv
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(str(db))
     try:
         conn.row_factory = sqlite3.Row
         return srv._issue_email_code(conn, email, purpose)
