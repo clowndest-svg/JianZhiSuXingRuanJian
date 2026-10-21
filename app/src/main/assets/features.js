@@ -1974,13 +1974,13 @@ const DM_PHRASES = ["在呢", "哈哈哈哈", "晚点聊", "收到～", "好滴"
 
 const dmUi = { threadId: 0, generation: 0, panel: "", tab: "official", query: "",
     searchSeq: 0, results: [], busy: false, composing: false, record: null, draft: null, caret: [0, 0],
-    stickBottom: true };
+    stickBottom: true, voiceMode: false };
 const dmSearchCache = new Map();
 const dmHold = {pending:false,timer:0,held:false,released:false,cancelled:false,startY:0};
 const dmCall = {
     state: "idle", id: "", peer: null, role: "", pc: null, stream: null, audio: null,
     offer: null, pendingIce: [], localIce: [], timer: 0, ring: 0, timeout: 0,
-    startedAt: 0, muted: false, speaker: true, reason: "", endTimer: 0
+    startedAt: 0, muted: false, speaker: false, reason: "", endTimer: 0, minimized: false
 };
 const dmOfficial = { items: [], byId: new Map(), loaded: false, task: null };
 const DM_AUDIO_MAX = 5 * 1024 * 1024;
@@ -2065,15 +2065,18 @@ function dmFootHTML() {
     const tile = (label, action, media) => '<button type="button" class="dm-plus-tile"'
         + (media ? ' data-dm-mutual="1"' : '') + ' onclick="' + action + '">' + label + '</button>';
     return '<div class="dm-tools">'
-        + '<button type="button" class="dm-tool" id="dm-voice-btn" aria-label="按住说话，松开发送" aria-controls="dm-voice-panel" aria-expanded="false" onpointerdown="dmHoldDown(event)" onpointermove="dmHoldMove(event)" onpointerup="dmHoldUp(event)" onpointercancel="dmHoldCancel()" oncontextmenu="return false">'
-        + '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"/></svg></button>'
+        + '<button type="button" class="dm-tool" id="dm-mode-btn" aria-label="切换到语音输入" onclick="dmToggleInputMode()"></button>'
+        + '<div class="dm-input-slot">'
         + '<input id="dm-input" type="text" maxlength="' + CM_LIMITS.dm + '" placeholder="说点什么…" aria-label="私信内容"'
         + ' onfocus="dmInputFocus()" onselect="dmRememberCaret()" onkeyup="dmRememberCaret()" onclick="dmRememberCaret()" oninput="dmRememberCaret()" oncompositionstart="dmUi.composing=true" oncompositionend="dmUi.composing=false" onkeydown="dmInputKey(event)">'
+        + '<button type="button" class="dm-input-mic" id="dm-input-mic" aria-label="切换到语音输入" onclick="dmToggleInputMode()"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"/></svg></button>'
+        + '<button type="button" class="dm-hold-bar" id="dm-hold-bar" hidden aria-label="按住说话，松开发送" onpointerdown="dmHoldDown(event)" onpointermove="dmHoldMove(event)" onpointerup="dmHoldUp(event)" onpointercancel="dmHoldCancel()" oncontextmenu="return false">按住 说话</button>'
+        + '</div>'
         + '<button type="button" class="dm-tool" id="dm-emoji-btn" aria-label="表情面板" aria-controls="dm-emoji-panel" aria-expanded="false" onclick="toggleDmPanel(\'emoji\')">'
         + '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 14q4 5 8 0M8 8h.01M16 8h.01"/></svg></button>'
         + '<button type="button" class="dm-tool" id="dm-plus-btn" aria-label="更多功能" aria-controls="dm-plus-panel" aria-expanded="false" onclick="toggleDmPanel(\'plus\')">'
         + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16"/></svg></button>'
-        + '<button type="button" class="td-btn dm-send" onclick="sendDM()">发送</button></div>'
+        + '<button type="button" class="td-btn dm-send" id="dm-send-btn" onclick="sendDM()">发送</button></div>'
         + '<section class="dm-panel" id="dm-emoji-panel" aria-label="表情" hidden>'
         + '<div class="dm-sticker-tabs" role="tablist" aria-label="表情来源">'
         + [['official','轻小团'],['emoji','普通表情'],['network','网络表情'],['local','本地表情']].map(t => '<button type="button" role="tab" id="dm-tab-' + t[0]
@@ -2102,6 +2105,8 @@ function dmMountComposer() {
     if (dmUi.threadId !== uid || !cmEl("dm-input")) {
         dmCleanup(); dmUi.threadId = uid;
         qsSetFoot(dmFootHTML());
+        try { dmUi.voiceMode = localStorage.getItem('QINGSU_DM_INPUT_MODE') === 'voice'; } catch (e) { dmUi.voiceMode = false; }
+        dmPaintInputMode();
         const s = dmScope();
         dmLoadOfficial().then(() => { if (dmScopeAlive(s)) { dmPaintOfficial(); dmRenderBubbles(); } });
     }
@@ -2416,11 +2421,12 @@ function dmCancelRecording() {
         rec.chunks = []; rec.blob = null;
     }
     const panel = cmEl('dm-voice-panel'); if (panel) { panel.hidden = true; panel.innerHTML = ''; }
-    cmEl('dm-voice-btn')?.setAttribute('aria-expanded', 'false');
+    cmEl('dm-hold-bar')?.setAttribute('aria-expanded', 'false');
+    dmHoldPaint();
 }
 function dmPaintVoice(rec) {
     const panel = cmEl('dm-voice-panel'); if (!panel || dmUi.record !== rec) return;
-    panel.hidden = false; cmEl('dm-voice-btn')?.setAttribute('aria-expanded', 'true');
+    panel.hidden = false; cmEl('dm-hold-bar')?.setAttribute('aria-expanded', 'true');
     if (rec.status === 'preview') {
         panel.innerHTML = '<div class="dm-voice-head"><b>语音预览</b><span>' + rec.duration + ' 秒' + (rec.autoStopped ? ' · 已达 10 分钟上限' : '') + '</span></div>'
             + '<audio id="dm-voice-preview" src="' + escapeHtml(rec.url) + '" controls preload="metadata" aria-label="试听录制的语音"></audio>'
@@ -2477,8 +2483,10 @@ function dmHoldDown(event) {
         if (!dmHold.pending) return;
         if (dmHold.cancelled) { dmHold.pending = false; return; }
         dmHold.pending = false; dmHold.held = true;
+        dmHoldPaint();
         dmStartRecording(true);
     }, 220);
+    dmHoldPaint();
     if (event.cancelable) event.preventDefault();
 }
 function dmHoldMove(event) {
@@ -2486,17 +2494,19 @@ function dmHoldMove(event) {
     const cancel = event.clientY < dmHold.startY - 55;
     if (cancel && !dmHold.cancelled) { dmHold.cancelled = true; callNativeToast('松开会取消语音'); }
     else if (!cancel && dmHold.cancelled) dmHold.cancelled = false;
+    dmHoldPaint();
 }
 function dmHoldUp(event) {
     clearTimeout(dmHold.timer);
     if (dmHold.pending && !dmHold.held) {
         dmHold.pending = false;
-        if (dmHold.cancelled) { callNativeToast('已取消语音'); return; }
-        dmStartRecording();
+        if (dmHold.cancelled) { callNativeToast('已取消语音'); dmHoldPaint(); return; }
+        callNativeToast('按住说话，松开发送');
+        dmHoldPaint();
         return;
     }
     if (!dmHold.held) return;
-    dmHold.held = false; dmHold.released = true;
+    dmHold.held = false; dmHold.released = true; dmHoldPaint();
     const rec = dmUi.record;
     if (dmHold.cancelled) { dmCancelRecording(); callNativeToast('已取消语音'); return; }
     if (!rec) { callNativeToast('按住说话，松开发送'); return; }
@@ -2508,6 +2518,33 @@ function dmHoldUp(event) {
 function dmHoldCancel() {
     clearTimeout(dmHold.timer); dmHold.pending = false;
     if (dmHold.held) { dmHold.held = false; dmCancelRecording(); }
+    dmHoldPaint();
+}
+const DM_VOICE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"/></svg>';
+const DM_KEYBOARD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg>';
+function dmHoldPaint() {
+    const bar = cmEl('dm-hold-bar'); if (!bar) return;
+    bar.textContent = dmHold.held ? (dmHold.cancelled ? '松开 取消' : '松开 发送') : '按住 说话';
+    bar.classList.toggle('holding', dmHold.held && !dmHold.cancelled);
+    bar.classList.toggle('cancel', dmHold.held && dmHold.cancelled);
+}
+function dmPaintInputMode() {
+    const voice = !!dmUi.voiceMode;
+    const mode = cmEl('dm-mode-btn'), input = cmEl('dm-input'), mic = cmEl('dm-input-mic');
+    const bar = cmEl('dm-hold-bar'), send = cmEl('dm-send-btn');
+    if (mode) { mode.innerHTML = voice ? DM_KEYBOARD_ICON : DM_VOICE_ICON; mode.setAttribute('aria-label', voice ? '切换到文字输入' : '切换到语音输入'); }
+    if (input) input.hidden = voice;
+    if (mic) mic.hidden = voice;
+    if (bar) bar.hidden = !voice;
+    if (send) send.hidden = voice;
+    dmHoldPaint();
+}
+function dmToggleInputMode() {
+    dmUi.voiceMode = !dmUi.voiceMode;
+    try { localStorage.setItem('QINGSU_DM_INPUT_MODE', dmUi.voiceMode ? 'voice' : 'text'); } catch (e) {}
+    dmCancelRecording(); dmClosePanels(); dmPaintInputMode();
+    if (dmUi.voiceMode) dmBlurKeyboard();
+    else { dmInputFocus(); const input = cmEl('dm-input'); if (input) { input.focus(); dmScrollLatest(true); } }
 }
 async function dmStartRecording(hold) {
     if (!cm.thread) return;
@@ -2634,13 +2671,31 @@ function dmBubbleInner(m, kind, pending) {
     if (['image', 'video', 'audio', 'sticker'].includes(kind)) {
         const url = dmMediaURL(m.media_url), src = escapeHtml(url);
         if (!url) return '<span class="dm-media-wait">' + (pending ? '发送中…' : '附件暂不可用') + '</span>';
-        if (kind === 'audio') return '<div class="dm-audio"><span>语音 · ' + Number(m.duration || 0) + ' 秒</span><audio controls preload="metadata" src="' + src + '" aria-label="语音消息" onplay="dmExclusivePlayback(this)" oncontextmenu="event.stopPropagation();return true"></audio></div>';
+        if (kind === 'audio') return dmAudioBubble(m, src);
         if (kind === 'video') return '<video class="dm-media-video" src="' + src + '" controls playsinline preload="metadata" onplay="dmExclusivePlayback(this)" oncontextmenu="event.stopPropagation();return true"></video>';
         const meta = m.sticker_meta || {}, source = dmExternalURL(meta.source_url);
         return '<img class="' + (kind === 'sticker' ? 'dm-sticker-img' : 'dm-media-img') + '" src="' + src + '" alt="' + (kind === 'sticker' ? '图片表情' : '图片消息') + '" loading="lazy" onclick="viewPostImage(this.src)">'
             + ((source && !dmAttributionHidden(meta)) ? '<small class="dm-attribution"><a href="' + escapeHtml(source) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(meta.title || '来源') + '</a><br>' + escapeHtml(meta.author || '') + ' · ' + escapeHtml(meta.license || '') + '</small>' : '');
     }
     return escapeHtml(m.body || '');
+}
+function dmAudioBubble(m, src) {
+    const duration = Math.max(1, Number(m.duration || 0));
+    return '<div class="dm-audio-wx" role="button" tabindex="0" aria-label="播放 ' + duration + ' 秒语音" onclick="dmToggleAudio(this)">'
+        + '<span class="dm-audio-play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span>'
+        + '<span class="dm-audio-wave" aria-hidden="true"><i></i><i></i><i></i></span>'
+        + '<span class="dm-audio-time">' + duration + '"</span>'
+        + '<audio preload="metadata" src="' + src + '" style="display:none" onplay="dmAudioPlay(this)" onpause="dmAudioPause(this)" onended="dmAudioStop(this)" oncontextmenu="event.stopPropagation();return true"></audio>'
+        + '</div>';
+}
+function dmAudioBox(audio) { return audio && audio.closest ? audio.closest('.dm-audio-wx') : null; }
+function dmAudioPlay(audio) { const box = dmAudioBox(audio); if (box) box.classList.add('playing'); }
+function dmAudioPause(audio) { const box = dmAudioBox(audio); if (box) box.classList.remove('playing'); }
+function dmAudioStop(audio) { dmAudioPause(audio); }
+function dmToggleAudio(box) {
+    const audio = box && box.querySelector('audio'); if (!audio) return;
+    if (audio.paused) audio.play().catch(() => callNativeToast('语音播放失败，请重试'));
+    else audio.pause();
 }
 function dmExclusivePlayback(active) {
     document.querySelectorAll('#thread-bubbles audio,#thread-bubbles video').forEach(el => { if (el !== active) el.pause(); });
@@ -2910,51 +2965,110 @@ function dmCallLayer() {
 }
 function dmCallPaintControls() {
     const mute = cmEl("dm-call-mute");
-    if (mute) mute.textContent = dmCall.muted ? "取消静音" : "静音";
+    if (mute) { mute.classList.toggle("active", dmCall.muted); mute.setAttribute("aria-pressed", String(dmCall.muted)); }
     const speaker = cmEl("dm-call-speaker");
-    if (speaker) speaker.textContent = dmCall.speaker ? "听筒" : "扬声器";
+    if (speaker) { speaker.classList.toggle("active", dmCall.speaker); speaker.setAttribute("aria-pressed", String(dmCall.speaker)); }
+}
+function dmCallTimeText() {
+    if (!dmCall.startedAt) return "0:00";
+    const seconds = Math.max(0, Math.floor((Date.now() - dmCall.startedAt) / 1000));
+    return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
 }
 function dmCallTick() {
-    if (!dmCall.startedAt) return;
-    const seconds = Math.max(0, Math.floor((Date.now() - dmCall.startedAt) / 1000));
-    cmText("dm-call-timer", Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0"));
+    const text = dmCallTimeText();
+    cmText("dm-call-timer", text);
+    cmText("dm-call-mini-time", text);
+}
+function dmCallMiniRender() {
+    let mini = cmEl("dm-call-mini");
+    if (!mini) {
+        mini = document.createElement("div");
+        mini.id = "dm-call-mini";
+        mini.className = "dm-call-mini";
+        document.body.appendChild(mini);
+    }
+    mini.hidden = false;
+    mini.innerHTML = '<button type="button" class="dm-call-mini-main" id="dm-call-mini-main" onclick="dmCallRestore()">'
+        + '<span class="dm-call-mini-dot" aria-hidden="true"></span><b>' + escapeHtml(dmCallName(dmCall.peer)) + '</b>'
+        + '<span id="dm-call-mini-time">' + dmCallTimeText() + '</span></button>'
+        + '<button type="button" class="dm-call-mini-hang" onclick="dmEndCall()">挂断</button>';
+}
+function dmCallMiniHide() {
+    const mini = cmEl("dm-call-mini");
+    if (mini) { mini.hidden = true; mini.innerHTML = ""; }
+}
+function dmCallMinimize() {
+    if (!["connecting", "active"].includes(dmCall.state)) return;
+    dmCall.minimized = true;
+    dmCallRender();
+}
+function dmCallRestore() {
+    dmCall.minimized = false;
+    dmCallRender();
+    if (dmCall.state === "active") { dmCallPaintControls(); dmCallTick(); }
+}
+function dmCallPeerTop(name, kicker, sub) {
+    return '<div class="dm-call-top"><div class="dm-call-avatar"><span class="cm-avatar">' + cmAvatarInner(dmCall.peer || {}) + '</span></div>'
+        + '<h2>' + name + '</h2><p class="dm-call-kicker">' + kicker + '</p>'
+        + (sub ? '<p class="dm-call-sub">' + sub + '</p>' : '') + '</div>';
+}
+function dmCallRound(id, cls, label, icon, action, active) {
+    return '<button type="button"' + (id ? ' id="' + id + '"' : '') + ' class="dm-call-round ' + cls + (active ? ' active' : '') + '"'
+        + (id ? ' aria-pressed="' + (active ? 'true' : 'false') + '"' : '') + ' onclick="' + action + '">' + icon + '<span>' + label + '</span></button>';
 }
 function dmCallRender() {
     const layer = dmCallLayer();
     if (dmCall.state === "idle") {
         layer.hidden = true;
         layer.innerHTML = "";
+        dmCallMiniHide();
         return;
     }
+    if (dmCall.minimized && ["connecting", "active"].includes(dmCall.state)) {
+        layer.hidden = true;
+        layer.innerHTML = "";
+        dmCallMiniRender();
+        return;
+    }
+    dmCallMiniHide();
     layer.hidden = false;
     const peer = dmCall.peer || {};
     const name = escapeHtml(dmCallName(peer));
-    const avatar = '<div class="dm-call-avatar">' + cmAvatarInner(peer) + "</div>";
+    const hangIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15c4-3 8-3 12 0l1.5 1.5-2.5 3-2.5-1.5c-1.7.5-3.3.5-5 0L7 19.5l-2.5-3z"/></svg>';
+    const acceptIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg>';
+    const muteIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"/></svg>';
+    const speakerIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h3l4 4V5L7 9zM15 9a4 4 0 0 1 0 6M17.5 6.5a7 7 0 0 1 0 11"/></svg>';
     let body = "";
     if (dmCall.state === "incoming") {
-        body = '<p class="dm-call-kicker">语音通话邀请</p><h2>' + name + '</h2><p class="dm-call-sub">邀请你语音通话</p>'
-            + '<div class="dm-call-actions"><button type="button" class="dm-call-btn-reject" onclick="dmRejectCall()">拒绝</button>'
-            + '<button type="button" class="dm-call-btn-accept" onclick="dmAcceptCall()">接听</button></div>';
+        body = dmCallPeerTop(name, "语音通话邀请", "邀请你语音通话")
+            + '<div class="dm-call-page-actions">'
+            + dmCallRound("", "reject dm-call-btn-reject", "拒绝", hangIcon, "dmRejectCall()")
+            + dmCallRound("", "accept dm-call-btn-accept", "接听", acceptIcon, "dmAcceptCall()")
+            + '</div>';
     } else if (dmCall.state === "outgoing") {
-        body = '<p class="dm-call-kicker">正在呼叫</p><h2>' + name + '</h2><p class="dm-call-sub">等待对方接听…</p>'
-            + '<div class="dm-call-actions"><button type="button" class="dm-call-btn-hang" onclick="dmCancelCall()">取消</button></div>';
+        body = dmCallPeerTop(name, "正在呼叫", "等待对方接听…")
+            + '<div class="dm-call-page-actions">'
+            + dmCallRound("", "hang dm-call-btn-hang", "取消", hangIcon, "dmCancelCall()") + '</div>';
     } else if (dmCall.state === "connecting") {
-        body = '<p class="dm-call-kicker">语音通话</p><h2>' + name + '</h2><p class="dm-call-sub">正在连接…</p>'
-            + '<div class="dm-call-actions"><button type="button" class="dm-call-btn-hang" onclick="dmEndCall()">挂断</button></div>';
+        body = '<button type="button" class="dm-call-down" aria-label="最小化" onclick="dmCallMinimize()">⌄</button>'
+            + dmCallPeerTop(name, "语音通话", "正在连接…")
+            + '<div class="dm-call-page-actions">'
+            + dmCallRound("", "hang dm-call-btn-hang", "挂断", hangIcon, "dmEndCall()") + '</div>';
     } else if (dmCall.state === "active") {
         const canSpeaker = !!(window.AndroidBridge && typeof window.AndroidBridge.setVoiceCallSpeaker === "function");
-        body = '<p class="dm-call-kicker">语音通话中</p><h2>' + name + '</h2><p class="dm-call-timer" id="dm-call-timer">0:00</p>'
-            + '<div class="dm-call-controls"><button type="button" id="dm-call-mute" class="dm-call-control" onclick="dmToggleMute()">静音</button>'
-            + (canSpeaker ? '<button type="button" id="dm-call-speaker" class="dm-call-control" onclick="dmToggleSpeaker()">听筒</button>' : '')
-            + '<button type="button" class="dm-call-control dm-call-btn-hang" onclick="dmEndCall()">挂断</button></div>';
+        body = '<button type="button" class="dm-call-down" aria-label="最小化" onclick="dmCallMinimize()">⌄</button>'
+            + dmCallPeerTop(name, "语音通话中", "")
+            + '<p class="dm-call-timer" id="dm-call-timer">' + dmCallTimeText() + '</p>'
+            + '<div class="dm-call-page-actions">'
+            + dmCallRound("dm-call-mute", "", "静音", muteIcon, "dmToggleMute()", dmCall.muted)
+            + (canSpeaker ? dmCallRound("dm-call-speaker", "", "免提", speakerIcon, "dmToggleSpeaker()", dmCall.speaker) : '')
+            + dmCallRound("", "hang dm-call-btn-hang", "挂断", hangIcon, "dmEndCall()")
+            + '</div>';
     } else if (dmCall.state === "ended") {
-        body = '<p class="dm-call-kicker">语音通话</p><h2>' + name + '</h2><p class="dm-call-sub">' + escapeHtml(dmCall.reason || "通话结束") + '</p>';
+        body = dmCallPeerTop(name, "语音通话", escapeHtml(dmCall.reason || "通话结束"));
     }
-    layer.innerHTML = '<div class="dm-call-card">' + avatar + body + '</div>';
-    if (dmCall.state === "active") {
-        dmCallPaintControls();
-        dmCallTick();
-    }
+    layer.innerHTML = '<div class="dm-call-card dm-call-page">' + body + '</div>';
+    if (dmCall.state === "active") { dmCallPaintControls(); dmCallTick(); }
 }
 function dmCallRingStop() {
     clearInterval(dmCall.ring);
@@ -3025,13 +3139,16 @@ function dmCallReset() {
     dmCallCleanupMedia();
     dmCall.state = "idle"; dmCall.id = ""; dmCall.peer = null; dmCall.role = "";
     dmCall.offer = null; dmCall.pendingIce = []; dmCall.localIce = [];
-    dmCall.startedAt = 0; dmCall.muted = false; dmCall.speaker = true; dmCall.reason = "";
+    dmCall.startedAt = 0; dmCall.muted = false; dmCall.speaker = false; dmCall.reason = "";
+    dmCall.minimized = false; dmCallMiniHide();
     dmCallRender();
 }
 function dmCallFinish(reason) {
     if (dmCall.state === "idle" || dmCall.state === "ended") return;
     const wasActive = ["outgoing", "connecting", "active"].includes(dmCall.state);
     dmCallCleanupMedia();
+    dmCall.minimized = false;
+    dmCallMiniHide();
     dmCall.state = "ended";
     dmCall.reason = reason || (wasActive ? "通话已结束" : "通话结束");
     dmCall.startedAt = 0;
@@ -3112,7 +3229,8 @@ async function dmStartCall() {
     dmCancelRecording(); dmClosePanels(); dmBlurKeyboard();
     dmCall.state = "outgoing"; dmCall.peer = { id: peer.id, name: cmName(peer) };
     dmCall.role = "caller"; dmCall.id = ""; dmCall.offer = null; dmCall.pendingIce = []; dmCall.localIce = [];
-    dmCall.muted = false; dmCall.speaker = true; dmCall.reason = "";
+    dmCall.muted = false; dmCall.speaker = false; dmCall.reason = "";
+    dmCall.minimized = false;
     dmCallRender();
     try {
         const iceServers = await dmCallIceServers();
@@ -3203,7 +3321,8 @@ function dmHandleCallEvent(data) {
         }
         dmCall.state = "incoming"; dmCall.id = data.call_id; dmCall.peer = data.from || null;
         dmCall.role = "callee"; dmCall.offer = data.sdp; dmCall.pendingIce = []; dmCall.localIce = [];
-        dmCall.muted = false; dmCall.speaker = true; dmCall.reason = "";
+        dmCall.muted = false; dmCall.speaker = false; dmCall.reason = "";
+        dmCall.minimized = false;
         dmCallRender(); dmCallRingStart();
         return;
     }

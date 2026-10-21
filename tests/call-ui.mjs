@@ -25,7 +25,7 @@ try{
  const a=await api('/api/register',{...profile,username:'callowner'}),b=await api('/api/register',{...profile,username:'callpartner'});
  browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
  const mk=async(user)=>{const context=await browser.newContext({viewport:{width:393,height:850},permissions:['microphone']});const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(String(e)));
-  await page.addInitScript(({token,id,name})=>{localStorage.setItem('QINGSU_AUTH_TOKEN',token);localStorage.setItem('QINGSU_AUTH_USER',JSON.stringify({id,username:name}));window.__QS_FORCE_RELAY__=true;},{token:user.token,id:user.id,name:user.username});
+  await page.addInitScript(({token,id,name})=>{localStorage.setItem('QINGSU_AUTH_TOKEN',token);localStorage.setItem('QINGSU_AUTH_USER',JSON.stringify({id,username:name}));window.__QS_FORCE_RELAY__=true;window.__speakerCalls=[];window.AndroidBridge={playBeep(){},vibrate(){},startVoiceCallAudio(){},stopVoiceCallAudio(){},setVoiceCallSpeaker(v){window.__speakerCalls.push(v);}};},{token:user.token,id:user.id,name:user.username});
   await page.goto(base,{waitUntil:'domcontentloaded'});await page.waitForFunction(()=>typeof openDM==='function');
   await page.waitForFunction(()=>typeof wsOpen==='function'&&wsOpen(),null,{timeout:15000});
   return {page,errors};
@@ -43,6 +43,21 @@ try{
  await B.page.waitForFunction(()=>dmCall.state==='active',{timeout:30000});
  await A.page.screenshot({path:path.join(folder,'call-active.png')});
  checks.push('both ends reached active');
+ if(await A.page.locator('#dm-call-speaker').count()!==1)throw new Error('speaker button missing on the call page');
+ await A.page.locator('#dm-call-speaker').click();
+ assert.equal(await A.page.evaluate(()=>dmCall.speaker),true);
+ assert.equal(await A.page.evaluate(()=>window.__speakerCalls.at(-1)),true);
+ assert.equal(await A.page.locator('#dm-call-speaker').getAttribute('aria-pressed'),'true');
+ await A.page.screenshot({path:path.join(folder,'call-speaker.png')});
+ checks.push('speaker button renders, toggles state and reaches the native bridge');
+ if(await A.page.locator('.dm-call-down').count()!==1)throw new Error('call page minimize button missing');
+ await A.page.locator('.dm-call-down').click();
+ await A.page.waitForSelector('#dm-call-mini:not([hidden])');
+ await A.page.screenshot({path:path.join(folder,'call-mini.png')});
+ if(await A.page.locator('#dm-call-layer').isVisible())throw new Error('call page should hide when minimized');
+ await A.page.locator('#dm-call-mini-main').click();
+ await A.page.waitForSelector('#dm-call-layer:not([hidden])');
+ checks.push('call page minimizes to a floating bar and restores');
  const stats=await A.page.evaluate(async()=>{
   const pc=dmCall.pc;if(!pc)return null;const rows=[];const all=[];const report=await pc.getStats();
   report.forEach(x=>all.push(x));
