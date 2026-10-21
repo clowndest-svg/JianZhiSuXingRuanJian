@@ -40,7 +40,7 @@
 - 外部来源首次独立下载有一次临时503；公网浏览器及随后完整媒体烟测均通过，失败记录也保留，不将外部服务描述为必达。运维监控确实记录了这次503，未删日志或压掉告警。
 - 后台首轮39项有5个夹具初始化失败，旧用例仅报KeyError而无HTTP响应信息；增加注册状态断言后连续两轮39项全过，原失败未复现，不把它归因为已查明的业务缺陷。诊断改动为 `e320b4987eb3faf17d885e4d943b4fa775c370f6`，[后台39项CI及部署成功](https://github.com/clowndest-svg/JianZhiSuXingRuanJianHouTai/actions/runs/39547919155)。后台业务文件无变更；鉴权API200，公网HTML哈希与部署源一致。
 - 主应用回退快照 `/opt/qingsu/backups/release-20261021-130629`；后台快照 `/opt/qingsu/backups/admin-console-ci-39547919155-c5a7ee1417fd`。发布前后加密副本均拉至本机并恢复验证；最新 `bundle-20261021-131014.p7m` 的SQLite完整性ok、4个媒体文件恢复通过。
-- 保留现有运维覆盖 `min_build=0`，没有强制阻断旧安装用户；Redis正常共享计数且未降级，正式服务和定时任务正常。
+- 保留现有服务端运维覆盖 `min_build=0`，未另行抬服务端强更门；Redis正常共享计数且未降级，正式服务和定时任务正常。
 - 自动审批拒绝永久删除，本地173项约393MB临时内容已移至仓库外 `qingsu-cleanup-archive/r164-20261021-scratch` 可恢复归档。服务器旧release、上传归档和探针也移入 `/opt/qingsu/ci-archive/r164-20261021`，保留当前与上一release、所有正式备份/数据/密钥。本记录不将归档当作已释放磁盘空间。
 
 聚合原始证据位于 [release-evidence-r164](release-evidence-r164/)，包括成功与失败的网络探针、浏览器合成账号截图、签名/资源对账、CI、恢复及清理记录。

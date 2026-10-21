@@ -7,8 +7,10 @@
 - 梗图标识绑定用户和有效期，按稳定模板标识签名，不因上游列表顺序改变而转存另一张图。
 - 保留原始来源，不把API代码的MIT许可套到原图。上游未声明原图许可时如实展示。此功能搜索指定来源的素材库，不宣称全网搜索。
 
-来源：[Memegen项目](https://github.com/jacebrowning/memegen)及其[模板API](https://api.memegen.link/templates)。当前服务器实测API返回209项，中文“猫”匹配5项，图片“I Should Buy a Boat Cat”实际下载89,038字节。Imgflip在服务器网络不可达；发 表 情站点robots禁止一般爬虫搜索，不采用绕过方式。Commons仍存在握手超时限制，保留其不可用提示。
+来源：[Memegen项目](https://github.com/jacebrowning/memegen)及其[模板API](https://api.memegen.link/templates)。当前服务器实测API返回209项，中文“猫”匹配5项，图片“I Should Buy a Boat Cat”实际下载89,038字节。Commons仍存在握手超时限制，保留其不可用提示。
 
-验证沿用r164完整回归，并新增梗图搜索/转存/来源/用户绑定/SSRF契约，媒体测试共13项；Android重新构建/lint并签名，构建号49。新版完整CI、线上验证、产物同步与清理结果按实际完成情况补充。
+验证沿用r164完整回归，并新增梗图搜索/转存/来源/用户绑定/SSRF契约，媒体测试共13项，本地浏览器11组全部通过；Android重新构建/lint并签名，构建号49。
+
+源码`bc6cf41cd34924215a6afbd1dd0db1a4bd418679`、生产`r39549156472`；[构建、集成与部署全部成功](https://github.com/clowndest-svg/JianZhiSuXingRuanJian/actions/runs/39549156472)。公网浏览器5组通过，包含中文“猫”梗图预览/转存/发送/来源、OpenMoji、语音录制转码播放、即时消息及草稿；合成账号和媒体按ID清理。线上APK 5,430,806字节，SHA-256 `484c7aa53c037c2634b25d1adc6073e5b67b1d2d574c574a03be7d4a7c885c72`，已同步；v2/v3正式签名通过。回退快照`/opt/qingsu/backups/release-20261021-133416`。最终发现图片消息点击放大入口回退，继续由r166补回并验证，未将这一项标为r165通过。
 
 无ADB设备，实体手机安装、系统授权、真实麦克风与厂商后台行为仍不能由Chromium模拟麦克风和Java契约替代。r164的短暂上游503和首轮后台夹具失败记录继续保留。

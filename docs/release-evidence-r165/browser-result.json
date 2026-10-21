@@ -1,0 +1,16 @@
+{
+  "checks": [
+    "emoji inserts at caret and does not send; panel blurs input",
+    "official sticker previews then sends; text draft survives acknowledgement",
+    "official pinyin search",
+    "network selection remains a draft; attribution is visible",
+    "local image selection previews before upload and sends without mutual follow",
+    "real MediaRecorder preview/upload/Opus playback; incoming message preserves input and audio node",
+    "320/393/1200 layout without horizontal overflow",
+    "lost HTTP response retries the same request ID and stores one message",
+    "LIVE OpenMoji Chinese search, remote PNG import, attributed message persisted",
+    "LIVE network meme catalog search/import/send with original source",
+    "cleanup and late account response rejection"
+  ],
+  "errors": []
+}
