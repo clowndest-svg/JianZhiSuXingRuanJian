@@ -1,0 +1,19 @@
+{
+  "dry_run": {
+    "fixtures": [
+      "releasecheck_web_c33da920c1_a"
+    ],
+    "ids": [
+      417
+    ],
+    "media": [],
+    "real_users_before": 2
+  },
+  "result": {
+    "fixture_users_removed": 1,
+    "fixture_files_removed": 0,
+    "real_users_unchanged": 2,
+    "foreign_key_errors": 0,
+    "integrity": "ok"
+  }
+}

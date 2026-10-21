@@ -1,0 +1,86 @@
+{
+  "workflow_id": 39555833820,
+  "head_sha": "1f998ba242a12817348364774ede1ca95c75c1ee",
+  "status": "completed",
+  "conclusion": "success",
+  "jobs": {
+    "android": "success",
+    "integration": "success",
+    "deploy": "success"
+  },
+  "android_sources_changed": false,
+  "signed_apk": "skipped; reused live signed build 50",
+  "release": "r39555833820",
+  "source_revision": "1f998ba242a12817348364774ede1ca95c75c1ee",
+  "backup": "/opt/qingsu/backups/release-20261021-144224",
+  "build": 50,
+  "version_name": "2.2.5",
+  "apk_sha256": "26a18c7fd077d19a73c70f16a4f2438d92e5bc3747f8b9a238a8553c5e53d99f",
+  "users_total": 2,
+  "fixture_accounts_remaining": 0,
+  "fixtures_removed_today": {
+    "initial": 2,
+    "postdeploy": 2,
+    "openmoji_retry": 1,
+    "media_files": 3
+  },
+  "foreign_key_errors": 0,
+  "integrity": "ok",
+  "counter_audit": {
+    "ok": true,
+    "drift": [],
+    "count": 0
+  },
+  "mail": {
+    "code": 0,
+    "mail": "up"
+  },
+  "qa": "inactive",
+  "admin_revision": "e320b4987eb3faf17d885e4d943b4fa775c370f6",
+  "admin_console_sha256": "6f1f15fd61d7d3a1056d21dcc51e0b8321b1d2729db482d61faf62e0d5cd2b3f",
+  "monitor": {
+    "checked_at": 1792565042,
+    "qingsu": "active",
+    "qingsu-llama": "active",
+    "qingsu-backup.timer": "active",
+    "qingsu-cert-renew.timer": "active",
+    "ready": 200,
+    "free_disk_mb": 30559,
+    "backup_age_hours": 0.0,
+    "certificate_hours_left": 132.5,
+    "requests": 63,
+    "errors_5xx": 0,
+    "p95_ms": 50.3,
+    "sqlite_lock_errors": 0,
+    "cache_degraded": 0,
+    "problems": []
+  },
+  "postdeploy_browser": {
+    "build": 50,
+    "checks": [
+      "trusted public HTTPS, official assets, confirm-send and draft preservation",
+      "real production HTTP-to-WebSocket message delivery",
+      "public Chromium simulated microphone record/preview/upload/production decode/playback",
+      "unavailable upstream retains unsent draft and supports cancelling to change source",
+      "live public Chinese network meme search/preview/import/send/original source",
+      "public full-size meme image viewer opens by click"
+    ],
+    "unavailable": [
+      "OpenMoji image import"
+    ],
+    "errors": []
+  },
+  "openmoji_retry": {
+    "search": {
+      "status": 200,
+      "provider": "OpenMoji",
+      "items": 12
+    },
+    "import": {
+      "status": 503,
+      "detail": "Service Unavailable"
+    },
+    "interpretation": "upstream image host transient 503; search works, browser keeps draft and allows cancelling; earlier 13:58 successful import remains in production-browser.json"
+  },
+  "ci_incoming": "empty; deploy tar moved to /opt/qingsu/ci-archive/r166-followup-20261021"
+}

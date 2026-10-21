@@ -1,0 +1,19 @@
+{
+  "search": {
+    "status": 200,
+    "provider": "OpenMoji",
+    "items": 12
+  },
+  "import": {
+    "status": 503,
+    "detail": "Service Unavailable"
+  },
+  "browser": {
+    "unavailable": [
+      "OpenMoji image import"
+    ],
+    "draft_retained_and_cancellable": true,
+    "errors": []
+  },
+  "interpretation": "Upstream image host returned 503 during import. Search and draft handling stay correct; the earlier 13:58 successful import is in production-browser.json. Not counted as a post-deploy OpenMoji success."
+}

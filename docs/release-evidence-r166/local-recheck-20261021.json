@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-21T14:29:00+08:00",
+  "checked_at": "2026-10-21T14:48:00+08:00",
   "environment": {
     "python": "3.12.14",
     "node": "24.14.1",
@@ -80,6 +80,12 @@
       "suite": "node --check",
       "files": 4,
       "ok": true
+    },
+    {
+      "suite": "test_ops_api.py",
+      "tests": 39,
+      "ok": true,
+      "note": "admin repo e320b498, independent rerun"
     }
   ],
   "artifact_gate": {
@@ -96,16 +102,19 @@
     "backend_modules_match": 4
   },
   "live": {
-    "release": "r39551030318",
-    "source_revision": "2b1a432a64be1be046f25b9ef6a63a270567578d",
+    "release": "r39555833820",
+    "source_revision": "1f998ba242a12817348364774ede1ca95c75c1ee",
     "build": 50,
     "health": "ok",
-    "rate_store": "redis"
+    "rate_store": "redis",
+    "backup": "/opt/qingsu/backups/release-20261021-144224"
   },
   "cleanup": {
-    "fixture_users_removed": 2,
-    "fixture_files_removed": 1,
+    "fixture_users_removed": 5,
+    "fixture_files_removed": 3,
+    "rounds": 3,
     "real_users": 2,
+    "fixtures_remaining": 0,
     "integrity": "ok",
     "monitor_problems": []
   },
@@ -113,6 +122,59 @@
     "name": "concurrent cold-start migration",
     "symptom": "duplicate column name: cycle_started_at when two workers migrate a fresh DB",
     "fix": "server.py _ensure_columns treats duplicate-column ALTER as idempotent; test_multiprocess now checks startup even without Redis",
-    "status": "verified locally 3/3; deployment pending"
+    "status": "fixed and deployed: r39555833820 / 1f998ba; local 3/3 and CI integration success"
+  },
+  "postdeploy": {
+    "build": 50,
+    "checks": [
+      "trusted public HTTPS, official assets, confirm-send and draft preservation",
+      "real production HTTP-to-WebSocket message delivery",
+      "public Chromium simulated microphone record/preview/upload/production decode/playback",
+      "unavailable upstream retains unsent draft and supports cancelling to change source",
+      "live public Chinese network meme search/preview/import/send/original source",
+      "public full-size meme image viewer opens by click"
+    ],
+    "unavailable": [
+      "OpenMoji image import"
+    ],
+    "errors": []
+  },
+  "final_state": {
+    "users_total": 2,
+    "fixtures": 0,
+    "media_rows": 3,
+    "media_files": 4,
+    "missing_media": [],
+    "orphan_files": [
+      "avatar-2.jpg"
+    ],
+    "fk": [],
+    "integrity": "ok",
+    "qa_config_exists": false,
+    "ci_incoming": [],
+    "releases": [
+      "r39549156472",
+      "r39551030318",
+      "r39555833820"
+    ]
+  },
+  "openmoji_postdeploy": {
+    "search": {
+      "status": 200,
+      "provider": "OpenMoji",
+      "items": 12
+    },
+    "import": {
+      "status": 503,
+      "detail": "Service Unavailable"
+    },
+    "browser": {
+      "unavailable": [
+        "OpenMoji image import"
+      ],
+      "draft_retained_and_cancellable": true,
+      "errors": []
+    },
+    "interpretation": "Upstream image host returned 503 during import. Search and draft handling stay correct; the earlier 13:58 successful import is in production-browser.json. Not counted as a post-deploy OpenMoji success."
   }
 }

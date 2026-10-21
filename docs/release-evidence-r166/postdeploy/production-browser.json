@@ -1,0 +1,15 @@
+{
+  "build": 50,
+  "checks": [
+    "trusted public HTTPS, official assets, confirm-send and draft preservation",
+    "real production HTTP-to-WebSocket message delivery",
+    "public Chromium simulated microphone record/preview/upload/production decode/playback",
+    "unavailable upstream retains unsent draft and supports cancelling to change source",
+    "live public Chinese network meme search/preview/import/send/original source",
+    "public full-size meme image viewer opens by click"
+  ],
+  "unavailable": [
+    "OpenMoji image import"
+  ],
+  "errors": []
+}
