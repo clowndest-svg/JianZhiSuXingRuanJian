@@ -20,6 +20,11 @@ const pageErrors=[];
 const shotsDir=process.env.QINGSU_SHOTS_DIR;
 if(shotsDir)fs.mkdirSync(shotsDir,{recursive:true});
 const shot=(page,name)=>shotsDir?page.screenshot({path:path.join(shotsDir,name)}):Promise.resolve();
+const cleanShot=async(page,name)=>{
+  if(!shotsDir)return;
+  await page.evaluate(()=>{const t=document.getElementById('web-toast-container');if(t)t.remove();}).catch(()=>{});
+  await page.screenshot({path:path.join(shotsDir,name)});
+};
 try {
   for(let i=0;i<100;i++){try{if((await fetch(base+'/health')).ok)break;}catch{} await new Promise(r=>setTimeout(r,100));}
   browser = await chromium.launch({headless:true,...(process.env.QINGSU_CHROME_PATH ? {executablePath:process.env.QINGSU_CHROME_PATH} : {}),args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
@@ -255,7 +260,7 @@ try {
   await page.locator('#prof-scene-cards .choice-card[data-value="band"]').click();
   assert.equal(await page.locator('#prof-scene').inputValue(),'band');
   assert.match(await page.locator('#prof-plan-preview').innerText(),/弹力带塑形/);
-  await shot(page,'profile-scene-band.png');
+  await cleanShot(page,'profile-scene-band.png');
   await page.evaluate(()=>saveCustomProfile());
   await page.waitForFunction(()=>{const t=document.getElementById('header-profile-summary')?.innerText||'';return /173cm/.test(t)&&/138\.5斤/.test(t);},null,{timeout:15000});
   const dash=await api('/api/dashboard',null,a.token);
@@ -269,7 +274,7 @@ try {
   assert.match(await page.locator('#workout-exercises-card').innerText(),/弹力带臀桥/);
   assert.equal(await page.locator('#btn-timer-main').innerText(),'重置主课 30 分');
   assert.equal(await page.locator('#timer-display').innerText(),'30:00');
-  await shot(page,'workout-band.png');
+  await cleanShot(page,'workout-band.png');
   checks.push('profile scene selection changes the workout plan and timer');
   await page.evaluate(()=>{window.__sceneSwitchNoReload=1;});
   await page.locator('#workout-scene-switch .scene-btn[data-value="gym"]').click();
@@ -279,14 +284,14 @@ try {
   let sceneSaved=false;
   for(let i=0;i<60;i++){const d=await api('/api/dashboard',null,a.token);if(d.profile.scene==='gym'){sceneSaved=true;break;}await new Promise(r=>setTimeout(r,100));}
   assert.equal(sceneSaved,true,'scene switch must persist');
-  await shot(page,'workout-gym.png');
+  await cleanShot(page,'workout-gym.png');
   checks.push('workout-tab scene switch updates the plan immediately and persists without reload');
   await page.evaluate(()=>openProfileModal());
   await page.locator('#modal-body-shapes-grid #shape-card-female_lean').click();
   await page.waitForFunction(()=>document.querySelector('#workout-exercises-card')?.innerText.includes('史密斯机宽距深蹲'),null,{timeout:10000});
   assert.match(await page.locator('#workout-context-title').innerText(),/修长轻盈/);
   assert.equal(await page.locator('#workout-scene-switch .scene-btn[data-value="gym"]').evaluate(el=>el.classList.contains('active')),true);
-  await shot(page,'profile-plan-preview.png');
+  await cleanShot(page,'profile-plan-preview.png');
   await page.evaluate(()=>closeProfileModal());
   await page.setViewportSize({width:320,height:740});
   await page.waitForTimeout(120);
@@ -297,7 +302,7 @@ try {
             panel:p?p.getBoundingClientRect().width:0,panelScroll:p?p.scrollWidth:0};
   });
   assert.ok(narrow.doc<=321&&narrow.body<=321&&narrow.panelScroll<=321,JSON.stringify(narrow));
-  await shot(page,'workout-320.png');
+  await cleanShot(page,'workout-320.png');
   await page.setViewportSize({width:393,height:850});
   let shapeSaved=false;
   for(let i=0;i<40;i++){const d=await api('/api/dashboard',null,a.token);if(d.profile.goal_type==='female_lean'){shapeSaved=true;break;}await new Promise(r=>setTimeout(r,100));}

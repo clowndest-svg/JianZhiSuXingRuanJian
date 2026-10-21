@@ -1,0 +1,88 @@
+{
+  "release": "r39672788607",
+  "source_revision": "a6337d6682bd844f18cab37130e31387d1058f67",
+  "status": "ok",
+  "build": 60,
+  "version_name": "2.2.15",
+  "apk_sha256": "14ed15663de69ba11c3ed9e08da617925a3ee6915e55d8db01c3d25a339a349b",
+  "apk_size": 5459478,
+  "apk_md5": "397286a3ae96832a8a9eb643713557c8",
+  "apk_certificate_sha256": "c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f",
+  "chat_turn": true,
+  "min_build_override": 0,
+  "public": {
+    "build": 60,
+    "checks": [
+      "profile scene selection saves and previews the body-shape × scene combination",
+      "workout-tab scene switch changes the plan immediately and persists without reload",
+      "changing body shape keeps the gym scene and regenerates that scene version",
+      "workout plan panel fits 320px without horizontal overflow"
+    ],
+    "narrow": {
+      "doc": 320,
+      "body": 320,
+      "w": 320,
+      "panel": 320
+    }
+  },
+  "self_check": {
+    "assets_media": {
+      "passed": [
+        "18 official assets served",
+        "real voice normalize/send/read/retry; authoritative duration; stolen media rejected",
+        "local/official stickers send without mutual follow; recall"
+      ],
+      "build": "60"
+    },
+    "passed": [
+      "two simultaneous sessions",
+      "fresh account and share URL",
+      "share access boundary",
+      "latest daily weight",
+      "idempotent workout",
+      "checklist persistence",
+      "private 30-day summary",
+      "shared goal creation, real progress and removal",
+      "push capability and public guide",
+      "session revocation",
+      "update gate min_build=0 override=True blocked=0",
+      "new-client registration requires an email code"
+    ],
+    "build": "60"
+  },
+  "monitor": {
+    "checked_at": 1792615937,
+    "qingsu": "active",
+    "qingsu-llama": "active",
+    "qingsu-backup.timer": "active",
+    "qingsu-cert-renew.timer": "active",
+    "coturn": "active",
+    "qingsu-asr": "active",
+    "ready": 200,
+    "turn": true,
+    "asr_http": 200,
+    "cpu_percent": 0.8,
+    "memory_percent": 62.3,
+    "memory_available_mb": 1376,
+    "swap_percent": 1.7,
+    "load1": 0.11,
+    "load_per_core": 0.03,
+    "free_disk_mb": 27747,
+    "disk_percent": 32.2,
+    "thresholds": {
+      "cpu_percent": 85.0,
+      "memory_percent": 85.0,
+      "swap_percent": 25.0,
+      "load_per_core": 1.5,
+      "disk_percent": 85.0
+    },
+    "backup_age_hours": 0.1,
+    "certificate_hours_left": 118.4,
+    "requests": 200,
+    "errors_5xx": 0,
+    "p95_ms": 50.0,
+    "sqlite_lock_errors": 0,
+    "cache_degraded": 0,
+    "problems": []
+  }
+}

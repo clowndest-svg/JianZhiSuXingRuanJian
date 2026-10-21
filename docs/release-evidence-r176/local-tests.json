@@ -1,0 +1,65 @@
+{
+  "version": "2.2.15 (60)",
+  "source_commit": "a6337d6",
+  "artifact": {
+    "deployed_size": 5459478,
+    "deployed_sha256": "14ed15663de69ba11c3ed9e08da617925a3ee6915e55d8db01c3d25a339a349b",
+    "local_build_size": 5459478,
+    "local_build_sha256": "2114f704b3fd7210668f3d55e7c7166c1ffcda19df7d0f63542ef192eff62dbb"
+  },
+  "frontend_vm": {
+    "suite": "tests/legacy-frontend.mjs",
+    "total": 353,
+    "green": 353,
+    "red": 0,
+    "mutant_ref": "8dbde6b",
+    "mutant_green": 340,
+    "mutant_red": 13
+  },
+  "backend_legacy": {
+    "suite": "tests/legacy-backend.py",
+    "total": 619,
+    "green": 619,
+    "red": 0
+  },
+  "integration": {
+    "suite": "tests/test_integration.py",
+    "tests": 63,
+    "result": "OK"
+  },
+  "contracts": {
+    "suite": "tests/test_r173_contracts.py",
+    "tests": 5,
+    "result": "OK"
+  },
+  "browser_chat": {
+    "suite": "tests/chat-ui.mjs",
+    "result": "OK",
+    "errors": [],
+    "new_checks": [
+      "profile scene selection changes the workout plan and timer",
+      "workout-tab scene switch updates the plan immediately and persists without reload",
+      "changing body shape keeps the scene and regenerates that scene version"
+    ]
+  },
+  "browser_call": {
+    "suite": "tests/call-ui.mjs",
+    "checks": 7,
+    "result": "OK",
+    "connection": "connected",
+    "local_candidate": "relay",
+    "remote_candidate": "relay"
+  },
+  "screenshots": [
+    "local-profile-scene.png",
+    "local-profile-preview.png",
+    "local-workout-band.png",
+    "local-workout-gym.png",
+    "local-workout-320.png",
+    "public-profile-plan.png",
+    "public-profile-shape.png",
+    "public-workout-band.png",
+    "public-workout-gym.png",
+    "public-workout-320.png"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "version": {
+    "version_code": 60,
+    "version_name": "2.2.15",
+    "sha256": "14ed15663de69ba11c3ed9e08da617925a3ee6915e55d8db01c3d25a339a349b"
+  },
+  "checks": [
+    "profile scene selection saves and previews the body-shape × scene combination",
+    "workout-tab scene switch changes the plan immediately and persists without reload",
+    "changing body shape keeps the gym scene and regenerates that scene version",
+    "workout plan panel fits 320px without horizontal overflow"
+  ],
+  "narrow": {
+    "doc": 320,
+    "body": 320,
+    "w": 320,
+    "panel": 320
+  }
+}
