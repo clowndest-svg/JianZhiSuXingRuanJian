@@ -61,6 +61,11 @@ try {
   await page.locator('.dm-send').click();
   await page.waitForFunction(()=>cm.bubbles.some(m=>m.kind==='sticker'&&m.media_url));
   checks.push('local image selection previews before upload and sends without mutual follow');
+  await page.locator('#thread-bubbles img.dm-sticker-img').last().click();
+  await page.waitForFunction(()=>document.getElementById('account-tools-dialog').open);
+  assert.ok(await page.locator('#account-tools-dialog img').count());
+  await page.evaluate(()=>document.getElementById('account-tools-dialog').close());
+  checks.push('sent image sticker opens the full-size image viewer');
   await page.locator('#dm-voice-btn').click();await page.waitForSelector('#dm-voice-stop:not([disabled])');
   await page.waitForTimeout(1200);await page.locator('#dm-voice-stop').click();await page.waitForSelector('#dm-voice-preview');
   assert.equal((await api('/api/chat/messages?with_user='+bid,null,a.token)).items.length,2);

@@ -2397,10 +2397,10 @@ function dmBubbleInner(m, kind, pending) {
     if (['image', 'video', 'audio', 'sticker'].includes(kind)) {
         const url = dmMediaURL(m.media_url), src = escapeHtml(url);
         if (!url) return '<span class="dm-media-wait">' + (pending ? '发送中…' : '附件暂不可用') + '</span>';
-        if (kind === 'audio') return '<div class="dm-audio"><span>语音 · ' + Number(m.duration || 0) + ' 秒</span><audio controls preload="metadata" src="' + src + '" aria-label="语音消息" onplay="dmExclusivePlayback(this)"></audio></div>';
-        if (kind === 'video') return '<video class="dm-media-video" src="' + src + '" controls playsinline preload="metadata" onplay="dmExclusivePlayback(this)"></video>';
+        if (kind === 'audio') return '<div class="dm-audio"><span>语音 · ' + Number(m.duration || 0) + ' 秒</span><audio controls preload="metadata" src="' + src + '" aria-label="语音消息" onplay="dmExclusivePlayback(this)" oncontextmenu="event.stopPropagation();return true"></audio></div>';
+        if (kind === 'video') return '<video class="dm-media-video" src="' + src + '" controls playsinline preload="metadata" onplay="dmExclusivePlayback(this)" oncontextmenu="event.stopPropagation();return true"></video>';
         const meta = m.sticker_meta || {}, source = dmExternalURL(meta.source_url);
-        return '<img class="' + (kind === 'sticker' ? 'dm-sticker-img' : 'dm-media-img') + '" src="' + src + '" alt="' + (kind === 'sticker' ? '图片表情' : '图片消息') + '" loading="lazy">'
+        return '<img class="' + (kind === 'sticker' ? 'dm-sticker-img' : 'dm-media-img') + '" src="' + src + '" alt="' + (kind === 'sticker' ? '图片表情' : '图片消息') + '" loading="lazy" onclick="viewPostImage(this.src)">'
             + (source ? '<small class="dm-attribution"><a href="' + escapeHtml(source) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(meta.title || '来源') + '</a><br>' + escapeHtml(meta.author || '') + ' · ' + escapeHtml(meta.license || '') + '</small>' : '');
     }
     return escapeHtml(m.body || '');

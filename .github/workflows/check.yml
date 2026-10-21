@@ -239,7 +239,7 @@ jobs:
           install -m 600 .github/deploy_known_hosts "$RUNNER_TEMP/qingsu-ssh/known_hosts"
           sha256sum "$RUNNER_TEMP/qingsu-release.tar" > "$RUNNER_TEMP/qingsu-release.sha256"
           read -r ARCHIVE_SHA _ < "$RUNNER_TEMP/qingsu-release.sha256"
-          scp -i "$RUNNER_TEMP/qingsu-ssh/id_ed25519" \
+          scp -C -i "$RUNNER_TEMP/qingsu-ssh/id_ed25519" \
             -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/qingsu-ssh/known_hosts" \
             "$RUNNER_TEMP/qingsu-release.tar" \
