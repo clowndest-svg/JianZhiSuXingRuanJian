@@ -1,0 +1,50 @@
+{
+  "directus": {
+    "before": {
+      "memory_limit": 0,
+      "nano_cpus": 0,
+      "memory_current_mb": 209.5
+    },
+    "after": {
+      "memory_limit_mb": 768,
+      "memory_swap_mb": 768,
+      "cpu_cores": 1,
+      "memory_current_mb": 209.7,
+      "cpu_percent": 0.53,
+      "health": "healthy",
+      "ping_http": 200
+    },
+    "persistence": "/opt/qingsu/admin-console/docker-compose.override.yml + live docker update"
+  },
+  "llama": {
+    "before": {
+      "memory_max_mb": 1600,
+      "memory_high_mb": null,
+      "cpu_quota": "infinity",
+      "memory_current_mb": 207.5
+    },
+    "after": {
+      "memory_max_mb": 1200,
+      "memory_high_mb": 1000,
+      "cpu_quota_percent": 200,
+      "memory_current_mb": 207.5,
+      "nice": 10,
+      "health_http": 200
+    },
+    "persistence": "/etc/systemd/system/qingsu-llama.service.d/limits.conf + set-property"
+  },
+  "core_priority": {
+    "qingsu_cpu_weight": 500,
+    "coturn_cpu_weight": 500,
+    "qingsu": "active",
+    "coturn": "active"
+  },
+  "apply_script": "scripts/provision-resource-limits.sh",
+  "verified_at": "2026-10-21T18:20:32+08:00",
+  "health": {
+    "qingsu": "ok",
+    "llama_http": 200,
+    "directus_ping_http": 200,
+    "coturn": "active"
+  }
+}

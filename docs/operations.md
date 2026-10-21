@@ -44,6 +44,17 @@ r167 起网络表情默认是中文梗图：服务端检索 360 图片（主）�
 
 当前只支持双方都在 App 内在线时的 1:1 通话；App 被系统杀掉或后台断网时没有厂商推送，不会后台响铃。TURN 关闭 TCP/TLS，UDP 被运营商封锁的网络无法通话，会明确提示失败并保留语音消息。`/health` 的 `chat.turn` 和监控的 `turn` 字段可看出 TURN 是否可用。
 
+### 资源保护与监控阈值
+
+Directus 和本地 llama 都是后台服务，给它们设硬上限，避免某个查询或模型任务把 qingsu/coturn 挤掉：
+
+- Directus：容器 768MB 内存（无 swap）、1 核；配置在 `/opt/qingsu/admin-console/docker-compose.override.yml`，当前容器用 `docker update` 生效。
+- llama：`MemoryHigh=1000M`、`MemoryMax=1200M`、`CPUQuota=200%`（2 核）；drop-in 在 `/etc/systemd/system/qingsu-llama.service.d/limits.conf`。
+- qingsu 与 coturn：`CPUWeight=500`，高峰时优先拿 CPU；不限制其内存，避免误伤主服务。
+- 重建服务器时执行 `scripts/provision-resource-limits.sh`；Directus 的 768MB 是当前 210MB 的约 3.6 倍余量，llama 的 1.2GB 是当前约 217MB 的约 5.5 倍余量，正常任务不会被误杀。
+
+`monitor.py` 每 5 分钟额外记录 `cpu_percent`、`memory_percent`、`swap_percent`、`load_per_core`、`disk_percent`，阈值分别为 85%、85%、25%、1.5、85%，任一越线会把对应名称写进 `problems` 并让 service 失败；报告里同时保留阈值原文，避免以后忘记口径。可用 `QINGSU_MONITOR_CPU_PERCENT=-1` 这类环境变量临时覆盖单个阈值做自检；生产服务不设置这些变量。1Panel 里“网站/应用 0”只是它没接管 Docker/手工服务，不是资源使用指标。
+
 - `systemctl status qingsu`：专用账号运行，只读代码，数据与媒体目录可写。
 - 发布脚本显式将代码/网页目录设为root所有、目录755、文件644，避免Windows归档的可写权限进入服务器。服务账号不可写`server.py`；数据和媒体继续由服务账号管理。
 - `systemctl list-timers qingsu-*`：备份每日03:10（随机最多5分钟）；短期证书每日00/12点检查（随机最多10分钟）；监控每5分钟。

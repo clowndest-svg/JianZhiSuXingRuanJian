@@ -23,3 +23,13 @@
 ## 边界
 
 只支持双方都在 App 内在线时的 1:1 通话；App 被系统杀掉或后台断网时没有厂商推送，不会后台响铃；没有 PSTN/手机号呼入、没有通话录音/历史记录。TURN 只有 UDP，运营商封锁 UDP 的网络会失败并提示，语音消息仍可用。当前无 ADB 设备，实体手机的系统麦克风弹窗、听筒/扬声器实际路由和厂商输入法/后台策略仍需真机各点一次；Chromium 假麦克风与强制 relay 不能替代这些人工项。
+
+## 资源保护（2026-10-21 追加）
+
+为防 Directus/本地 llama 的尖峰挤占主服务，已加硬上限并保留运行时余量：
+
+- Directus 容器：768MB 内存（无 swap）、1 核；当前约 210MB、0.5% CPU，健康检查 200。
+- llama：`MemoryHigh=1000M`、`MemoryMax=1200M`、`CPUQuota=200%`；当前约 208MB，健康检查 200。
+- qingsu 与 coturn：`CPUWeight=500`；两者均 active。
+- 持久化：llama/qingsu/coturn 用 systemd drop-in，Directus 用 `docker-compose.override.yml` + `docker update`；重建脚本 `scripts/provision-resource-limits.sh`。
+- 监控新增 `cpu_percent / memory_percent / swap_percent / load_per_core / disk_percent`，阈值 85/85/25/1.5/85；当前读数 0.3/42.2/0.4/0.02/25.4，`problems: []`。已用 `QINGSU_MONITOR_*=-1` 逐项强制越线，分别得到 `high_cpu/low_memory/high_swap/high_load/low_disk` 且 exit 1；恢复正常后 exit 0。监控脚本已装到现网。
