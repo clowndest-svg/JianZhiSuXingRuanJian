@@ -87,6 +87,14 @@ class ChatMedia(unittest.TestCase):
                 self.assertTrue(again.json()['duplicate'])
                 self.assertEqual(again.json()['message']['id'], sent.json()['message']['id'])
 
+    def test_voice_duration_rounds_to_nearest_second(self):
+        # 1 秒整的语音显示 1″；向上取整会显示 2″（r170 及以前）。
+        for ext in ('ogg', 'webm'):
+            with self.subTest(ext=ext):
+                up = self.upload(ext)
+                self.assertEqual(up.status_code, 200, up.text)
+                self.assertEqual(up.json()['duration'], 1)
+
     def test_missing_and_stolen_voice_rejected(self):
         self.assertEqual(self.send('audio', media_name='missing.audio.ogg').status_code, 400)
         up = self.upload(who=2).json()

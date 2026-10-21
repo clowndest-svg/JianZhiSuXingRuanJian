@@ -2423,18 +2423,22 @@ function dmCancelRecording() {
     const panel = cmEl('dm-voice-panel'); if (panel) { panel.hidden = true; panel.innerHTML = ''; }
     cmEl('dm-hold-bar')?.setAttribute('aria-expanded', 'false');
     dmHoldPaint();
+    dmHoldRender();
 }
 function dmPaintVoice(rec) {
     const panel = cmEl('dm-voice-panel'); if (!panel || dmUi.record !== rec) return;
-    panel.hidden = false; cmEl('dm-hold-bar')?.setAttribute('aria-expanded', 'true');
+    cmEl('dm-hold-bar')?.setAttribute('aria-expanded', 'true');
+    if (rec.hold) {
+        panel.hidden = true; panel.innerHTML = '';
+        dmHoldRender();
+        return;
+    }
+    panel.hidden = false;
     if (rec.status === 'preview') {
         panel.innerHTML = '<div class="dm-voice-head"><b>语音预览</b><span>' + rec.duration + ' 秒' + (rec.autoStopped ? ' · 已达 10 分钟上限' : '') + '</span></div>'
             + '<audio id="dm-voice-preview" src="' + escapeHtml(rec.url) + '" controls preload="metadata" aria-label="试听录制的语音"></audio>'
             + '<p class="dm-panel-note" id="dm-voice-status" role="status">仅保存在本机，确认发送后才上传。</p>'
             + '<div class="dm-voice-actions"><button type="button" onclick="dmCancelRecording()">取消</button><button type="button" class="dm-confirm" id="dm-voice-send" onclick="dmSendAudio()">发送语音</button></div>';
-    } else if (rec.hold) {
-        panel.innerHTML = '<div class="dm-voice-head"><b>' + (rec.status === 'starting' ? '正在请求麦克风…' : '正在录音') + '</b><span id="dm-voice-time" role="timer">0:00 / 10:00</span></div>'
-            + '<p class="dm-panel-note">松开发送 · 上滑取消</p>';
     } else {
         panel.innerHTML = '<div class="dm-voice-head"><b>' + (rec.status === 'starting' ? '正在请求麦克风…' : '正在录音') + '</b><span id="dm-voice-time" role="timer">0:00 / 10:00</span></div>'
             + '<p class="dm-panel-note">停止后可试听；退出聊天或切到后台会取消录音。</p><div class="dm-voice-actions">'
@@ -2473,17 +2477,65 @@ async function dmEnsureMicrophone() {
         setTimeout(() => finish(false), 20000);
     });
 }
+const DM_HOLD_HTML = '<div class="dm-hold-bubble" aria-hidden="true">'
+    + '<span class="dm-hold-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>'
+    + '<span class="dm-hold-sec" id="dm-hold-sec">0″</span></div>'
+    + '<div class="dm-hold-pills">'
+    + '<button type="button" class="dm-hold-pill" onclick="dmHoldCancelTap()">取消</button>'
+    + '<div class="dm-hold-pill is-hint">上滑取消</div>'
+    + '</div>'
+    + '<div class="dm-hold-sheet">'
+    + '<div class="dm-hold-sheet-top"><span class="dm-hold-live" id="dm-hold-live">正在录音</span><span id="dm-hold-time" role="timer">0:00</span></div>'
+    + '<b id="dm-hold-sheet-main" aria-live="polite">松开 发送</b>'
+    + '</div>';
+function dmHoldLayer() {
+    let layer = cmEl('dm-hold-layer');
+    if (!layer) {
+        layer = document.createElement('section');
+        layer.id = 'dm-hold-layer';
+        layer.className = 'dm-hold-layer';
+        layer.hidden = true;
+        document.body.appendChild(layer);
+    }
+    return layer;
+}
+function dmHoldRender() {
+    const layer = dmHoldLayer();
+    if (!dmHold.pending && !dmHold.held) {
+        if (!layer.hidden) { layer.hidden = true; layer.innerHTML = ''; }
+        return;
+    }
+    if (!layer.innerHTML) layer.innerHTML = DM_HOLD_HTML;
+    layer.hidden = false;
+    const rec = dmUi.record;
+    const starting = !rec || rec.status === 'starting';
+    layer.classList.toggle('cancel', !!dmHold.cancelled);
+    layer.classList.toggle('starting', starting);
+    cmText('dm-hold-live', dmHold.cancelled ? '松开会取消' : (starting ? '正在准备麦克风…' : '正在录音'));
+    cmText('dm-hold-sheet-main', dmHold.cancelled ? '松开 取消' : '松开 发送');
+}
+function dmHoldCancelTap() {
+    if (!dmHold.pending && !dmHold.held) return;
+    clearTimeout(dmHold.timer);
+    dmCancelRecording();
+    dmHoldPaint();
+    dmHoldRender();
+    callNativeToast('已取消语音');
+}
 function dmHoldDown(event) {
     if (event && event.button !== undefined && event.button !== 0) return;
     clearTimeout(dmHold.timer);
     dmHold.pending = true; dmHold.held = false; dmHold.released = false;
     dmHold.cancelled = false; dmHold.startY = event.clientY;
     try { event.currentTarget.setPointerCapture(event.pointerId); } catch (e) {}
+    dmHoldRender();
+    callNativeVibrate(12);
     dmHold.timer = setTimeout(() => {
         if (!dmHold.pending) return;
-        if (dmHold.cancelled) { dmHold.pending = false; return; }
+        if (dmHold.cancelled) { dmHold.pending = false; dmHoldRender(); return; }
         dmHold.pending = false; dmHold.held = true;
         dmHoldPaint();
+        dmHoldRender();
         dmStartRecording(true);
     }, 220);
     dmHoldPaint();
@@ -2492,33 +2544,38 @@ function dmHoldDown(event) {
 function dmHoldMove(event) {
     if (!dmHold.pending && !dmHold.held) return;
     const cancel = event.clientY < dmHold.startY - 55;
-    if (cancel && !dmHold.cancelled) { dmHold.cancelled = true; callNativeToast('松开会取消语音'); }
-    else if (!cancel && dmHold.cancelled) dmHold.cancelled = false;
-    dmHoldPaint();
+    if (cancel !== dmHold.cancelled) {
+        dmHold.cancelled = cancel;
+        dmHoldPaint(); dmHoldRender();
+        if (cancel) callNativeVibrate(20);
+    }
 }
 function dmHoldUp(event) {
     clearTimeout(dmHold.timer);
     if (dmHold.pending && !dmHold.held) {
         dmHold.pending = false;
-        if (dmHold.cancelled) { callNativeToast('已取消语音'); dmHoldPaint(); return; }
-        callNativeToast('按住说话，松开发送');
-        dmHoldPaint();
+        if (dmHold.cancelled) { dmHold.cancelled = false; callNativeToast('已取消语音'); }
+        else callNativeToast('按住说话，松开发送');
+        dmHoldPaint(); dmHoldRender();
         return;
     }
     if (!dmHold.held) return;
-    dmHold.held = false; dmHold.released = true; dmHoldPaint();
+    dmHold.held = false; dmHold.pending = false; dmHold.released = true;
+    dmHoldPaint();
     const rec = dmUi.record;
-    if (dmHold.cancelled) { dmCancelRecording(); callNativeToast('已取消语音'); return; }
+    if (dmHold.cancelled) { dmHold.cancelled = false; dmCancelRecording(); dmHoldRender(); callNativeToast('已取消语音'); return; }
+    dmHoldRender();
     if (!rec) { callNativeToast('按住说话，松开发送'); return; }
-    if (rec.status === 'starting') return;
+    if (rec.status === 'starting') { dmCancelRecording(); dmHoldRender(); callNativeToast('说话时间太短，按住说话'); return; }
     if (rec.status !== 'recording') return;
-    if (dmNow() - rec.started < 600) { dmCancelRecording(); callNativeToast('说话时间太短，按住说话'); return; }
+    if (dmNow() - rec.started < 600) { dmCancelRecording(); dmHoldRender(); callNativeToast('说话时间太短，按住说话'); return; }
+    callNativeVibrate(10);
     dmStopRecording(true);
 }
 function dmHoldCancel() {
     clearTimeout(dmHold.timer); dmHold.pending = false;
     if (dmHold.held) { dmHold.held = false; dmCancelRecording(); }
-    dmHoldPaint();
+    dmHoldPaint(); dmHoldRender();
 }
 const DM_VOICE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"/></svg>';
 const DM_KEYBOARD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg>';
@@ -2583,6 +2640,10 @@ async function dmStartRecording(hold) {
             rec.blob = new Blob(rec.chunks, { type: rec.recorder.mimeType || rec.mime }); rec.chunks = [];
             if (!rec.blob.size || rec.blob.size > DM_AUDIO_MAX) { dmCancelRecording(); callNativeToast('没有录到可发送的语音，请重试'); return; }
             rec.url = URL.createObjectURL(rec.blob); rec.status = 'preview'; dmPaintVoice(rec);
+            if (rec.hold && rec.rid && cm.pending[rec.rid]) {
+                cm.pending[rec.rid].msg.media_url = rec.url;
+                if (dmIsVisible()) paintThread();
+            }
             if (rec.autoSend) { rec.autoSend = false; dmSendAudio(); }
         };
         rec.started = dmNow(); rec.status = 'recording'; rec.recorder.start(1000); dmPaintVoice(rec);
@@ -2595,7 +2656,10 @@ async function dmStartRecording(hold) {
         rec.tick = setInterval(() => {
             if (dmUi.record !== rec || !dmScopeAlive(rec.scope)) return;
             const n = Math.min(600, Math.floor((dmNow() - rec.started) / 1000));
-            cmText('dm-voice-time', Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0') + ' / 10:00');
+            const clock = Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0');
+            cmText('dm-voice-time', clock + ' / 10:00');
+            cmText('dm-hold-time', clock);
+            cmText('dm-hold-sec', n + '″');
         }, 1000);
         rec.limit = setTimeout(() => { if (dmUi.record === rec) dmStopRecording(true); }, 599000);
     } catch (e) {
@@ -2612,8 +2676,14 @@ async function dmStartRecording(hold) {
 }
 function dmStopRecording(auto) {
     const rec = dmUi.record; if (!rec || rec.status !== 'recording') return;
-    rec.duration = Math.min(600, Math.max(1, Math.ceil((dmNow() - rec.started) / 1000))); rec.autoStopped = !!auto;
+    rec.duration = Math.min(600, Math.max(1, Math.round((dmNow() - rec.started) / 1000))); rec.autoStopped = !!auto;
     rec.status = 'stopping'; clearInterval(rec.tick); clearTimeout(rec.limit); dmStopTracks(rec.stream);
+    // 松开就先把气泡放上屏（上传还没开始），别让用户盯着空白等服务器。
+    if (rec.autoSend && !rec.rid) {
+        rec.rid = dmRequestId();
+        dmPending(rec.rid, rec.scope, { kind: 'audio', duration: rec.duration });
+        if (dmIsVisible()) paintThread();
+    }
     const btn = cmEl('dm-voice-stop'); if (btn) { btn.disabled = true; btn.textContent = '正在准备试听…'; }
     try { rec.recorder.stop(); } catch (e) { dmCancelRecording(); callNativeToast('录音未能保存，请重试'); }
 }
@@ -2624,7 +2694,8 @@ async function dmSendAudio() {
     const s = rec.scope, rid = rec.rid, btn = cmEl('dm-voice-send');
     if (btn) { btn.disabled = true; btn.textContent = '发送中…'; }
     cmText('dm-voice-status', '正在上传语音…');
-    dmPending(rid, s, { kind: 'audio', duration: rec.duration }); paintThread();
+    if (!cm.pending[rid]) dmPending(rid, s, { kind: 'audio', duration: rec.duration });
+    if (dmIsVisible()) paintThread();
     try {
         if (!rec.mediaName) {
             const fd = new FormData(), ext = rec.mime.includes('mp4') ? 'm4a' : (rec.mime.includes('ogg') ? 'ogg' : 'webm');
@@ -2638,13 +2709,21 @@ async function dmSendAudio() {
         cmText('dm-voice-status', '正在确认发送…');
         const r = await rawPostApi('/api/chat/send', { to: s.threadId, kind: 'audio', media_name: rec.mediaName, duration: rec.duration, request_id: rid });
         dmAck(rid, r.message, s);
+        if (rec.hold) callNativeToast('语音已发送');
         if (dmScopeAlive(s) && dmUi.record === rec) dmCancelRecording();
     } catch (e) {
         if (!dmAccountAlive(s)) return;
         delete cm.pending[rid]; paintThread();
         if (!dmScopeAlive(s) || dmUi.record !== rec) return;
         rec.uploading = false;
-        if (btn) { btn.disabled = false; btn.textContent = '重试发送'; }
+        if (rec.hold) {
+            // 按住录音失败要看得见：气泡撤回，回到可试听/重试的面板。
+            rec.hold = false; rec.autoSend = false;
+            dmPaintVoice(rec);
+            callNativeToast('语音没发出去，点“发送语音”重试');
+        }
+        const retry = cmEl('dm-voice-send');
+        if (retry) retry.textContent = '重试发送';
         cmText('dm-voice-status', '未确认发送成功：' + (e.message || '网络不通') + '。可用同一条语音重试。');
     }
 }
@@ -2670,7 +2749,10 @@ function dmBubbleInner(m, kind, pending) {
     }
     if (['image', 'video', 'audio', 'sticker'].includes(kind)) {
         const url = dmMediaURL(m.media_url), src = escapeHtml(url);
-        if (!url) return '<span class="dm-media-wait">' + (pending ? '发送中…' : '附件暂不可用') + '</span>';
+        if (!url) {
+            if (kind === 'audio' && pending) return dmAudioPendingBubble(m);
+            return '<span class="dm-media-wait">' + (pending ? '发送中…' : '附件暂不可用') + '</span>';
+        }
         if (kind === 'audio') return dmAudioBubble(m, src);
         if (kind === 'video') return '<video class="dm-media-video" src="' + src + '" controls playsinline preload="metadata" onplay="dmExclusivePlayback(this)" oncontextmenu="event.stopPropagation();return true"></video>';
         const meta = m.sticker_meta || {}, source = dmExternalURL(meta.source_url);
@@ -2679,8 +2761,14 @@ function dmBubbleInner(m, kind, pending) {
     }
     return escapeHtml(m.body || '');
 }
-function dmAudioBubble(m, src) {
+function dmAudioPendingBubble(m) {
     const duration = Math.max(1, Number(m.duration || 0));
+    return '<div class="dm-audio-wx pending" aria-label="语音发送中">'
+        + '<span class="dm-audio-play" aria-hidden="true"><span class="dm-audio-spin"></span></span>'
+        + '<span class="dm-audio-wave" aria-hidden="true"><i></i><i></i><i></i></span>'
+        + '<span class="dm-audio-time">' + duration + '"</span></div>';
+}
+function dmAudioBubble(m, src) {    const duration = Math.max(1, Number(m.duration || 0));
     return '<div class="dm-audio-wx" role="button" tabindex="0" aria-label="播放 ' + duration + ' 秒语音" onclick="dmToggleAudio(this)">'
         + '<span class="dm-audio-play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span>'
         + '<span class="dm-audio-wave" aria-hidden="true"><i></i><i></i><i></i></span>'
