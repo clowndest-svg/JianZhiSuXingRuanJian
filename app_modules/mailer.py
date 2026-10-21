@@ -14,8 +14,9 @@ import smtplib
 import ssl
 import threading
 import time
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import formataddr
+from email.utils import formataddr, formatdate, make_msgid
 
 CONFIG_PATH = os.environ.get("QINGSU_MAIL_CONFIG", "/opt/qingsu/mail.json")
 
@@ -85,21 +86,40 @@ def status():
     return {"ok": True, "sender_domain": cfg["from"].split("@")[-1].lower()}
 
 
-def send(to_addr, subject, text):
+def send(to_addr, subject, text, purpose=""):
     """成功 (True, "")；失败 (False, 人话原因)。不把异常抛给调用方。
 
     失败原因只留异常类型名——smtplib 的报错里常带主机名、用户名甚至服务器应答原文，
     那些一旦进日志或进响应就等于把发信账号泄露出去。
+    正文同时给纯文本与极简 HTML：只有 HTML 或只有一行的信更像群发垃圾。
     """
     cfg = _config()
     if not cfg:
         return False, "邮件通道未接入，暂时发不出验证码"
     if not email_shape_ok(to_addr):
         return False, "邮箱格式不对，收不到信"
-    msg = MIMEText(text, "plain", "utf-8")
+    msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = formataddr(("轻塑减脂", cfg["from"]))
+    msg["From"] = formataddr(("轻塑", cfg["from"]))
     msg["To"] = to_addr
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=cfg["from"].split("@")[-1])
+    msg["Reply-To"] = cfg["from"]
+    msg["X-Auto-Response-Suppress"] = "All"
+    msg.attach(MIMEText(text, "plain", "utf-8"))
+    title = {"bind": "绑定邮箱", "reset": "重置密码", "register": "注册",
+             "login": "邮箱登录"}.get(purpose, "账号操作")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    code = ""
+    if lines:
+        code = lines[0].split("：")[-1].strip()[-6:]
+    rest = " ".join(lines[1:])
+    html = ('<div style="font-family:-apple-system,\'PingFang SC\',sans-serif;font-size:15px;'
+            'color:#1f2937;line-height:1.7">'
+            '<p>你正在进行「' + title + '」，验证码：</p>'
+            '<p style="font-size:28px;font-weight:700;letter-spacing:6px;color:#047857">' +
+            code + '</p><p style="color:#4b5563">' + rest + '</p></div>')
+    msg.attach(MIMEText(html, "html", "utf-8"))
     try:
         if cfg["tls"] in ("starttls", "tls"):
             smtp = smtplib.SMTP(cfg["host"], cfg["port"], timeout=15)

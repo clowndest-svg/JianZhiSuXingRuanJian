@@ -61,7 +61,7 @@ async def response_policy(request: Request, call_next):
     response.headers["X-Content-Type-Options"]="nosniff"
     response.headers["Referrer-Policy"]="no-referrer"
     response.headers["X-Frame-Options"]="DENY"
-    if request.url.path.startswith(("/api/","/u/","/uploads/")):
+    if request.url.path.startswith(("/api/", "/u/")) or (request.url.path.startswith("/uploads/") and "cache-control" not in response.headers):
         response.headers["Cache-Control"]="private, no-store"
     logging.getLogger("uvicorn.error").info("request id=%s path=%s status=%s elapsed_ms=%.1f",request_id,request.url.path.split("/")[1:2],response.status_code,(time.monotonic()-started)*1000)
     return response
@@ -530,6 +530,11 @@ def _community_schema(c):
         ("media_meta", "TEXT NOT NULL DEFAULT '{}'"),
         # 语音转文字的结果跟着消息存：同一段语音只转一次，两端都能看到。
         ("asr_text", "TEXT NOT NULL DEFAULT ''"),
+        # 引用回复：存被引用消息的快照，原消息撤回后引用块仍可读（微信同款做法）。
+        ("quote_id", "INTEGER NOT NULL DEFAULT 0"),
+        ("quote_name", "TEXT NOT NULL DEFAULT ''"),
+        ("quote_kind", "TEXT NOT NULL DEFAULT ''"),
+        ("quote_snippet", "TEXT NOT NULL DEFAULT ''"),
     ])
     c.execute("""
     CREATE TABLE IF NOT EXISTS user_blocks (
@@ -790,6 +795,13 @@ def _ip(request):
         return "unknown"
 
 
+def _app_build(request):
+    try:
+        return int((request.headers.get(BUILD_HEADER) or "0").strip() or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _login_blocked(key):
     return rate_peek("login:" + key) >= _LOGIN_MAX_FAILS
 
@@ -809,6 +821,7 @@ def _public_allowed(ip):
 # 旧包的代码已经装在用户手机上了，改不动，所以唯一能打得到它的杠杆在服务端：
 # 业务请求必须自带 X-App-Build，旧版根本不会发这个头，缺头即按"太旧"处理。
 BUILD_HEADER = "x-app-build"
+
 # 访客侧的两个大屏读数与打气不参与强更：把来看监督页的人挡在门外没有任何意义，
 # 它们本来就要求分享密钥并按 IP 限流。
 # 找回密码这三条也在豁免里：它们正是"人已经被挡在门外"时要用的，
@@ -982,10 +995,20 @@ class RegisterReq(ValidatedModel):
     goal_type: Optional[str] = "tone"
     dining_mode: Optional[str] = "takeout"
     special_population: bool = False
+    email: Optional[str] = None
+    email_code: Optional[str] = None
 
 class LoginReq(ValidatedModel):
     username: str
     password: str
+
+class EmailCodeReq(ValidatedModel):
+    email: str
+    purpose: str = "login"
+
+class EmailLoginReq(ValidatedModel):
+    email: str
+    code: str
 
 class ProfileUpdateReq(ValidatedModel):
     gender: Optional[str] = None
@@ -1077,12 +1100,34 @@ def _body_or_400(age, height, weight_jin, target_weight_jin):
 def register(req: RegisterReq, request: Request):
     if req.special_population:raise HTTPException(400,'本版本只提供一般成人记录预算，不适用于孕哺期或需要个性化营养治疗的情况')
     body = _body_or_400(req.age, req.height, req.weight_jin, req.target_weight_jin)
+    email = mailer.normalize(req.email or "")
+    # 新客户端（57+）注册必须带邮箱验证码；邮件通道都没接好时降级为老流程并留日志，
+    # 不能因为邮件服务挂掉就把所有新用户锁在门外。
+    try:
+        mail_ready = bool(mailer.status().get("ok"))
+    except Exception:
+        mail_ready = False
+    if _app_build(request) >= 57 and mail_ready and not mailer.email_shape_ok(email):
+        raise HTTPException(status_code=400, detail="注册需要填邮箱并获取验证码")
+    if _app_build(request) >= 57 and not mail_ready:
+        logging.getLogger("uvicorn.error").warning("register_email_gate_degraded mail_down")
+    if email and not mailer.email_shape_ok(email):
+        raise HTTPException(status_code=400, detail="邮箱格式不对，收不到验证码")
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT id FROM users WHERE username = ?", (req.username.strip(),))
     if c.fetchone():
         conn.close()
         raise HTTPException(status_code=400, detail="该用户名已存在，请直接登录或换一个用户名")
+    if email:
+        ok, why = _consume_email_code(conn, email, "register", req.email_code or "")
+        if not ok:
+            conn.close()
+            raise HTTPException(status_code=400, detail=why)
+        clash = c.execute("SELECT user_id FROM profiles WHERE email=? AND email<>''", (email,)).fetchone()
+        if clash:
+            conn.close()
+            raise HTTPException(status_code=400, detail="这个邮箱已经绑在另一个账号上了")
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     token = new_token()
@@ -1116,10 +1161,11 @@ def register(req: RegisterReq, request: Request):
 
         # Create profile
         c.execute("""
-        INSERT INTO profiles (user_id, gender, age, height, weight_jin, target_weight_jin, goal_type, dining_mode, scene, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'home', ?)
+        INSERT INTO profiles (user_id, gender, age, height, weight_jin, target_weight_jin, goal_type, dining_mode, scene, email, email_verified_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'home', ?, ?, ?)
         """, (user_id, req.gender, body["age"], body["height"], body["weight_jin"],
-               body["target_weight_jin"], req.goal_type, req.dining_mode, now))
+               body["target_weight_jin"], req.goal_type, req.dining_mode,
+               email, (now if email else ''), now))
 
         # Log initial baseline weight
         today = date.today().isoformat()
@@ -1204,6 +1250,57 @@ def login(req: LoginReq, request: Request):
         "public_url": public_url_for(user)
     }
 
+@app.post("/api/login/email")
+def login_email(req: EmailLoginReq, request: Request):
+    """邮箱验证码登录：账号密码之外的第二条路，失败同样计入 15 分钟限流。"""
+    addr = mailer.normalize(req.email)
+    if not mailer.email_shape_ok(addr):
+        raise HTTPException(status_code=400, detail="邮箱格式不对")
+    key = "%s|email|%s" % (_ip(request), addr)
+    if _login_blocked(key):
+        raise HTTPException(status_code=429, detail="失败次数过多，请 15 分钟后再试")
+    conn = get_db()
+    c = conn.cursor()
+    prof = c.execute("SELECT user_id, email_verified_at FROM profiles WHERE email=?", (addr,)).fetchone()
+    user = c.execute("SELECT * FROM users WHERE id=?", (prof["user_id"],)).fetchone() if prof and prof["email_verified_at"] else None
+    if not user:
+        _login_fail(key)
+        conn.close()
+        raise HTTPException(status_code=400, detail="邮箱或验证码不对")
+    ok, why = _consume_email_code(conn, addr, "login", req.code)
+    if not ok:
+        _login_fail(key)
+        conn.close()
+        raise HTTPException(status_code=400, detail=why)
+    if user["banned_at"]:
+        conn.close()
+        raise AccountBanned(user["ban_reason"])
+    token = new_token()
+    c.execute("DELETE FROM sessions WHERE expires_at<=?", (int(time.time()),))
+    c.execute("INSERT INTO sessions VALUES (?,?,?)", (hash_token(token), user["id"], int(time.time())+2592000))
+    try:
+        touch_region(c, user["id"], _ip(request))
+    except Exception as error:
+        logging.getLogger("uvicorn.error").warning("region_touch_failed uid=%s err=%s",
+                                                   user["id"], type(error).__name__)
+    conn.commit()
+    conn.close()
+    rate_reset("login:" + key)
+    user = dict(user)
+    return {
+        "code": 0, "msg": "登录成功！", "token": token,
+        "username": user["username"], "nickname": user["nickname"],
+        "id": int(user["id"]), "public_id": user["public_id"] or "",
+        "public_url": public_url_for(user)
+    }
+
+@app.post("/api/auth/email/send")
+def auth_email_send(req: EmailCodeReq, request: Request):
+    purpose = (req.purpose or "login").strip().lower()
+    if purpose not in ("register", "login"):
+        raise HTTPException(status_code=400, detail="不支持的验证码用途")
+    return _send_code(mailer.normalize(req.email), purpose, request)
+
 @app.get("/api/me")
 def get_me(user: dict = Depends(get_current_user)):
     conn = get_db()
@@ -1245,6 +1342,23 @@ def update_profile(req: ProfileUpdateReq, user: dict = Depends(get_current_user)
         SET gender=?, age=?, height=?, weight_jin=?, target_weight_jin=?, goal_type=?, dining_mode=?, scene=?, updated_at=?
         WHERE user_id = ?
         """, (gender, age, height, weight_jin, target_weight_jin, goal_type, dining_mode, scene, now, user["id"]))
+
+        # 档案里改体重=今天称了一次重：顶栏读的是"最新体重记录"，
+        # 只改档案表会让页面继续显示旧数字（140 斤那个 bug）。
+        try:
+            changed = weight_jin is not None and abs(float(weight_jin) - float(cur.get("weight_jin") or 0)) >= 0.01
+        except (TypeError, ValueError):
+            changed = False
+        if changed:
+            today = date.today().isoformat()
+            row = c.execute("SELECT id FROM weight_logs WHERE user_id=? AND log_date=? "
+                            "ORDER BY id DESC LIMIT 1", (user["id"], today)).fetchone()
+            if row:
+                c.execute("UPDATE weight_logs SET weight_jin=?, created_at=? WHERE id=?",
+                          (weight_jin, now, row["id"]))
+            else:
+                c.execute("INSERT INTO weight_logs (user_id, log_date, weight_jin, waist_cm, created_at) "
+                          "VALUES (?,?,?,0,?)", (user["id"], today, weight_jin, now))
 
         conn.commit()
     except Exception:conn.rollback();raise
@@ -1317,6 +1431,21 @@ def _send_code(addr, purpose, request):
     """
     if not mailer.email_shape_ok(addr):
         raise HTTPException(status_code=400, detail="邮箱格式不对，收不到信")
+    # 所有用途共用 60 秒冷却：反复点“发验证码”既骚扰收件箱，也把发信额度烧光。
+    conn = get_db()
+    try:
+        last = conn.execute("SELECT created_at FROM email_codes WHERE email_hash=? AND purpose=? "
+                            "ORDER BY id DESC LIMIT 1", (hash_token(addr), purpose)).fetchone()
+    finally:
+        conn.close()
+    if last:
+        try:
+            age = (datetime.now() - datetime.strptime(last["created_at"], "%Y-%m-%d %H:%M:%S")).total_seconds()
+        except (TypeError, ValueError):
+            age = 999
+        if age < 60:
+            wait = max(1, 60 - int(age))
+            raise HTTPException(status_code=429, detail="验证码刚发过，请 %d 秒后再试" % wait)
     st = mailer.status()
     if not st["ok"]:
         raise HTTPException(status_code=503, detail=st["why"])
@@ -1332,9 +1461,11 @@ def _send_code(addr, purpose, request):
         code = _issue_email_code(conn, addr, purpose)
     finally:
         conn.close()
-    body = ("轻塑减脂 验证码：%s\n%d 分钟内有效，只能用一次。\n"
-            "如果不是你本人操作，请忽略这封邮件，并尽快在 App 里修改密码。" % (code, CODE_TTL // 60))
-    sent, why = mailer.send(addr, "轻塑减脂 验证码", body)
+    body = ("轻塑 %s 验证码：%s\n%d 分钟内有效，只能用一次。\n"
+            "如果不是你本人操作，请忽略这封邮件，并尽快在 App 里修改密码。" %
+            ({"bind": "绑定邮箱", "reset": "重置密码", "register": "注册",
+              "login": "邮箱登录"}.get(purpose, "账号"), code, CODE_TTL // 60))
+    sent, why = mailer.send(addr, "轻塑验证码", body, purpose=purpose)
     if not sent:
         conn = get_db()
         try:
@@ -1646,7 +1777,7 @@ def compute_dashboard_data(user: dict) -> dict:
     c.execute("SELECT weight_jin FROM weight_logs WHERE user_id = ? ORDER BY log_date ASC,id ASC LIMIT 1", (user["id"],))
     first_wt = c.fetchone()
     q_start = first_wt["weight_jin"] if first_wt else None
-    current_weight = latest_wt["weight_jin"] if latest_wt else p.get("weight_jin", 140.0)
+    current_weight = latest_wt["weight_jin"] if latest_wt else p.get("weight_jin")
 
     # Calculate real remaining calorie budget
     # 运动日比休息日多 170 kcal（workout_cal - rest_cal），切换真的会改额度
@@ -3481,7 +3612,7 @@ def signed_photo(url,share_user=None):
     return f"/uploads/{name}?expires={expiry}&signature={sig}{audience}"
 
 @app.get("/uploads/{name}")
-def private_photo(name: str, expires: int=0, signature: str="",audience:int=0):
+def private_photo(name: str, expires: int=0, signature: str="",audience:int=0, thumb:int=0):
     payload=f"{name}:{expires}"
     if audience:
         c=get_db()
@@ -3501,8 +3632,41 @@ def private_photo(name: str, expires: int=0, signature: str="",audience:int=0):
     path=os.path.join(UPLOAD_DIR,name)
     if not os.path.isfile(path):raise HTTPException(status_code=404,detail="照片不存在")
     mime = "audio/ogg" if name.endswith(".audio.ogg") else (mimetypes.guess_type(name)[0] or "application/octet-stream")
+    cache = "private, max-age=86400" if mime.startswith(("image/", "video/", "audio/")) else "private, max-age=3600"
+    if thumb and mime.startswith("image/"):
+        small = _ensure_thumb(name, path)
+        if small:
+            return FileResponse(small, media_type="image/jpeg",
+                                headers={"Cache-Control": cache, "X-Content-Type-Options": "nosniff"})
     return FileResponse(path,media_type=mime,
-                        headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
+                        headers={"Cache-Control":cache,"X-Content-Type-Options":"nosniff"})
+
+
+def _ensure_thumb(name, path):
+    """按需生成 480px 缩略图（JPEG），文件名带原图名，原图不改。"""
+    small = os.path.join(UPLOAD_DIR, name + ".thumb.jpg")
+    if os.path.isfile(small):
+        return small
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(path) as image:
+            image.seek(0)
+            image = ImageOps.exif_transpose(image)
+            if image.mode in ("RGBA", "LA", "P"):
+                canvas = Image.new("RGB", image.size, (255, 255, 255))
+                rgba = image.convert("RGBA")
+                canvas.paste(rgba, mask=rgba.split()[-1])
+                image = canvas
+            else:
+                image = image.convert("RGB")
+            image.thumbnail((480, 480))
+            tmp = small + "." + uuid.uuid4().hex[:6]
+            image.save(tmp, format="JPEG", quality=82, optimize=True)
+            os.replace(tmp, small)
+    except Exception as error:
+        logging.getLogger("uvicorn.error").warning("thumb_failed name=%s err=%s", name, type(error).__name__)
+        return None
+    return small
 
 @app.post('/api/photo/delete')
 def delete_latest_photo(user:dict=Depends(get_current_user)):
@@ -3803,10 +3967,13 @@ def _post_card(conn, row, me):
                               (pid, me["id"])).fetchone()) if me else False
     followed = bool(conn.execute("SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?",
                                  (me["id"], row["user_id"])).fetchone()) if me else False
+    names = community.read_images(row["images"])
     return {"id": pid,
             "title": row["title"] or "",
             "body": row["body"],
-            "images": [signed_photo("/uploads/" + n) for n in community.read_images(row["images"])],
+            "images": [signed_photo("/uploads/" + n) for n in names],
+            # 列表只拉缩略图：原图 200~600KB，两列瀑布流一屏就是 1MB+。
+            "image_thumbs": [signed_photo("/uploads/" + n) + "&thumb=1" for n in names],
             "author": _user_brief(conn, row["user_id"]),
             "region": row["region"] or "",
             "created_at": row["created_at"],
@@ -3867,6 +4034,7 @@ class DmSendReq(ValidatedModel):
     media_name: str = ""
     request_id: Optional[str] = None
     duration: Optional[int] = None
+    quote_id: int = 0
 
 
 class StickerImportReq(ValidatedModel):
@@ -4736,7 +4904,25 @@ def mutual_follow(conn, a, b) -> bool:
                                  (b, a)).fetchone())
 
 
-def _deliver(conn, sender, to_id, body, request_id, kind="text", media_name="", dur=0):
+def _quote_snapshot(conn, quote_id, conv_key):
+    """引用块存的是发送那一刻的快照：原消息以后撤回/删除，引用块照样能读。"""
+    row = conn.execute("SELECT * FROM messages WHERE id=?", (int(quote_id),)).fetchone()
+    if not row or row["conv_key"] != conv_key:
+        raise HTTPException(status_code=400, detail="引用的消息不在这个会话里")
+    if row["recalled_at"]:
+        raise HTTPException(status_code=400, detail="引用的消息已撤回")
+    who = conn.execute("SELECT nickname, username FROM users WHERE id=?", (row["from_id"],)).fetchone()
+    name = ((who["nickname"] or who["username"] or "") if who else "").strip()[:20]
+    kind = row["kind"] or "text"
+    if kind == "text":
+        snippet = (row["body"] or "").strip().replace("\n", " ")[:60]
+    else:
+        snippet = {"image": "[图片]", "video": "[视频]", "audio": "[语音]",
+                   "sticker": "[表情]"}.get(kind, "[消息]")
+    return int(row["id"]), name, kind, snippet
+
+
+def _deliver(conn, sender, to_id, body, request_id, kind="text", media_name="", dur=0, quote_id=0):
     """落库 + 更新会话摘要，返回 (message dict, 是否重复)。WS 与 HTTP 兜底共用这一条路，
     两条路各写一份存法就会出现"走 WS 发的重进 App 找不到"。"""
     to = conn.execute("SELECT id FROM users WHERE id=?", (to_id,)).fetchone()
@@ -4776,11 +4962,14 @@ def _deliver(conn, sender, to_id, body, request_id, kind="text", media_name="", 
             return _message_dict(hit), True
     ck = chat.conv_key(sender["id"], to_id)
     stamp = _now()
+    q_id, q_name, q_kind, q_snippet = _quote_snapshot(conn, quote_id, ck) if quote_id else (0, "", "", "")
     try:
         cur = conn.execute(
             "INSERT INTO messages(conv_key,from_id,to_id,body,request_id,created_at,kind,media_name,"
-            "media_mime,media_size,media_w,media_h,media_dur,media_meta) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (ck, sender["id"], to_id, body, key, stamp, kind, media_name, mime, size, width, height, dur, metadata))
+            "media_mime,media_size,media_w,media_h,media_dur,media_meta,"
+            "quote_id,quote_name,quote_kind,quote_snippet) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (ck, sender["id"], to_id, body, key, stamp, kind, media_name, mime, size, width, height, dur, metadata,
+             q_id, q_name, q_kind, q_snippet))
     except sqlite3.IntegrityError:
         # WS 和 HTTP 兜底可能同时投同一条：UNIQUE(from_id,request_id) 顶回后到的那个。
         # 回到"已存在"这条路，别让用户看到一条发送失败的红字。
@@ -4821,6 +5010,9 @@ def _message_dict(row):
             "media_mime": (row["media_mime"] or "") if "media_mime" in names else "",
             "media_size": int(row["media_size"] or 0) if "media_size" in names else 0,
             "asr_text": "" if recalled else ((row["asr_text"] or "") if "asr_text" in names else ""),
+            "quote": ({"id": int(row["quote_id"]), "name": row["quote_name"] or "",
+                       "kind": row["quote_kind"] or "", "text": row["quote_snippet"] or ""}
+                      if "quote_id" in names and int(row["quote_id"] or 0) else None),
             "created_at": row["created_at"],
             "read_at": row["read_at"], "request_id": row["request_id"]}
 
@@ -5088,17 +5280,19 @@ def _store_sticker(raw, user, metadata=None):
 
 
 @app.get("/api/chat/stickers/search")
-def search_chat_stickers(q: str = "", provider: str = 'openmoji', user: dict = Depends(get_current_user)):
+def search_chat_stickers(q: str = "", provider: str = 'openmoji', page: int = 0,
+                         user: dict = Depends(get_current_user)):
     ok, *_ = rate_hit("sticker-search:%d" % user["id"], 20, 60)
     if not ok:
         raise HTTPException(status_code=429, detail="搜索太频繁了，歇一会儿")
     if not q.strip() or len(q) > 60:
         raise HTTPException(status_code=400, detail="请输入 1 到 60 字的表情关键词")
     try:
-        result = stickers.search(q, user["id"], media_key(), provider=provider)
+        result = stickers.search(q, user["id"], media_key(), provider=provider, page=page)
         return {"code": 0, "items": result["items"], "provider": result.get('provider', provider),
                 "available": result.get('available', True), "detail": result.get('detail'),
-                "sources": result.get('sources', []), "unavailable": result.get('unavailable', [])}
+                "sources": result.get('sources', []), "unavailable": result.get('unavailable', []),
+                "page": result.get('page', page), "has_more": bool(result.get('has_more'))}
     except stickers.ProviderUnavailable:
         return {"code": 0, "items": [], "provider": provider, "available": False,
                 "detail": "网络表情来源暂不可用，请稍后重试或上传自己的表情"}
@@ -5154,7 +5348,8 @@ def chat_send(req: DmSendReq, user: dict = Depends(get_current_user)):
     conn = get_db()
     try:
         msg, dup = _deliver(conn, user, int(req.to), body, req.request_id,
-                            kind=kind, media_name=req.media_name, dur=dur)
+                            kind=kind, media_name=req.media_name, dur=dur,
+                            quote_id=int(req.quote_id or 0))
     finally:
         conn.close()
     if not dup:
@@ -5550,7 +5745,8 @@ async def chat_socket(ws: WebSocket, ticket: str = ""):
                     conn = get_db()
                     try:
                         msg, dup = _deliver(conn, sender, int(data.get("to") or 0), body,
-                                            (data.get("request_id") or "")[:64] or None)
+                                            (data.get("request_id") or "")[:64] or None,
+                                            quote_id=int(data.get("quote_id") or 0))
                     finally:
                         conn.close()
                     if not dup:

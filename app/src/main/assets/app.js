@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 56;
+const APP_BUILD = 57;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -642,7 +642,7 @@ function applyDashboardData(data) {
         proteinG: data.metrics.protein_g,
         carbsG: data.metrics.carbs_g,
         fatG: data.metrics.fat_g,
-        summaryText: `${data.profile.height}cm · ${data.current_weight_jin}斤 · ${getGoalName(data.profile.goal_type)}`
+        summaryText: `${data.profile.height}cm · ${data.current_weight_jin == null ? '体重待记录' : data.current_weight_jin + '斤'} · ${getGoalName(data.profile.goal_type)}`
     };
     // 服务器返回的是存储形状（下划线），UI 读的是驼峰；以前直接赋值导致
     // 目标体重显示 undefined、差值算成 NaN、身材卡片退回女性第一款。
@@ -1777,6 +1777,76 @@ function switchAuthTab(tab) {
     }
 }
 
+function toggleEmailLogin() {
+    const box = document.getElementById("email-login-box");
+    if (!box) return;
+    box.hidden = !box.hidden;
+    if (!box.hidden) { const el = document.getElementById("login-email"); if (el && !el.value) el.focus(); }
+}
+
+/** 验证码 60 秒冷却：服务端也会拒（429），这里先把按钮按住并倒计时。 */
+function startCodeCountdown(btn, seconds = 60) {
+    if (!btn) return;
+    if (btn._codeTimer) clearInterval(btn._codeTimer);
+    let left = seconds;
+    btn.disabled = true;
+    btn.textContent = left + " 秒后重发";
+    btn._codeTimer = setInterval(() => {
+        left -= 1;
+        if (left <= 0) {
+            clearInterval(btn._codeTimer); btn._codeTimer = null;
+            btn.disabled = false; btn.textContent = "发送验证码";
+        } else btn.textContent = left + " 秒后重发";
+    }, 1000);
+}
+
+async function sendAuthCode(purpose) {
+    const input = document.getElementById(purpose === "register" ? "reg-email" : "login-email");
+    const email = ((input && input.value) || "").trim();
+    if (!email) { callNativeToast("先填邮箱"); return; }
+    const btn = document.getElementById(purpose === "register" ? "reg-code-btn" : "login-code-btn");
+    if (btn && btn.disabled) return;
+    try {
+        const res = await fetch(`${API_BASE}/api/auth/email/send`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: email, purpose: purpose })
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new Error((data && data.detail) || "验证码没发出去");
+        callNativeToast(data.msg || "验证码已发送，10 分钟内有效");
+        startCodeCountdown(btn);
+    } catch (e) { callNativeToast(e.message || "验证码没发出去"); }
+}
+
+async function applyAuthSuccess(data, message) {
+    saveAuthSession(data.token, { username: data.username, nickname: data.nickname });
+    state.publicUrl = data.public_url;
+    closeAuthModal();
+    callNativeToast(message);
+    callNativeVibrate(100);
+    await syncRemoteDashboard();
+    await syncRemoteCharts();
+    if (typeof refreshAccount === "function") refreshAccount().catch(() => {});
+}
+
+async function submitEmailLogin() {
+    const email = ((document.getElementById("login-email") || {}).value || "").trim();
+    const code = ((document.getElementById("login-email-code") || {}).value || "").trim();
+    if (!email || !code) { callNativeToast("邮箱和验证码都要填"); return; }
+    try {
+        const res = await fetch(`${API_BASE}/api/login/email`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: email, code: code })
+        });
+        const data = await res.json();
+        if (data.token) {
+            await applyAuthSuccess(data, `🎉 欢迎回来，${escapeHtml(displayName(data))}！`);
+        } else {
+            callNativeToast(data.detail || "邮箱或验证码不对");
+        }
+    } catch (e) { callNativeToast("网络连接失败，请检查网络"); }
+}
+
 async function submitLogin() {
     const u = document.getElementById("login-username").value.trim();
     const p = document.getElementById("login-password").value.trim();
@@ -1813,7 +1883,11 @@ async function submitRegister() {
     const h = parseFloat(document.getElementById("reg-height").value);
     const w = parseFloat(document.getElementById("reg-weight").value);
     const target=parseFloat(document.getElementById("reg-target-weight").value);
+    const email=((document.getElementById("reg-email")||{}).value||"").trim();
+    const code=((document.getElementById("reg-code")||{}).value||"").trim();
     if(!Number.isFinite(target)||target<40||target>600){callNativeToast("请填写你确认的目标体重（40–600斤）");return;}
+    if(!/^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/.test(email)){callNativeToast("请填写有效邮箱，并点“发送验证码”");return;}
+    if(!/^\d{6}$/.test(code)){callNativeToast("请填写邮箱收到的 6 位验证码");return;}
 
     if (!u || !p) { callNativeToast("请填写注册用户名和密码"); return; }
     // 这三项决定每日热量额度：空着或离谱就不许注册，不再悄悄用 26/165/140 顶上
@@ -1833,6 +1907,7 @@ async function submitRegister() {
             body: JSON.stringify({
                 username: u, password: p, gender: g, age: a, height: h,
                 weight_jin: w, target_weight_jin: target,
+                email: email, email_code: code,
                 special_population: document.getElementById('reg-special-population').checked,
                 goal_type: "tone", dining_mode: "takeout"
             })
@@ -1858,7 +1933,7 @@ async function logoutUser() {
     try { if (state.token) await rawPostApi("/api/logout",{}); }
     catch(e) { callNativeToast("本机已退出；网络异常，服务器会话尚未撤销"); }
     sessionGeneration++;
-    localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(USER_KEY);localStorage.removeItem("QINGSU_AVATAR_DATA");
     state=JSON.parse(JSON.stringify(INITIAL_STATE)); wbRows=null;
     uncertainWrites.clear();pendingWrites.clear();
     resetPrivateUI();updateUserUI(null);

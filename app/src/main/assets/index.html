@@ -1336,8 +1336,23 @@
                     <button class="btn-primary" style="margin-top: 10px;" onclick="submitLogin()">
                         🚀 立即登录并载入真实档案
                     </button>
+                    <div id="email-login-box" hidden style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);">
+                        <div class="form-group">
+                            <label class="form-label" for="login-email">邮箱验证码登录</label>
+                            <input type="email" id="login-email" placeholder="注册时绑定的邮箱" class="input-control" maxlength="200">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="login-email-code">验证码</label>
+                            <div style="display:flex; gap:8px;">
+                                <input id="login-email-code" inputmode="numeric" maxlength="6" placeholder="6 位验证码" class="input-control" style="flex:1; min-width:0;">
+                                <button type="button" class="btn-primary" id="login-code-btn" style="width:auto; padding:0 14px; white-space:nowrap;" onclick="sendAuthCode('login')">发送验证码</button>
+                            </div>
+                        </div>
+                        <button class="btn-primary" style="margin-top: 6px;" onclick="submitEmailLogin()">用邮箱验证码登录</button>
+                    </div>
                     <div style="font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 10px;">
                         新用户请切换至【注册新用户】录入个人真实身高体重
+                        · <button type="button" class="link-like" onclick="toggleEmailLogin()">用邮箱验证码登录</button>
                         · <button type="button" class="link-like" onclick="openForgotPassword()">忘记密码</button>
                     </div>
                 </div>
@@ -1351,6 +1366,17 @@
                     <div class="form-group">
                         <label class="form-label" for="reg-password">密码</label>
                         <input type="password" id="reg-password" placeholder="设置您的密码" class="input-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="reg-email">邮箱（用于找回密码与邮箱登录）</label>
+                        <input type="email" id="reg-email" placeholder="例如 you@example.com" class="input-control" maxlength="200">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="reg-code">邮箱验证码</label>
+                        <div style="display:flex; gap:8px;">
+                            <input id="reg-code" inputmode="numeric" maxlength="6" placeholder="6 位验证码" class="input-control" style="flex:1; min-width:0;">
+                            <button type="button" class="btn-primary" id="reg-code-btn" style="width:auto; padding:0 14px; white-space:nowrap;" onclick="sendAuthCode('register')">发送验证码</button>
+                        </div>
                     </div>
                     <div class="form-row-2 form-group">
                         <div>

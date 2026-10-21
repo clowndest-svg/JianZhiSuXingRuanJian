@@ -325,6 +325,7 @@ async function refreshAccount(){
     try { if (typeof connectChat === "function") connectChat(); } catch (e) {}
     try{
         accountCache=await getJson('/api/account');
+        if(accountCache)rememberAvatar(accountCache.avatar_url||'');
         // 昵称可能在别的入口改过，或这是旧版本存下的会话：顶栏名字要跟着这次回读刷新，
         // 不能一直停在登录那一刻读到的值。
         if(accountCache&&accountCache.user){
@@ -345,11 +346,30 @@ async function refreshAccount(){
 }
 
 /** 顶栏圆点：有头像放头像，没头像用昵称首字做字母章，一个字符都没有才落回"轻"。
-    用 Array.from 而不是 [0]：昵称可能以 emoji 开头，直接按下标取会切出半个码元变成乱码。 */
+    用 Array.from 而不是 [0]：昵称可能以 emoji 开头，直接按下标取会切出半个码元变成乱码。
+    头像地址本地留一份：冷启动时 /api/account 还没回来，先用上次的地址，
+    否则每次进 App 都会先闪一下字母章。 */
+function cachedAvatar(){ try{ return localStorage.getItem('QINGSU_AVATAR_DATA')||''; }catch(e){ return ''; } }
+function rememberAvatar(url){
+    try{
+        if(!url){ localStorage.removeItem('QINGSU_AVATAR_DATA'); return; }
+        // 头像走签名链接，15 分钟就过期，直接缓存 URL 过一晚就是坏图。
+        // 缓存成 data URL：冷启动先画这一张，账号接口回来后再用新的。
+        const full=/^(data:|https?:)/.test(url)?url:API_BASE+url;
+        if(/^data:image\//.test(full)){ try{localStorage.setItem('QINGSU_AVATAR_DATA',full);}catch(e){} return; }
+        fetch(full).then(r=>r.ok?r.blob():null).then(blob=>{
+            if(!blob||blob.size>300*1024)return;
+            const reader=new FileReader();
+            reader.onload=()=>{ try{localStorage.setItem('QINGSU_AVATAR_DATA',String(reader.result||''));}catch(e){} };
+            reader.readAsDataURL(blob);
+        }).catch(()=>{});
+    }catch(e){}
+}
 function paintAccountBadge(){
     const host=document.getElementById('header-avatar-slot');
     const u=(accountCache&&accountCache.user)||state.user||{};
-    const who={name:String(u.nickname||u.username||'').trim(),avatar:accountCache&&accountCache.avatar_url};
+    const avatar=((accountCache&&accountCache.avatar_url)||cachedAvatar()||'');
+    const who={name:String(u.nickname||u.username||'').trim(),avatar};
     if(host)host.innerHTML=cmAvatarInner(who);
     // 底部导航与桌面顶栏里那颗"我的"用的是同一张脸，三处必须同时换，
     // 不然改了头像之后只有顶栏变了、下面还是旧字母。
@@ -419,11 +439,13 @@ async function openAccountCenter(){
       <div class="td-group">
         ${tdValueRow('已绑邮箱',a.email_bound?a.email_masked+(a.email_verified?'（已验证）':'（未验证）'):'未绑定')}
         <label class="td-field-row"><span class="td-field-label">邮箱</span><input id="bind-email" type="email" maxlength="200" placeholder="用于找回密码"></label>
-        <label class="td-field-row"><span class="td-field-label">验证码</span><input id="bind-code" inputmode="numeric" maxlength="6" placeholder="十分钟内有效"></label>
+        <label class="td-field-row"><span class="td-field-label">验证码</span><input id="bind-code" inputmode="numeric" maxlength="6" placeholder="先点“发验证码”，再填收到的 6 位数字"></label>
         <div class="td-actions">
-          <button type="button" class="td-btn-quiet" onclick="sendBindCode()">发验证码</button>
+          <button type="button" class="td-btn-quiet" id="bind-code-btn" onclick="sendBindCode()">发验证码</button>
           <button type="button" class="td-btn" onclick="verifyBindCode()">绑定并验证</button>
         </div>
+        <div class="td-actions"><button type="button" class="td-btn-quiet" onclick="openForgotPassword()">用邮箱验证码重置密码</button></div>
+        <p class="td-note">验证码 10 分钟有效，60 秒内只能发一次。重置密码会要求填新密码，成功后所有设备下线。</p>
         <p id="email-status" class="td-status" role="status" ${a.mail==='up'?'':'data-err="1"'}>${escapeHtml(mailLine)}</p>
       </div>
       <div class="td-group-label">修改密码</div>
@@ -530,9 +552,12 @@ async function sendBindCode(){
     const box=document.getElementById('bind-email');
     const email=(box&&box.value||'').trim();
     if(!email){tdStatus('email-status','先填邮箱',true);return;}
+    const btn=document.getElementById('bind-code-btn');
+    if(btn&&btn.disabled)return;
     try{
         const r=await postApi('/api/account/email/send',{email});
         tdStatus('email-status',r.msg+'（'+r.ttl_minutes+' 分钟内有效）');
+        startCodeCountdown(btn);
     }catch(e){tdStatus('email-status',e.message||'验证码没发出去',true);}
 }
 
@@ -580,13 +605,15 @@ async function openForgotPassword(){
       <div class="td-group-label">第 1 步：发验证码</div>
       <div class="td-group">
         <label class="td-field-row"><span class="td-field-label">注册时绑定的邮箱</span><input id="fg-email" type="email" maxlength="200"></label>
-        <div class="td-actions"><button type="button" class="td-btn" onclick="sendForgotCode()">发送验证码</button></div>
+        <div class="td-actions"><button type="button" class="td-btn" id="fg-code-btn" onclick="sendForgotCode()">发送验证码</button></div>
       </div>
       <div class="td-group-label">第 2 步：填验证码与新密码</div>
       <div class="td-group">
         <label class="td-field-row"><span class="td-field-label">验证码</span><input id="fg-code" inputmode="numeric" maxlength="6"></label>
         <label class="td-field-row"><span class="td-field-label">新密码（至少 8 位）</span><input id="fg-pw" type="password" maxlength="200" autocomplete="new-password"></label>
+        <label class="td-field-row"><span class="td-field-label">再输一遍新密码</span><input id="fg-pw2" type="password" maxlength="200" autocomplete="new-password"></label>
         <div class="td-actions"><button type="button" class="td-btn" onclick="submitForgotReset()">重置密码</button></div>
+        <p class="td-note">验证码 60 秒内只能发一次；重置成功后所有设备下线，请用新密码登录。</p>
       </div>
       <p id="fg-status" class="td-status" role="status"></p>
       <p class="td-note">没绑过邮箱的账号找不回来：本软件不采集手机号，也没有人工客服通道。这条限制是明摆着的，不做"假装能找回"。</p>`);
@@ -600,10 +627,13 @@ async function openForgotPassword(){
 async function sendForgotCode(){
     const email=((document.getElementById('fg-email')||{}).value||'').trim();
     if(!email){tdStatus('fg-status','先填邮箱',true);return;}
+    const btn=document.getElementById('fg-code-btn');
+    if(btn&&btn.disabled)return;
     try{
         const r=await publicPost('/api/account/forgot',{email});
         // 服务端对"绑过"和"没绑过"给同一句话，这里也不许加区别
         tdStatus('fg-status',r.msg);
+        startCodeCountdown(btn);
     }catch(e){tdStatus('fg-status',e.message||'验证码没发出去',true);}
 }
 
@@ -611,8 +641,10 @@ async function submitForgotReset(){
     const email=((document.getElementById('fg-email')||{}).value||'').trim();
     const code=((document.getElementById('fg-code')||{}).value||'').trim();
     const pw=((document.getElementById('fg-pw')||{}).value||'');
+    const pw2=((document.getElementById('fg-pw2')||{}).value||'');
     if(!email||!code){tdStatus('fg-status','邮箱和验证码都要填',true);return;}
     if(pw.length<8){tdStatus('fg-status','新密码至少 8 位',true);return;}
+    if(pw!==pw2){tdStatus('fg-status','两次输入的新密码不一样',true);return;}
     try{
         const r=await publicPost('/api/account/reset',{email,code,new_password:pw});
         tdStatus('fg-status',r.msg);
@@ -821,7 +853,7 @@ function cmText0(stamp) { return String(stamp || "").slice(0, 10); }
 /* 头像点：有图用图，没图用昵称首字（Array.from 防 emoji 被按下标切半个码元） */
 function cmAvatarInner(user, fallback) {
     const url = user && user.avatar;
-    if (url) return '<img src="' + escapeHtml(API_BASE + url) + '" alt="">';
+    if (url) return '<img src="' + escapeHtml(/^(data:|https?:)/.test(url) ? url : API_BASE + url) + '" alt="">';
     const nm = String((user && user.name) || fallback || "").trim();
     const first = nm ? Array.from(nm)[0] : "轻";
     return escapeHtml(first.toUpperCase());
@@ -869,13 +901,15 @@ function syncCardCounts(postId) {
    一屏只能容两条，看着像时间线不像广场。 */
 function cmCardHTML(p, withId) {
     const imgs = p.images || [];
+    const thumbs = p.image_thumbs || [];
     const hasImg = imgs.length > 0;
-    // 没图时那张文字卡就是封面：标题（或正文）已经印在上面了，
-    // 下面那行再写一遍就成了"同一句话出现两次"（截图里最难看的就是这个）。
+    // 封面用 480px 缩略图：原图动辄 200~600KB，两列瀑布流一屏就是上 MB。
+    const coverSrc = API_BASE + (thumbs[0] || imgs[0] || "");
+    const fullSrc = API_BASE + (imgs[0] || "");
     const cover = hasImg
-        ? '<img src="' + escapeHtml(API_BASE + imgs[0]) + '" alt="帖子配图" loading="lazy"'
+        ? '<img src="' + escapeHtml(coverSrc) + '" alt="帖子配图" loading="lazy"'
           + ' onclick="event.stopPropagation();viewPostImage(\'' +
-          escapeHtml(API_BASE + imgs[0]).replace(/'/g, "%27") + '\')"'
+          escapeHtml(fullSrc).replace(/'/g, "%27") + '\')"'
           + ' ondblclick="dblLikePost(' + p.id + ',this)">'
           + (imgs.length > 1 ? '<span class="cm-cover-more">' + imgs.length + ' 张图</span>' : "")
         : '<span class="cm-cover-none">' + escapeHtml((p.title || p.body || "").slice(0, 60) || "这条只有一句话") + "</span>";
@@ -900,12 +934,23 @@ function renderFeed() {
     host.innerHTML = cm.items.map(function (p) { return cmCardHTML(p, true); }).join("");
     const more = cmEl("cm-more");
     if (more) more.hidden = !cm.more;
+    setupFeedMoreObserver();
     if (cmState("cm-feed-state", ""), !cm.items.length) {
         cmState("cm-feed-state", cm.feed === "mine" ? "你还没有发过帖子，上面那条就是入口。"
             : cm.feed === "follow" ? "关注的人发的帖子会出现在这里。现在还没有。"
             : cm.feed === "city" ? "同城还没有帖子。属地是发帖子或评论时按 IP 认出来的，只到省一级。"
             : "广场还空着，第一条可以你来发。");
     }
+}
+
+/** 滚到“看更早的”时自动拉下一页；按钮本身保留给网页端手动点。 */
+function setupFeedMoreObserver() {
+    const more = cmEl("cm-more");
+    if (!more || more.dataset.observed || typeof IntersectionObserver !== "function") return;
+    more.dataset.observed = "1";
+    new IntersectionObserver(function (entries) {
+        if (entries.some(function (e) { return e.isIntersecting; }) && cm.more && !cm.loading) loadCommunity(true);
+    }, { rootMargin: "240px 0px" }).observe(more);
 }
 
 async function loadCommunity(append) {
@@ -1974,7 +2019,7 @@ const DM_PHRASES = ["在呢", "哈哈哈哈", "晚点聊", "收到～", "好滴"
 
 const dmUi = { threadId: 0, generation: 0, panel: "", tab: "official", query: "",
     searchSeq: 0, results: [], busy: false, composing: false, record: null, draft: null, caret: [0, 0],
-    stickBottom: true, voiceMode: false };
+    stickBottom: true, voiceMode: false, quote: null, searchPage: 0, searchHasMore: false };
 const dmSearchCache = new Map();
 const dmHold = {pending:false,timer:0,held:false,released:false,cancelled:false,startY:0};
 const dmCall = {
@@ -2030,6 +2075,7 @@ function dmCleanup() {
     dmClosePanels();
     dmUi.threadId = 0; dmUi.query = ""; dmUi.results = []; dmUi.tab = "official";
     dmUi.busy = false; dmUi.composing = false; dmUi.textRetry = null; dmUi.stickBottom = true;
+    dmUi.quote = null; dmUi.searchPage = 0; dmUi.searchHasMore = false;
     qsBubbleCancel(); qsHideMenu();
 }
 function dmScrollLatest(force) {
@@ -2093,6 +2139,7 @@ function dmFootHTML() {
         + tile('常用语', 'dmShowPhrases()', false) + '</div>'
         + '<p class="dm-lock-hint" id="dm-lock-hint">互相关注后才能发图片和视频；表情、语音不受此限制。</p>'
         + '<div class="dm-phrases" id="dm-phrases" hidden>' + DM_PHRASES.map(p => '<button type="button" onclick="dmUsePhrase(\'' + escapeHtml(p) + '\')">' + escapeHtml(p) + '</button>').join('') + '</div></section>'
+        + '<section id="dm-quote-bar" class="dm-quote-bar" hidden></section>'
         + '<section id="dm-draft" class="dm-draft" aria-label="待发送附件" hidden></section>'
         + '<section class="dm-panel dm-voice-panel" id="dm-voice-panel" aria-label="语音录制与预览" hidden></section>'
         + '<input type="file" id="dm-sticker-file" accept="image/gif,image/png,image/webp,image/jpeg" class="file-hidden" onchange="dmPickSticker(this)">'
@@ -2107,10 +2154,12 @@ function dmMountComposer() {
         qsSetFoot(dmFootHTML());
         try { dmUi.voiceMode = localStorage.getItem('QINGSU_DM_INPUT_MODE') === 'voice'; } catch (e) { dmUi.voiceMode = false; }
         dmPaintInputMode();
+        dmBindStickerScroll();
         const s = dmScope();
         dmLoadOfficial().then(() => { if (dmScopeAlive(s)) { dmPaintOfficial(); dmRenderBubbles(); } });
     }
     const mutual = !!cm.thread.partner.mutual_follow;
+    dmPaintQuote();
     const foot = cmEl("pl-foot");
     if (foot) foot.querySelectorAll("[data-dm-mutual]").forEach(el => { el.disabled = !mutual; });
     const hint = cmEl("dm-lock-hint"); if (hint) hint.hidden = mutual;
@@ -2202,16 +2251,60 @@ function dmStickerEmpty(detail) {
         + '<div class="dm-suggest">' + ['你好', '猫', '无语', '开心'].map(word => '<button type="button" onclick="dmSuggestion(\'' + word + '\')">' + word + '</button>').join('') + '</div>'
         + '<button type="button" class="dm-generate-btn" onclick="dmGenerateMeme()">用这句话生成梗图</button></div>';
 }
-function dmPaintNetwork(result, provider) {
+function dmPaintNetwork(result, provider, append) {
     const host = cmEl('dm-sticker-content'); if (!host) return;
-    dmUi.results = (Array.isArray(result.items) ? result.items : []).filter(x => x && typeof x.id === 'string').slice(0, 40);
-    if (result.available === false || !dmUi.results.length) {
-        host.innerHTML = dmStickerEmpty(result.available === false ? (result.detail || '这个来源暂时不可用') : (result.detail || ''));
+    const items = (Array.isArray(result.items) ? result.items : []).filter(x => x && typeof x.id === 'string');
+    const first = !append;
+    dmUi.results = append ? dmUi.results.concat(items) : items;
+    dmUi.searchHasMore = !!result.has_more;
+    if (result.available === false && !dmUi.results.length) {
+        host.innerHTML = dmStickerEmpty(result.detail || '这个来源暂时不可用');
         return;
     }
-    host.innerHTML = '<div class="dm-results-head"><p class="dm-panel-note">中文梗图</p>'
-        + '<button type="button" class="dm-generate-link" onclick="dmGenerateMeme()">按文字生成</button></div>'
-        + '<div class="dm-network-grid">' + dmUi.results.map(dmNetworkItemHTML).join('') + '</div>';
+    if (!dmUi.results.length) {
+        host.innerHTML = dmStickerEmpty(result.detail || '');
+        return;
+    }
+    host.innerHTML = (first ? '<div class="dm-results-head"><p class="dm-panel-note">中文梗图</p>'
+        + '<button type="button" class="dm-generate-link" onclick="dmGenerateMeme()">按文字生成</button></div>' : '')
+        + '<div class="dm-network-grid">' + dmUi.results.map(dmNetworkItemHTML).join('') + '</div>'
+        + (dmUi.searchHasMore
+            ? '<div class="dm-more-wrap"><button type="button" class="dm-more-btn" id="dm-more-btn" onclick="dmLoadMoreStickers()">加载更多</button></div>'
+            : '<p class="dm-panel-note dm-end-note">没有更多了</p>');
+}
+async function dmLoadMoreStickers() {
+    if (dmUi.tab !== 'network' || dmUi.busy || dmUi.moreLoading || !dmUi.searchHasMore || !dmUi.query) return;
+    dmUi.moreLoading = true;
+    const s = dmScope(), seq = dmUi.searchSeq, page = dmUi.searchPage + 1, provider = dmUi.provider;
+    const btn = cmEl('dm-more-btn'); if (btn) { btn.disabled = true; btn.textContent = '正在加载…'; }
+    try {
+        const r = await getJson('/api/chat/stickers/search?q=' + encodeURIComponent(dmUi.query)
+            + '&provider=' + encodeURIComponent(provider) + '&page=' + page);
+        if (!dmScopeAlive(s) || seq !== dmUi.searchSeq || dmUi.tab !== 'network') return;
+        if (r.code !== 0) {
+            if (btn) { btn.disabled = false; btn.textContent = '加载更多'; }
+            callNativeToast(r.detail || '加载失败，稍后再试');
+            return;
+        }
+        dmUi.searchPage = page;
+        dmPaintNetwork(r, provider, true);
+    } catch (e) {
+        if (dmScopeAlive(s) && seq === dmUi.searchSeq) {
+            if (btn) { btn.disabled = false; btn.textContent = '加载更多'; }
+            callNativeToast(e.message || '网络不通');
+        }
+    } finally {
+        dmUi.moreLoading = false;
+    }
+}
+function dmBindStickerScroll() {
+    const panel = cmEl('dm-emoji-panel');
+    if (!panel || panel.dataset.scrollBound) return;
+    panel.dataset.scrollBound = '1';
+    panel.addEventListener('scroll', () => {
+        if (dmUi.tab !== 'network' || !dmUi.searchHasMore || dmUi.moreLoading) return;
+        if (panel.scrollHeight - panel.scrollTop - panel.clientHeight < 180) dmLoadMoreStickers();
+    }, { passive: true });
 }
 async function dmSearchStickers() {
     if (dmUi.tab === "official") { dmFilterOfficial(); return; }
@@ -2220,13 +2313,17 @@ async function dmSearchStickers() {
     if (!q) { callNativeToast("先输入要搜索的关键词"); return; }
     const provider = cmEl('dm-provider')?.value || dmUi.provider || 'cn';
     dmUi.provider = provider;
-    dmUi.query = q; dmUi.results = [];
+    dmUi.query = q; dmUi.results = []; dmUi.searchPage = 0; dmUi.searchHasMore = false;
     const key = String(state.user && state.user.id) + '\n' + provider + '\n' + q, cached = dmSearchCache.get(key);
-    if (cached && Date.now() - cached.at < 5 * 60 * 1000) { dmPaintNetwork(cached.data, provider); return; }
+    if (cached && Date.now() - cached.at < 5 * 60 * 1000) {
+        dmUi.searchPage = Number(cached.data.page || 0);
+        dmPaintNetwork(cached.data, provider);
+        return;
+    }
     const s = dmScope(), seq = ++dmUi.searchSeq, host = cmEl("dm-sticker-content");
     host.innerHTML = '<div class="dm-search-loading" role="status"><span class="dm-spinner"></span>正在搜「' + escapeHtml(q) + '」…</div>';
     try {
-        const r = await getJson("/api/chat/stickers/search?q=" + encodeURIComponent(q) + '&provider=' + encodeURIComponent(provider));
+        const r = await getJson("/api/chat/stickers/search?q=" + encodeURIComponent(q) + '&provider=' + encodeURIComponent(provider) + '&page=0');
         if (!dmScopeAlive(s) || seq !== dmUi.searchSeq || dmUi.tab !== "network") return;
         if (r.code !== 0) { host.innerHTML = dmStickerEmpty(r.detail || '搜索没成功，请稍后再试'); return; }
         if (r.available !== false && Array.isArray(r.items) && r.items.length) {
@@ -2331,6 +2428,34 @@ function dmClearDraft() {
     if (d?.objectURL) URL.revokeObjectURL(d.url);
     const host = cmEl('dm-draft'); if (host) { dmReleasePlayback(host); host.innerHTML = ''; host.hidden = true; }
 }
+function dmPaintQuote() {
+    const host = cmEl('dm-quote-bar'); if (!host) return;
+    const q = dmUi.quote;
+    if (!q) { host.hidden = true; host.innerHTML = ''; return; }
+    host.hidden = false;
+    host.innerHTML = '<div class="dm-quote-main"><b>' + escapeHtml(q.name || '消息') + '：</b>'
+        + escapeHtml(q.text || '') + '</div>'
+        + '<button type="button" aria-label="取消引用" onclick="dmClearQuote()">×</button>';
+}
+function dmClearQuote() { dmUi.quote = null; dmPaintQuote(); }
+function dmStartQuote(mid) {
+    qsHideMenu();
+    const m = qsFindBubble(Number(mid));
+    if (!m || m.recalled_at) return;
+    const kind = m.kind || 'text';
+    const text = kind === 'text' ? String(m.body || '').trim().replace(/\n/g, ' ').slice(0, 60)
+        : ({ image: '[图片]', video: '[视频]', audio: '[语音]', sticker: '[表情]' }[kind] || '[消息]');
+    const mine = qsSameId(m.from_id, state.user && state.user.id);
+    const who = mine ? (state.user || {}) : ((cm.thread && cm.thread.partner) || {});
+    dmUi.quote = { id: Number(m.id), name: String(cmName(who) || '').slice(0, 20), text };
+    dmPaintQuote();
+    dmInputFocus();
+}
+function dmJumpQuote(mid) {
+    const node = document.querySelector('#thread-bubbles [data-dm-key="m' + Number(mid) + '"]');
+    if (node) { node.scrollIntoView({ block: 'center', behavior: 'smooth' }); node.classList.add('dm-quote-flash'); setTimeout(() => node.classList.remove('dm-quote-flash'), 900); }
+    else callNativeToast('这条消息不在当前加载范围里');
+}
 function dmSetDraft(d) {
     if (dmUi.busy) { if (d.objectURL) URL.revokeObjectURL(d.url); return; }
     dmCancelRecording(); dmClearDraft(); dmClosePanels(); dmBlurKeyboard();
@@ -2363,8 +2488,10 @@ async function dmSendDraft() {
         }
         if (!dmScopeAlive(s) || dmUi.draft !== d) return;
         dmPending(rid, s, { kind: d.kind, body: d.text || '', media_url: d.url }); paintThread();
-        const r = await rawPostApi('/api/chat/send', { to: s.threadId, kind: d.kind, text: d.text || '', media_name: d.mediaName || '', request_id: rid });
+        const quote = dmUi.quote;
+        const r = await rawPostApi('/api/chat/send', { to: s.threadId, kind: d.kind, text: d.text || '', media_name: d.mediaName || '', request_id: rid, quote_id: quote ? quote.id : 0 });
         dmAck(rid, r.message, s);
+        if (quote && dmUi.quote && dmUi.quote.id === quote.id) dmClearQuote();
         if (dmScopeAlive(s) && dmUi.draft === d) dmClearDraft();
     } catch (e) {
         if (dmAccountAlive(s)) delete cm.pending[rid];
@@ -2731,8 +2858,9 @@ async function dmSendAudio() {
         }
         if (!dmScopeAlive(s) || dmUi.record !== rec) return;
         cmText('dm-voice-status', '正在确认发送…');
-        const r = await rawPostApi('/api/chat/send', { to: s.threadId, kind: 'audio', media_name: rec.mediaName, duration: rec.duration, request_id: rid });
+        const r = await rawPostApi('/api/chat/send', { to: s.threadId, kind: 'audio', media_name: rec.mediaName, duration: rec.duration, request_id: rid, quote_id: dmUi.quote ? dmUi.quote.id : 0 });
         dmAck(rid, r.message, s);
+        if (dmUi.quote) dmClearQuote();
         if (rec.hold) callNativeToast('语音已发送');
         if (dmScopeAlive(s) && dmUi.record === rec) dmCancelRecording();
     } catch (e) {
@@ -2827,7 +2955,7 @@ function dmRenderBubbles() {
     let cursor = host.firstElementChild;
     for (const [key, m, pending] of rows) {
         wanted.add(key);
-        const signature = m ? JSON.stringify([m.id, m.body, m.kind, m.recalled_at, m.duration, String(m.media_url || '').split('?')[0], cm.myTheme, m.asr_text, !!m.asr_pending, !!m.asr_failed, !!m.asr_empty]) : 'older';
+        const signature = m ? JSON.stringify([m.id, m.body, m.kind, m.recalled_at, m.duration, String(m.media_url || '').split('?')[0], cm.myTheme, m.asr_text, !!m.asr_pending, !!m.asr_failed, !!m.asr_empty, m.quote ? m.quote.id : 0]) : 'older';
         let node = nodes.get(key);
         if (!node || node.dataset.signature !== signature) {
             const next = document.createElement('div'); next.dataset.dmKey = key; next.dataset.signature = signature; next.className = 'dm-message';
@@ -2863,6 +2991,8 @@ function cmBubbleHTML(m, me, pending) {
         + ' data-mid="' + mid + '" data-mine="' + (mine ? 1 : 0) + '"'
         + ' oncontextmenu="return qsBubbleMenu(event,' + mid + ')"'
         + ' ontouchstart="qsBubbleHold(event,' + mid + ')" ontouchend="qsBubbleCancel()" ontouchmove="qsBubbleCancel()">'
+        + (m.quote ? '<button type="button" class="dm-quote-inline" onclick="dmJumpQuote(' + Number(m.quote.id) + ')"><b>'
+            + escapeHtml(m.quote.name || '') + '</b> ' + escapeHtml(m.quote.text || '') + '</button>' : '')
         + dmBubbleInner(m, kind, pending)
         + ((kind === "audio" && !pending && !m.recalled_at) ? dmAsrHTML(m) : "")
         + ((kind === "audio" && !pending && !m.recalled_at && !m.asr_text && !m.asr_pending && !m.asr_failed && !m.asr_empty)
@@ -2901,6 +3031,7 @@ function qsShowMenu(anchor, mid, x, y) {
     const canRecall = mine && !m.recalled_at && qsWithin(m.created_at, 300);
     const isAudio = (m.kind || 'text') === 'audio' && !m.recalled_at;
     menu.innerHTML = (isAudio ? '<button type="button" onclick="dmTranscribe(' + Number(mid) + ')">转文字</button>' : '')
+        + (m.recalled_at ? '' : '<button type="button" onclick="dmStartQuote(' + Number(mid) + ')">引用</button>')
         + '<button type="button" onclick="qsCopyBubble(' + Number(mid) + ')">复制</button>'
         + (canRecall ? '<button type="button" onclick="recallDM(' + Number(mid) + ')">撤回</button>' : "");
     document.body.appendChild(menu);
@@ -3003,10 +3134,12 @@ async function sendDM() {
     if (!state.token) { openAuthModal(); return; }
     const s = dmScope(), rid = dmUi.textRetry?.text === text ? dmUi.textRetry.rid : dmRequestId();
     dmUi.textRetry = { text, rid };
-    dmPending(rid, s, { body: text, kind: 'text' }); input.value = ''; dmUi.caret = [0, 0]; paintThread();
+    const quote = dmUi.quote;
+    dmPending(rid, s, { body: text, kind: 'text', quote: quote ? { id: quote.id, name: quote.name, text: quote.text } : null }); input.value = ''; dmUi.caret = [0, 0]; paintThread();
     try {
-        const r = await rawPostApi('/api/chat/send', { to: s.threadId, text, request_id: rid });
+        const r = await rawPostApi('/api/chat/send', { to: s.threadId, text, request_id: rid, quote_id: quote ? quote.id : 0 });
         dmAck(rid, r.message, s);
+        if (quote && dmUi.quote && dmUi.quote.id === quote.id) dmClearQuote();
         if (dmScopeAlive(s) && dmUi.textRetry?.rid === rid) dmUi.textRetry = null;
     } catch (e) {
         if (!dmAccountAlive(s)) return;

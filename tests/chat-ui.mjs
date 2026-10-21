@@ -55,15 +55,27 @@ try {
   assert.equal(await page.locator('.dm-sticker-tile').count(),1);checks.push('official pinyin search');
   // A deterministic provider result tests the browser flow, not upstream availability.
   let stickerSearch = {code:0,available:true,sources:['360 图片'],items:[{id:'fixture',title:'Fixture',preview_url:'https://upload.wikimedia.org/wikipedia/commons/f/fixture.png',source_url:'https://commons.wikimedia.org/wiki/File:Fixture.png',license:'CC0',author:'Fixture artist',source_label:'360 图片'}]};
-  await page.route('**/api/chat/stickers/search?*',route=>route.fulfill({json:stickerSearch}));
+  await page.route('**/api/chat/stickers/search?*',route=>{
+    const pageNo=Number(new URL(route.request().url()).searchParams.get('page')||0);
+    if(stickerSearch.available===false)return route.fulfill({json:stickerSearch});
+    const base=stickerSearch.items[0];
+    const items=[0,1].map(i=>Object.assign({},base,{id:'fixture-'+pageNo+'-'+i,title:'Fixture '+pageNo+'-'+i}));
+    route.fulfill({json:Object.assign({},stickerSearch,{page:pageNo,has_more:pageNo===0,items})});
+  });
   await page.locator('#dm-tab-network').click();await page.locator('#dm-sticker-query').fill('happy');
   await page.locator('#dm-sticker-search button').click();
+  await page.waitForSelector('.dm-network-item');
+  assert.equal(await page.locator('.dm-network-item').count(),2);
+  await page.locator('#dm-more-btn').click();
+  await page.waitForFunction(()=>document.querySelectorAll('.dm-network-item').length===4);
+  assert.match(await page.locator('#dm-sticker-content').textContent(),/没有更多了/);
+  checks.push('network search loads the next page at the bottom');
   assert.equal(await page.locator('.dm-network-source').count(),0);
   assert.equal(await page.locator('.dm-network-item .dm-license').count(),0);
   assert.equal(await page.locator('.dm-network-item a').count(),0);
   assert.equal(await page.evaluate(()=>dmAttributionHidden({license:'版权归原作者，来源未声明许可'})),true);
   assert.equal(await page.evaluate(()=>dmAttributionHidden({license:'CC BY-SA 4.0'})),false);
-  await page.getByRole('button',{name:'选择表情',exact:true}).click();
+  await page.locator('.dm-network-item button').first().click();
   assert.equal((await api('/api/chat/messages?with_user='+bid,null,a.token)).items.length,1);
   await page.locator('#dm-draft-cancel').click();checks.push('network selection remains a draft; list has no source links or license text');
   await page.locator('#dm-sticker-file').setInputFiles({name:'local.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')});
@@ -163,6 +175,19 @@ try {
   assert.match(featuresSource,/<video[^>]*oncontextmenu="event\.stopPropagation\(\);return true"/);
   checks.push('Opus playback; incoming message preserves input and audio node');
   checks.push('audio playback and audio/video native context menus survive bubble handling');
+  // 引用回复：长按菜单 → 引用 → 输入区出现引用条 → 发送后气泡带引用块并清空引用条
+  await page.locator('#dm-input').fill('');
+  await page.locator('#thread-bubbles .cm-bubble.them').filter({hasText:'对方发来的消息'}).last().click({button:'right'});
+  await page.waitForSelector('#bubble-menu button');
+  await page.getByRole('button',{name:'引用',exact:true}).click();
+  await page.waitForSelector('#dm-quote-bar:not([hidden])');
+  assert.match(await page.locator('#dm-quote-bar').textContent(),/对方发来的消息/);
+  await page.locator('#dm-input').fill('收到，马上到');
+  await page.locator('#dm-send-btn').click();
+  await page.waitForFunction(()=>cm.bubbles.some(m=>m.body==='收到，马上到'&&m.quote));
+  await page.waitForFunction(()=>/对方发来的消息/.test(document.querySelector('#thread-bubbles .dm-quote-inline')?.textContent||''));
+  assert.equal(await page.locator('#dm-quote-bar').isVisible(),false);
+  checks.push('quote reply shows the original and clears after sending');
   const micGate=await page.evaluate(async()=>{const saved=window.AndroidBridge;window.AndroidBridge={microphonePermissionState:()=> 'blocked',requestMicrophonePermission(){}};const blocked=await dmEnsureMicrophone();window.AndroidBridge={microphonePermissionState:()=> 'granted',requestMicrophonePermission(){}};const granted=await dmEnsureMicrophone();window.AndroidBridge=saved;return {blocked,granted};});
   assert.deepEqual(micGate,{blocked:false,granted:true});
   checks.push('microphone preflight blocks blocked state and passes granted state');

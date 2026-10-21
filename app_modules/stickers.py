@@ -32,6 +32,7 @@ TIMEOUT = 8
 API_LIMIT = 2 * 1024 * 1024
 MEDIA_LIMIT = 8 * 1024 * 1024
 RESULT_LIMIT = 12
+POOL_LIMIT = 60
 THUMB_SIZE = 720
 TOKEN_TTL = 15 * 60
 CACHE_TTL = 5 * 60
@@ -739,7 +740,7 @@ def _cn_lookup(token):
         return item[1]
 
 
-def search_cn(q, uid, secret, *, opener=None):
+def search_cn(q, uid, secret, *, opener=None, page=0, page_size=RESULT_LIMIT):
     key = _identity(uid, secret)
     q = _cn_query(q)
     plain = q
@@ -759,7 +760,7 @@ def search_cn(q, uid, secret, *, opener=None):
             continue
         seen.add(record["download_url"])
         merged.append(record)
-    if len(merged) < 8:
+    if len(merged) < 24:
         try:
             found = _cn_cached("baidu", meme, lambda: _cn_records_baidu(meme, opener))
             if found:
@@ -771,25 +772,39 @@ def search_cn(q, uid, secret, *, opener=None):
         except (ProviderUnavailable, InvalidSticker):
             unavailable.append("百度图片")
     merged.sort(key=lambda record: -_cn_score(record, q))
-    merged = merged[:RESULT_LIMIT]
+    merged = merged[:POOL_LIMIT]
     sources = list(dict.fromkeys(sources))
     unavailable = list(dict.fromkeys(unavailable))
+    start = max(0, int(page or 0)) * max(1, int(page_size or RESULT_LIMIT))
+    window = merged[start:start + max(1, int(page_size or RESULT_LIMIT))]
     if not merged:
         return {"items": [], "provider": "中文梗图", "sources": sources,
                 "unavailable": unavailable, "available": False,
-                "detail": "没有搜到中文梗图，换个关键词，或用这句话生成一张"}
+                "detail": "没有搜到中文梗图，换个关键词，或用这句话生成一张",
+                "page": int(page or 0), "has_more": False}
     token = _cn_store(merged)
-    items = [dict(id="cn." + token + "." + str(index) + "." + _sign(index + 1, uid, key),
+    items = [dict(id="cn." + token + "." + str(start + index) + "." + _sign(start + index + 1, uid, key),
                   **{field: record[field] for field in
                      ("title", "preview_url", "source_url", "license", "author", "source_label")})
-             for index, record in enumerate(merged)]
+             for index, record in enumerate(window)]
     return {"items": items, "provider": "中文梗图", "sources": sources,
-            "unavailable": unavailable, "available": True}
+            "unavailable": unavailable, "available": True,
+            "page": int(page or 0), "has_more": start + len(window) < len(merged)}
 
 
-def search(q, uid, secret, *, opener=None, provider='openmoji'):
+def search(q, uid, secret, *, opener=None, provider='openmoji', page=0, page_size=RESULT_LIMIT):
+    page = max(0, min(int(page or 0), 20))
+    size = max(1, min(int(page_size or RESULT_LIMIT), RESULT_LIMIT))
     if provider == 'cn':
-        return search_cn(q, uid, secret, opener=opener)
+        return search_cn(q, uid, secret, opener=opener, page=page, page_size=size)
+    result = _search_all(q, uid, secret, opener=opener, provider=provider)
+    items = result.get('items') or []
+    start = page * size
+    return dict(result, items=items[start:start + size], page=page,
+                has_more=start + size < len(items))
+
+
+def _search_all(q, uid, secret, *, opener=None, provider='openmoji'):
     if provider == 'memegen':
         key = hmac.digest(_identity(uid, secret), b'memegen-v1', 'sha256')
         _search_terms(q)  # shared input limits/control-character validation
@@ -803,7 +818,7 @@ def search(q, uid, secret, *, opener=None, provider='openmoji'):
         words = terms.split()
         items = [dict(id='mg.' + _sign(_meme_id(r['slug']), uid, key),
             **{f:r[f] for f in ('title', 'source_url', 'license', 'author', 'preview_url')})
-            for r in _meme_records(opener) if all(w in r['terms'] for w in words)][:RESULT_LIMIT]
+            for r in _meme_records(opener) if all(w in r['terms'] for w in words)][:POOL_LIMIT]
         return {'items':items, 'provider':'Memegen 网络梗图模板'}
     if provider == 'commons':
         return dict(search_commons(q, uid, secret, opener=opener), provider='Wikimedia Commons')
@@ -816,7 +831,7 @@ def search(q, uid, secret, *, opener=None, provider='openmoji'):
         if all(term in record['terms'] for term in terms):
             out.append(dict(id='om.' + _sign(index + 1, uid, key),
                 **{field: record[field] for field in ('title', 'author', 'license', 'source_url', 'preview_url')}))
-            if len(out) >= RESULT_LIMIT:
+            if len(out) >= POOL_LIMIT:
                 break
     return {'items': out, 'provider': 'OpenMoji'}
 

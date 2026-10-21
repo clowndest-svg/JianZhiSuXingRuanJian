@@ -443,7 +443,7 @@ class Integration(unittest.TestCase):
         m.mailer.CONFIG_PATH = str(cfg)
         sent, real_send = [], m.mailer.send
 
-        def fake_send(to_addr, subject, text):
+        def fake_send(to_addr, subject, text, purpose=""):
             sent.append((to_addr, text))
             return True, ''
         m.mailer.send = fake_send
