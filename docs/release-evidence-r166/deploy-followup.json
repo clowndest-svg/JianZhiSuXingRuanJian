@@ -39,18 +39,18 @@
   "admin_revision": "e320b4987eb3faf17d885e4d943b4fa775c370f6",
   "admin_console_sha256": "6f1f15fd61d7d3a1056d21dcc51e0b8321b1d2729db482d61faf62e0d5cd2b3f",
   "monitor": {
-    "checked_at": 1792565042,
+    "checked_at": 1792565652,
     "qingsu": "active",
     "qingsu-llama": "active",
     "qingsu-backup.timer": "active",
     "qingsu-cert-renew.timer": "active",
     "ready": 200,
-    "free_disk_mb": 30559,
-    "backup_age_hours": 0.0,
-    "certificate_hours_left": 132.5,
-    "requests": 63,
+    "free_disk_mb": 30560,
+    "backup_age_hours": 0.2,
+    "certificate_hours_left": 132.3,
+    "requests": 3,
     "errors_5xx": 0,
-    "p95_ms": 50.3,
+    "p95_ms": 2.6,
     "sqlite_lock_errors": 0,
     "cache_degraded": 0,
     "problems": []
@@ -82,5 +82,10 @@
     },
     "interpretation": "upstream image host transient 503; search works, browser keeps draft and allows cancelling; earlier 13:58 successful import remains in production-browser.json"
   },
-  "ci_incoming": "empty; deploy tar moved to /opt/qingsu/ci-archive/r166-followup-20261021"
+  "ci_incoming": "empty; deploy tar moved to /opt/qingsu/ci-archive/r166-followup-20261021",
+  "media_orphans": {
+    "avatar-2.jpg": "belongs to real user id 2 (profiles.avatar_url); not test data"
+  },
+  "monitor_transient": "monitor-transient-openmoji-503.json",
+  "monitor_transient_note": "14:49 window reported 2 upstream 503s (OpenMoji image download, browser + retry); by 14:54 window is clean and problems=[]."
 }
