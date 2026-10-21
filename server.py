@@ -3513,6 +3513,12 @@ def health():
                                 for n in ("media-signing.key", "ws-secret.key")}}
     info["chat"] = {"online": len(_WS_HUB), "sockets": int(sum(len(v) for v in _WS_HUB.values())),
                     "rejected": int(_ws_stats["rejected"]), "redis": bool(redis_up())}
+    # 限流计数存在哪，必须一眼看得见：Redis 在就是全局一份（多进程也准），
+    # 退回进程内内存时每个进程各算一份——将来加 --workers 时这条会悄悄放宽 N 倍。
+    info["rate"] = {"store": "redis" if redis_up() else "memory",
+                    "degraded": bool(_redis_last_err[0]),
+                    "last_error": _redis_last_err[0],
+                    "memory_buckets": len(_mem_buckets)}
     return info
 
 
@@ -4334,7 +4340,13 @@ def delete_comment(comment_id: int, user: dict = Depends(get_current_user)):
         post = conn.execute("SELECT user_id FROM posts WHERE id=?", (row["post_id"],)).fetchone()
         if int(row["user_id"]) != int(user["id"]) and (not post or int(post["user_id"]) != int(user["id"])):
             raise HTTPException(status_code=403, detail="只能删自己的评论")
-        conn.execute("UPDATE comments SET status='deleted' WHERE id=?", (comment_id,))
+        # 条件更新：并发双击时只有一个请求能把 open 改成 deleted，
+        # 另一个 rowcount=0 直接退出——否则两个请求各扣一次 comment_count，计数就漂了。
+        cur = conn.execute("UPDATE comments SET status='deleted' WHERE id=? AND status='open'",
+                           (comment_id,))
+        if not cur.rowcount:
+            conn.rollback()
+            raise HTTPException(status_code=404, detail="评论不存在")
         conn.execute("UPDATE posts SET comment_count = MAX(0, comment_count - 1) WHERE id=?", (row["post_id"],))
         # 评论没了，那条评论带来的 @ 提醒也要收回：留着就是一点就 404 的"死通知"
         conn.execute("DELETE FROM notifications WHERE kind='mention' AND dedup=?",

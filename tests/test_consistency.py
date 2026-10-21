@@ -32,12 +32,13 @@ def check(name, ok, detail=''):
     checks.append((name, bool(ok), detail))
 
 
-def api(path, body=None, token=None, timeout=30):
+def api(path, body=None, token=None, timeout=30, method=None):
     req = urllib.request.Request(
         BASE + path,
         data=None if body is None else json.dumps(body).encode(),
         headers={'Content-Type': 'application/json',
-                 **({'Authorization': 'Bearer ' + token} if token else {})})
+                 **({'Authorization': 'Bearer ' + token} if token else {})},
+        method=method)
     try:
         with OPENER.open(req, timeout=timeout) as r:
             STATUSES.append(r.status)
@@ -163,6 +164,34 @@ def main():
             codes = [r[0] for r in res]
             check('同一 request_id 并发评论只落一行', n == 1, {'rows': n, 'codes': codes})
             check('并发评论不返回 5xx', all(c < 500 for c in codes), codes)
+
+            # ---- 6b. comment_count 必须和在册评论对得上 ----
+            conn = sqlite3.connect(db_path)
+            stored = conn.execute('SELECT comment_count FROM posts WHERE id=?', (pid,)).fetchone()[0]
+            real = conn.execute("SELECT COUNT(*) FROM comments WHERE post_id=? AND status='open'",
+                                (pid,)).fetchone()[0]
+            conn.close()
+            check('comment_count 与在册评论数一致', stored == real,
+                  {'stored': stored, 'actual': real})
+
+            # ---- 6c. 并发删除同一条评论：只成功一次、只扣一次 ----
+            st, made = api('/api/community/posts/%d/comments' % pid, {'text': '待删评论'}, tokens[1])
+            cid = made['comment']['id']
+            conn = sqlite3.connect(db_path)
+            before = conn.execute('SELECT comment_count FROM posts WHERE id=?', (pid,)).fetchone()[0]
+            conn.close()
+            res = burst(8, lambda i: api('/api/community/comments/%d' % cid, None, tokens[1],
+                                         method='DELETE'))
+            ok_del = sum(1 for r in res if r[0] == 200)
+            conn = sqlite3.connect(db_path)
+            after = conn.execute('SELECT comment_count FROM posts WHERE id=?', (pid,)).fetchone()[0]
+            openn = conn.execute("SELECT COUNT(*) FROM comments WHERE post_id=? AND status='open'",
+                                 (pid,)).fetchone()[0]
+            conn.close()
+            check('并发删除同一条评论只成功一次', ok_del == 1, {'200s': ok_del,
+                                                              'codes': sorted(set(r[0] for r in res))})
+            check('删评论只扣一次计数', before - after == 1 and after == openn,
+                  {'before': before, 'after': after, 'open': openn})
 
             # ---- 7. 同一 request_id 并发私信：只落一条 ----
             res = burst(20, lambda i: api('/api/chat/send',

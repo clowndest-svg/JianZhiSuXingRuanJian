@@ -85,6 +85,10 @@ jobs:
       - run: python tests/test_ai_contract.py
       - run: python tests/test_update_copy.py
       - run: python tests/test_companion.py
+      # 并发与冗余计数：起真 Uvicorn 打同一批请求，判据只看落库结果
+      - run: python tests/test_consistency.py
+      # 多进程共享限流：CI 没有 Redis，这条会明确跳过而不是假装通过
+      - run: python tests/test_multiprocess.py
       - run: python tests/legacy-backend.py
       - run: node --check app/src/main/assets/app.js
       - run: node --check app/src/main/assets/features.js
