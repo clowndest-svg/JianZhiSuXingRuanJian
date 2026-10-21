@@ -1,0 +1,18 @@
+{
+  "http_status": 200,
+  "health": {
+    "status": "ok",
+    "release": "r39551030318",
+    "source_revision": "2b1a432a64be1be046f25b9ef6a63a270567578d",
+    "min_build": 0,
+    "build_override": true,
+    "rate": {
+      "store": "redis",
+      "degraded": false,
+      "last_error": "",
+      "memory_buckets": 0
+    }
+  },
+  "apk_source_assets_match": 33,
+  "public_primary_assets_match": 7
+}

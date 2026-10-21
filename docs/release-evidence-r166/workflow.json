@@ -1,0 +1,27 @@
+{
+  "id": 39551030318,
+  "head_sha": "2b1a432a64be1be046f25b9ef6a63a270567578d",
+  "status": "completed",
+  "conclusion": "success",
+  "html_url": "https://github.com/clowndest-svg/JianZhiSuXingRuanJian/actions/runs/39551030318",
+  "jobs": [
+    {
+      "name": "android",
+      "id": 119060025846,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "integration",
+      "id": 119060642344,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "deploy",
+      "id": 119061142532,
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ]
+}

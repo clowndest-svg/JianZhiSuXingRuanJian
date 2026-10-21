@@ -1,0 +1,118 @@
+{
+  "checked_at": "2026-10-21T14:29:00+08:00",
+  "environment": {
+    "python": "3.12.14",
+    "node": "24.14.1",
+    "chrome": "system Chrome",
+    "ffmpeg": "D:/RuanJian/ev/EVCapture"
+  },
+  "suites": [
+    {
+      "suite": "test_update_copy.py",
+      "tests": 3,
+      "ok": true
+    },
+    {
+      "suite": "test_ai_contract.py",
+      "tests": 6,
+      "ok": true
+    },
+    {
+      "suite": "test_companion.py",
+      "tests": 8,
+      "ok": true
+    },
+    {
+      "suite": "test_chat_media.py",
+      "tests": 13,
+      "ok": true
+    },
+    {
+      "suite": "test_native_media_contract.py",
+      "tests": 20,
+      "ok": true
+    },
+    {
+      "suite": "test_integration.py",
+      "tests": 62,
+      "ok": true
+    },
+    {
+      "suite": "test_consistency.py",
+      "tests": 24,
+      "ok": true,
+      "green": 24,
+      "red": 0
+    },
+    {
+      "suite": "test_multiprocess.py",
+      "checks": 3,
+      "runs": 3,
+      "ok": true,
+      "note": "startup check + 2 shared-rate checks"
+    },
+    {
+      "suite": "legacy-backend.py",
+      "tests": 619,
+      "green": 619,
+      "red": 0,
+      "ok": true
+    },
+    {
+      "suite": "legacy-frontend.mjs",
+      "tests": 334,
+      "red": 0,
+      "ok": true,
+      "green": 334
+    },
+    {
+      "suite": "frontend-integration.mjs",
+      "groups": 4,
+      "ok": true
+    },
+    {
+      "suite": "chat-ui.mjs",
+      "checks": 11,
+      "errors": [],
+      "ok": true
+    },
+    {
+      "suite": "node --check",
+      "files": 4,
+      "ok": true
+    }
+  ],
+  "artifact_gate": {
+    "version_code": 50,
+    "version_name": "2.2.5",
+    "apk_sha256": "26a18c7fd077d19a73c70f16a4f2438d92e5bc3747f8b9a238a8553c5e53d99f",
+    "apk_assets_match": 33,
+    "apk_assets_extra": [
+      "dexopt/baseline.prof",
+      "dexopt/baseline.profm"
+    ],
+    "signature": "v2+v3",
+    "public_assets_match": 8,
+    "backend_modules_match": 4
+  },
+  "live": {
+    "release": "r39551030318",
+    "source_revision": "2b1a432a64be1be046f25b9ef6a63a270567578d",
+    "build": 50,
+    "health": "ok",
+    "rate_store": "redis"
+  },
+  "cleanup": {
+    "fixture_users_removed": 2,
+    "fixture_files_removed": 1,
+    "real_users": 2,
+    "integrity": "ok",
+    "monitor_problems": []
+  },
+  "issue_found": {
+    "name": "concurrent cold-start migration",
+    "symptom": "duplicate column name: cycle_started_at when two workers migrate a fresh DB",
+    "fix": "server.py _ensure_columns treats duplicate-column ALTER as idempotent; test_multiprocess now checks startup even without Redis",
+    "status": "verified locally 3/3; deployment pending"
+  }
+}

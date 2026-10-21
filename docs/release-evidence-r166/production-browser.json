@@ -1,0 +1,13 @@
+{
+  "build": 50,
+  "checks": [
+    "trusted public HTTPS, official assets, confirm-send and draft preservation",
+    "real production HTTP-to-WebSocket message delivery",
+    "public Chromium simulated microphone record/preview/upload/production decode/playback",
+    "live public OpenMoji Chinese search/import/attribution",
+    "live public Chinese network meme search/preview/import/send/original source",
+    "public full-size meme image viewer opens by click"
+  ],
+  "unavailable": [],
+  "errors": []
+}

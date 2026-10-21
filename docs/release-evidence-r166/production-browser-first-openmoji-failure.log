@@ -1,0 +1,11 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+page.waitForFunction: Timeout 30000ms exceeded.
+    at D:\RuanJian\JiaZhiSuXianApk\_audit_sandbox\public-ui-r166.mjs:43:13 {
+  log: [],
+  name: 'TimeoutError'
+}
+
+Node.js v24.14.1
