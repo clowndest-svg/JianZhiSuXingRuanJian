@@ -409,6 +409,7 @@ body.qs-page-open{overflow:hidden}
 .dm-phrases[hidden]{display:none}
 .dm-phrases button{padding:6px 11px;border:1px solid #E2E8F0;border-radius:999px;background:#fff;color:#334155;font:inherit;font-size:12.5px;min-height:32px}
 .dm-tool{display:grid;place-items:center}
+#dm-voice-btn{touch-action:none;user-select:none;-webkit-user-select:none}
 .dm-tool svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .dm-sticker-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;padding:3px;background:#F3F7F4;border-radius:12px;margin-bottom:10px}
 .dm-sticker-tabs button{flex:none;white-space:nowrap;border:0;border-radius:9px;background:transparent;padding:7px 2px;color:#64748B;font:inherit;font-size:12px;min-height:34px;font-weight:600}

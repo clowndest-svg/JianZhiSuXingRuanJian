@@ -1976,6 +1976,7 @@ const dmUi = { threadId: 0, generation: 0, panel: "", tab: "official", query: ""
     searchSeq: 0, results: [], busy: false, composing: false, record: null, draft: null, caret: [0, 0],
     stickBottom: true };
 const dmSearchCache = new Map();
+const dmHold = {pending:false,timer:0,held:false,released:false,cancelled:false,startY:0};
 const dmCall = {
     state: "idle", id: "", peer: null, role: "", pc: null, stream: null, audio: null,
     offer: null, pendingIce: [], localIce: [], timer: 0, ring: 0, timeout: 0,
@@ -2064,7 +2065,7 @@ function dmFootHTML() {
     const tile = (label, action, media) => '<button type="button" class="dm-plus-tile"'
         + (media ? ' data-dm-mutual="1"' : '') + ' onclick="' + action + '">' + label + '</button>';
     return '<div class="dm-tools">'
-        + '<button type="button" class="dm-tool" id="dm-voice-btn" aria-label="录制语音" aria-controls="dm-voice-panel" aria-expanded="false" onclick="dmStartRecording()">'
+        + '<button type="button" class="dm-tool" id="dm-voice-btn" aria-label="按住说话，松开发送" aria-controls="dm-voice-panel" aria-expanded="false" onpointerdown="dmHoldDown(event)" onpointermove="dmHoldMove(event)" onpointerup="dmHoldUp(event)" onpointercancel="dmHoldCancel()" oncontextmenu="return false">'
         + '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"/></svg></button>'
         + '<input id="dm-input" type="text" maxlength="' + CM_LIMITS.dm + '" placeholder="说点什么…" aria-label="私信内容"'
         + ' onfocus="dmInputFocus()" onselect="dmRememberCaret()" onkeyup="dmRememberCaret()" onclick="dmRememberCaret()" oninput="dmRememberCaret()" oncompositionstart="dmUi.composing=true" oncompositionend="dmUi.composing=false" onkeydown="dmInputKey(event)">'
@@ -2176,16 +2177,17 @@ function dmExternalURL(value) {
     try { const u = new URL(String(value)); return u.protocol === "https:" && !u.username && !u.password ? u.href : ""; }
     catch (e) { return ""; }
 }
+function dmAttributionHidden(meta) {
+    if (!meta) return false;
+    if (meta.attribution === "hidden") return true;
+    return /未声明/.test(String(meta.license || ""));
+}
 function dmNetworkItemHTML(item, index) {
-    const preview = dmExternalURL(item.preview_url), source = dmExternalURL(item.source_url);
-    const label = item.source_label || '';
+    const preview = dmExternalURL(item.preview_url);
     return '<article class="dm-network-item"><div class="dm-network-thumb">'
         + (preview ? '<img src="' + escapeHtml(preview) + '" alt="' + escapeHtml(item.title || '素材预览')
             + '" crossorigin="anonymous" referrerpolicy="no-referrer" loading="lazy">' : '<span class="dm-panel-note">无可用预览</span>')
-        + (label ? '<span class="dm-network-source">' + escapeHtml(label) + '</span>' : '')
         + '</div><div class="dm-network-body"><b>' + escapeHtml(item.title || '未命名素材') + '</b>'
-        + '<span class="dm-license">' + escapeHtml(item.license || '许可未提供') + ' · ' + escapeHtml(item.author || '作者未提供') + '</span>'
-        + (source ? '<a href="' + escapeHtml(source) + '" target="_blank" rel="noopener noreferrer">来源</a>' : '')
         + '<button type="button" data-dm-import="1" aria-label="选择表情" onclick="dmImportSticker(' + index + ')">选择</button></div></article>';
 }
 function dmStickerEmpty(detail) {
@@ -2202,8 +2204,7 @@ function dmPaintNetwork(result, provider) {
         host.innerHTML = dmStickerEmpty(result.available === false ? (result.detail || '这个来源暂时不可用') : (result.detail || ''));
         return;
     }
-    const sources = (Array.isArray(result.sources) && result.sources.length ? result.sources.join(' + ') : (result.provider || provider));
-    host.innerHTML = '<div class="dm-results-head"><p class="dm-panel-note">来源：' + escapeHtml(sources) + ' · 版权归原作者，未声明许可</p>'
+    host.innerHTML = '<div class="dm-results-head"><p class="dm-panel-note">中文梗图</p>'
         + '<button type="button" class="dm-generate-link" onclick="dmGenerateMeme()">按文字生成</button></div>'
         + '<div class="dm-network-grid">' + dmUi.results.map(dmNetworkItemHTML).join('') + '</div>';
 }
@@ -2332,7 +2333,7 @@ function dmSetDraft(d) {
     const host = cmEl('dm-draft'); if (!host) return;
     host.hidden = false;
     host.innerHTML = (d.kind === 'video' ? '<video controls playsinline src="' + escapeHtml(d.url) + '"></video>' : '<img src="' + escapeHtml(d.url) + '" alt="待发送预览" referrerpolicy="no-referrer">')
-        + '<div><b>' + escapeHtml(d.label || '待发送附件') + '</b>' + (d.meta ? '<p>' + escapeHtml(d.meta.license || '') + ' · ' + escapeHtml(d.meta.author || '') + '</p>' : '')
+        + '<div><b>' + escapeHtml(d.label || '待发送附件') + '</b>' + (d.meta && !dmAttributionHidden(d.meta) ? '<p>' + escapeHtml(d.meta.license || '') + ' · ' + escapeHtml(d.meta.author || '') + '</p>' : '')
         + '<p id="dm-draft-status" role="status">确认后点发送</p></div><button type="button" id="dm-draft-cancel" onclick="dmClearDraft()">取消</button>';
 }
 async function dmSendDraft() {
@@ -2405,6 +2406,7 @@ function dmPickMedia(input, kind) {
 function dmNow() { return typeof performance !== 'undefined' ? performance.now() : Date.now(); }
 function dmStopTracks(stream) { if (stream) stream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} }); }
 function dmCancelRecording() {
+    clearTimeout(dmHold.timer); dmHold.pending = false; dmHold.held = false;
     const rec = dmUi.record; dmUi.record = null;
     if (rec) {
         rec.cancelled = true; clearInterval(rec.tick); clearTimeout(rec.limit);
@@ -2424,6 +2426,9 @@ function dmPaintVoice(rec) {
             + '<audio id="dm-voice-preview" src="' + escapeHtml(rec.url) + '" controls preload="metadata" aria-label="试听录制的语音"></audio>'
             + '<p class="dm-panel-note" id="dm-voice-status" role="status">仅保存在本机，确认发送后才上传。</p>'
             + '<div class="dm-voice-actions"><button type="button" onclick="dmCancelRecording()">取消</button><button type="button" class="dm-confirm" id="dm-voice-send" onclick="dmSendAudio()">发送语音</button></div>';
+    } else if (rec.hold) {
+        panel.innerHTML = '<div class="dm-voice-head"><b>' + (rec.status === 'starting' ? '正在请求麦克风…' : '正在录音') + '</b><span id="dm-voice-time" role="timer">0:00 / 10:00</span></div>'
+            + '<p class="dm-panel-note">松开发送 · 上滑取消</p>';
     } else {
         panel.innerHTML = '<div class="dm-voice-head"><b>' + (rec.status === 'starting' ? '正在请求麦克风…' : '正在录音') + '</b><span id="dm-voice-time" role="timer">0:00 / 10:00</span></div>'
             + '<p class="dm-panel-note">停止后可试听；退出聊天或切到后台会取消录音。</p><div class="dm-voice-actions">'
@@ -2462,7 +2467,49 @@ async function dmEnsureMicrophone() {
         setTimeout(() => finish(false), 20000);
     });
 }
-async function dmStartRecording() {
+function dmHoldDown(event) {
+    if (event && event.button !== undefined && event.button !== 0) return;
+    clearTimeout(dmHold.timer);
+    dmHold.pending = true; dmHold.held = false; dmHold.released = false;
+    dmHold.cancelled = false; dmHold.startY = event.clientY;
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch (e) {}
+    dmHold.timer = setTimeout(() => {
+        if (!dmHold.pending) return;
+        if (dmHold.cancelled) { dmHold.pending = false; return; }
+        dmHold.pending = false; dmHold.held = true;
+        dmStartRecording(true);
+    }, 220);
+    if (event.cancelable) event.preventDefault();
+}
+function dmHoldMove(event) {
+    if (!dmHold.pending && !dmHold.held) return;
+    const cancel = event.clientY < dmHold.startY - 55;
+    if (cancel && !dmHold.cancelled) { dmHold.cancelled = true; callNativeToast('松开会取消语音'); }
+    else if (!cancel && dmHold.cancelled) dmHold.cancelled = false;
+}
+function dmHoldUp(event) {
+    clearTimeout(dmHold.timer);
+    if (dmHold.pending && !dmHold.held) {
+        dmHold.pending = false;
+        if (dmHold.cancelled) { callNativeToast('已取消语音'); return; }
+        dmStartRecording();
+        return;
+    }
+    if (!dmHold.held) return;
+    dmHold.held = false; dmHold.released = true;
+    const rec = dmUi.record;
+    if (dmHold.cancelled) { dmCancelRecording(); callNativeToast('已取消语音'); return; }
+    if (!rec) { callNativeToast('按住说话，松开发送'); return; }
+    if (rec.status === 'starting') return;
+    if (rec.status !== 'recording') return;
+    if (dmNow() - rec.started < 600) { dmCancelRecording(); callNativeToast('说话时间太短，按住说话'); return; }
+    dmStopRecording(true);
+}
+function dmHoldCancel() {
+    clearTimeout(dmHold.timer); dmHold.pending = false;
+    if (dmHold.held) { dmHold.held = false; dmCancelRecording(); }
+}
+async function dmStartRecording(hold) {
     if (!cm.thread) return;
     if (!state.token) { openAuthModal(); return; }
     if (dmUi.busy || dmUi.draft) { callNativeToast('请先发送或取消待发送附件'); return; }
@@ -2472,7 +2519,9 @@ async function dmStartRecording() {
         && ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg'].find(t => Recorder.isTypeSupported(t));
     if (!mime || !navigator.mediaDevices?.getUserMedia) { callNativeToast('当前浏览器或客户端不支持语音录制，可发送文字'); return; }
     dmClosePanels(); dmBlurKeyboard();
-    const rec = { scope: dmScope(), status: 'starting', chunks: [], bytes: 0, mime, cancelled: false };
+    const holdMode = hold === true;
+    const rec = { scope: dmScope(), status: 'starting', chunks: [], bytes: 0, mime, cancelled: false,
+        hold: holdMode, autoSend: holdMode };
     dmUi.record = rec; dmPaintVoice(rec);
     const allowed = await dmEnsureMicrophone();
     if (!allowed) {
@@ -2497,8 +2546,15 @@ async function dmStartRecording() {
             rec.blob = new Blob(rec.chunks, { type: rec.recorder.mimeType || rec.mime }); rec.chunks = [];
             if (!rec.blob.size || rec.blob.size > DM_AUDIO_MAX) { dmCancelRecording(); callNativeToast('没有录到可发送的语音，请重试'); return; }
             rec.url = URL.createObjectURL(rec.blob); rec.status = 'preview'; dmPaintVoice(rec);
+            if (rec.autoSend) { rec.autoSend = false; dmSendAudio(); }
         };
         rec.started = dmNow(); rec.status = 'recording'; rec.recorder.start(1000); dmPaintVoice(rec);
+        if (rec.hold && dmHold.cancelled) { dmCancelRecording(); return; }
+        if (rec.hold && dmHold.released) {
+            dmHold.released = false;
+            if (dmNow() - rec.started < 600) { dmCancelRecording(); callNativeToast('说话时间太短，按住说话'); return; }
+            dmStopRecording(true);
+        }
         rec.tick = setInterval(() => {
             if (dmUi.record !== rec || !dmScopeAlive(rec.scope)) return;
             const n = Math.min(600, Math.floor((dmNow() - rec.started) / 1000));
@@ -2582,7 +2638,7 @@ function dmBubbleInner(m, kind, pending) {
         if (kind === 'video') return '<video class="dm-media-video" src="' + src + '" controls playsinline preload="metadata" onplay="dmExclusivePlayback(this)" oncontextmenu="event.stopPropagation();return true"></video>';
         const meta = m.sticker_meta || {}, source = dmExternalURL(meta.source_url);
         return '<img class="' + (kind === 'sticker' ? 'dm-sticker-img' : 'dm-media-img') + '" src="' + src + '" alt="' + (kind === 'sticker' ? '图片表情' : '图片消息') + '" loading="lazy" onclick="viewPostImage(this.src)">'
-            + (source ? '<small class="dm-attribution"><a href="' + escapeHtml(source) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(meta.title || '来源') + '</a><br>' + escapeHtml(meta.author || '') + ' · ' + escapeHtml(meta.license || '') + '</small>' : '');
+            + ((source && !dmAttributionHidden(meta)) ? '<small class="dm-attribution"><a href="' + escapeHtml(source) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(meta.title || '来源') + '</a><br>' + escapeHtml(meta.author || '') + ' · ' + escapeHtml(meta.license || '') + '</small>' : '');
     }
     return escapeHtml(m.body || '');
 }

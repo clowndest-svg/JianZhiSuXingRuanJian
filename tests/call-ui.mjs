@@ -11,6 +11,7 @@ const root=path.resolve(import.meta.dirname,'..');
 const folder=path.join(root,'_audit_sandbox','call-ui-'+process.pid);
 fs.mkdirSync(folder,{recursive:true});
 const base='http://127.0.0.1:18008';
+const build=Number(/versionCode\s+(\d+)/.exec(fs.readFileSync(path.join(root,'app/build.gradle'),'utf8'))[1]);
 if(!process.env.QINGSU_TURN_SECRET)throw new Error('QINGSU_TURN_SECRET is required');
 const child=spawn(process.env.QINGSU_TEST_PYTHON||'python',['-c',
  "import server,uvicorn;server.llm_chat=lambda *a,**k:None;server.web_search=lambda *a,**k:[];uvicorn.run(server.app,host='127.0.0.1',port=18008,log_level='warning',ws='websockets-sansio')"],
@@ -19,7 +20,7 @@ const log=fs.createWriteStream(path.join(folder,'server.log'));child.stdout.pipe
 let browser;
 try{
  for(let i=0;i<100;i++){try{if((await fetch(base+'/health')).ok)break;}catch{} await new Promise(r=>setTimeout(r,100));}
- const api=async(url,body,token)=>{const r=await fetch(base+url,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-App-Build':'52',...(token?{Authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});const d=await r.json();if(r.status!==200)throw new Error(url+' '+r.status+' '+JSON.stringify(d));return d;};
+ const api=async(url,body,token)=>{const r=await fetch(base+url,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-App-Build':String(build),...(token?{Authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});const d=await r.json();if(r.status!==200)throw new Error(url+' '+r.status+' '+JSON.stringify(d));return d;};
  const profile={password:'Call!12345',age:30,height:170,weight_jin:160,target_weight_jin:140};
  const a=await api('/api/register',{...profile,username:'callowner'}),b=await api('/api/register',{...profile,username:'callpartner'});
  browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});

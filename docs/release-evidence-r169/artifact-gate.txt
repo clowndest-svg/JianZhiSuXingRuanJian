@@ -1,0 +1,4 @@
+release artifacts agree: version_code=53 size=5443094 sha256=0e282c2fe70aace95be13c10bc95704ed54466ce9114eb059971c93b46638036
+apksigner: v2=true v3=true signer=CN=QingSu Release, O=QingSu, C=CN
+asset raw equality: 33/33
+contains: dmHoldDown / dmAttributionHidden / no source links in network cards

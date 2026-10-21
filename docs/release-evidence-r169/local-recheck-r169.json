@@ -1,0 +1,61 @@
+{
+  "checked_at": "2026-10-21T18:40:00+08:00",
+  "version": {
+    "code": 53,
+    "name": "2.2.8",
+    "local_apk_sha256": "0e282c2fe70aace95be13c10bc95704ed54466ce9114eb059971c93b46638036",
+    "size": 5443094,
+    "signature": "v2+v3",
+    "asset_raw_match": 33
+  },
+  "suites": [
+    {
+      "suite": "legacy-backend.py",
+      "tests": 619,
+      "green": 619,
+      "red": 0,
+      "ok": true
+    },
+    {
+      "suite": "legacy-frontend.mjs",
+      "tests": 334,
+      "ok": true
+    },
+    {
+      "suite": "frontend-integration.mjs",
+      "groups": 4,
+      "ok": true
+    },
+    {
+      "suite": "test_update_copy.py",
+      "tests": 3,
+      "ok": true
+    },
+    {
+      "suite": "chat-ui.mjs",
+      "checks": 15,
+      "ok": true,
+      "note": "includes hold-to-talk send and no source/license in network cards"
+    },
+    {
+      "suite": "call-ui.mjs",
+      "checks": 5,
+      "ok": true,
+      "relay": {
+        "local": "relay",
+        "remote": "relay"
+      }
+    },
+    {
+      "suite": "test_calls.py",
+      "tests": 3,
+      "ok": true
+    }
+  ],
+  "changes": [
+    "hide undeclared-license attribution in chat/draft",
+    "remove source links/license/author from network result cards",
+    "hold mic to record, release to send, slide up to cancel; tap keeps preview flow"
+  ],
+  "postdeploy": "pending"
+}
