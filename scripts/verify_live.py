@@ -24,15 +24,31 @@ def _user_refs(conn):
     return out
 
 
-def api(path,body=None,token=None):
-    req=urllib.request.Request(base+path,data=None if body is None else json.dumps(body).encode(),headers={'Content-Type':'application/json','X-App-Build':build,**({'Authorization':'Bearer '+token} if token else {})})
+def api(path,body=None,token=None,build_no=None):
+    req=urllib.request.Request(base+path,data=None if body is None else json.dumps(body).encode(),headers={'Content-Type':'application/json','X-App-Build':str(build_no or build),**({'Authorization':'Bearer '+token} if token else {})})
     try:
         with opener.open(req,timeout=15) as response:return response.status,json.load(response)
     except urllib.error.HTTPError as e:return e.code,json.load(e)
+
+def new_code(email,purpose='register'):
+    """自检自己签发一枚验证码：它本来就有目标库路径，不需要真的发信。
+    这样注册路径走的是真实的"邮箱验证码"校验，而不是绕过它。"""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+    import server as srv
+    conn=sqlite3.connect(os.environ.get('QINGSU_VERIFY_DB','/opt/qingsu/data/qingsu.db'))
+    try:
+        conn.row_factory=sqlite3.Row
+        return srv._issue_email_code(conn,email,purpose)
+    finally:conn.close()
+
 checks=[]
 try:
-    body=dict(username=username,password=secrets.token_urlsafe(24),age=30,height=170,weight_jin=160,target_weight_jin=140)
-    status,signup=api('/api/register',body);assert status==200
+    email=username+'@releasecheck.invalid'
+    body=dict(username=username,password=secrets.token_urlsafe(24),age=30,height=170,weight_jin=160,target_weight_jin=140,
+              email=email,email_code=new_code(email))
+    status,signup=api('/api/register',body);assert status==200,signup
     token=signup['token']
     status,login=api('/api/login',dict(username=username,password=body['password']));assert status==200
     assert api('/api/dashboard',token=token)[0]==200;checks.append('two simultaneous sessions')
@@ -65,6 +81,12 @@ try:
     # 门开没开必须落在发布记录里：抬不动门最坏的形状是"以为生效了"
     assert 'min_build' in ready and 'gate' in ready,'健康检查没上报强更门状态'
     checks.append('update gate min_build=%s override=%s blocked=%s'%(ready['min_build'],ready['build_override'],ready['gate']['blocked']))
+    # 新版注册必须带邮箱验证码（只在邮件通道在线时强制；没接好时服务端会降级，不在这里判红）
+    mail_state=api('/api/account/recovery-status')[1].get('mail')
+    if mail_state=='up':
+        status,gate=api('/api/register',dict(username=username+'_gate',password=secrets.token_urlsafe(16),age=30,height=170,weight_jin=160,target_weight_jin=140))
+        assert status==400 and '邮箱' in str(gate.get('detail','')),gate
+        checks.append('new-client registration requires an email code')
     print(json.dumps({'passed':checks},ensure_ascii=False))
 finally:
     db=sqlite3.connect(os.environ.get('QINGSU_VERIFY_DB','/opt/qingsu/data/qingsu.db'));db.execute('PRAGMA foreign_keys=ON')
