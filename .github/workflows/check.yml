@@ -88,6 +88,7 @@ jobs:
       - run: python tests/test_update_copy.py
       - run: python tests/test_companion.py
       - run: python tests/test_chat_media.py
+      - run: python tests/test_calls.py
       - run: python tests/test_native_media_contract.py
       # 并发与冗余计数：起真 Uvicorn 打同一批请求，判据只看落库结果
       - run: python tests/test_consistency.py

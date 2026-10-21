@@ -1,0 +1,18 @@
+{
+  "cpu_cores": 4,
+  "load_average": [
+    0.1,
+    0.08,
+    0.02
+  ],
+  "memory_available_mb": 2104,
+  "disk_free_gb": 30,
+  "latency_ms": 27,
+  "server_outbound_bytes_per_sec": 379265,
+  "coturn_rss_kb": 13700,
+  "coturn_memory_current_bytes": 6053888,
+  "coturn": "active/enabled",
+  "turn_ports": "udp 3478 + 49160-49180",
+  "turn_ttl_seconds": 3600,
+  "relay_test": "two browsers forced relay; local=relay remote=relay; remote audio track received"
+}

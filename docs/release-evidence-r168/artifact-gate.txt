@@ -1,0 +1,4 @@
+release artifacts agree: version_code=52 size=5443094 sha256=7a49a13da8efd367ab269cac65decc219e98226491b01b6b0b4d7033b34c46bd
+apksigner: v2=true v3=true signer=CN=QingSu Release, O=QingSu, C=CN
+asset raw equality: 33/33 (plus dexopt baseline files inside APK)
+contains: dmStartCall / dm-call-layer / 语音通话不录音 privacy note / app-init connectChat

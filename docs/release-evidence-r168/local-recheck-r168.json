@@ -1,0 +1,86 @@
+{
+  "checked_at": "2026-10-21T18:01:00+08:00",
+  "version": {
+    "code": 52,
+    "name": "2.2.7",
+    "local_apk_sha256": "7a49a13da8efd367ab269cac65decc219e98226491b01b6b0b4d7033b34c46bd",
+    "size": 5443094,
+    "signature": "v2+v3",
+    "asset_raw_match": 33
+  },
+  "suites": [
+    {
+      "suite": "legacy-backend.py",
+      "tests": 619,
+      "green": 619,
+      "red": 0,
+      "ok": true
+    },
+    {
+      "suite": "legacy-frontend.mjs",
+      "tests": 334,
+      "ok": true
+    },
+    {
+      "suite": "frontend-integration.mjs",
+      "groups": 4,
+      "ok": true
+    },
+    {
+      "suite": "test_integration.py",
+      "tests": 62,
+      "ok": true
+    },
+    {
+      "suite": "test_consistency.py",
+      "tests": 24,
+      "ok": true
+    },
+    {
+      "suite": "test_calls.py",
+      "tests": 3,
+      "ok": true
+    },
+    {
+      "suite": "test_chat_media.py",
+      "tests": 15,
+      "ok": true
+    },
+    {
+      "suite": "test_native_media_contract.py",
+      "tests": 21,
+      "ok": true
+    },
+    {
+      "suite": "test_multiprocess.py",
+      "checks": 3,
+      "stress_runs": 5,
+      "ok": true
+    },
+    {
+      "suite": "chat-ui.mjs",
+      "checks": 14,
+      "ok": true
+    },
+    {
+      "suite": "call-ui.mjs",
+      "checks": 5,
+      "ok": true,
+      "relay": {
+        "local": "relay",
+        "remote": "relay",
+        "remote_tracks": true
+      }
+    }
+  ],
+  "fixed_during_release": {
+    "concurrent_cold_start": "busy_timeout set before journal_mode=WAL; retry locked pragma; 5/5 multiprocess runs"
+  },
+  "turn": {
+    "coturn": "active/enabled",
+    "ports": "udp 3478 + 49160-49180",
+    "auth": "REST short-lived HMAC",
+    "ttl": 3600
+  },
+  "postdeploy": "pending"
+}

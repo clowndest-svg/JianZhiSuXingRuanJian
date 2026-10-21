@@ -1,0 +1,1 @@
+{"checks":["incoming call overlay reached the other browser","both ends reached active","forced TURN relay candidate pair and remote audio track","mute disables the local track","hangup reaches the other end"],"stats":{"connection":"connected","pair":true,"local":"relay","remote":"relay","audio":true,"remoteTracks":true}}

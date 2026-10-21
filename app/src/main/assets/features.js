@@ -321,6 +321,8 @@ function tdStatus(id,msg,isErr){
 
 async function refreshAccount(){
     if(!state.token){accountCache=null;paintAccountBadge();return null;}
+    // 通话来电只需要实时连接，不要求用户先停在消息页；登录后就把 WS 拉起来。
+    try { if (typeof connectChat === "function") connectChat(); } catch (e) {}
     try{
         accountCache=await getJson('/api/account');
         // 昵称可能在别的入口改过，或这是旧版本存下的会话：顶栏名字要跟着这次回读刷新，
@@ -644,6 +646,7 @@ const cm = {
    上一版的教训是 sessionGeneration 只管住了请求，界面还留着上一个人的列表。 */
 function resetCommunity() {
     cmGeneration++; dmCleanup();
+    try { dmCallReset(); } catch (e) {}
     if (cm.ws) { try { cm.ws.onclose = null; cm.ws.close(); } catch (e) {} cm.ws = null; }
     clearTimeout(cm.wsTimer);
     cm.wsRetry = 0;
@@ -1948,7 +1951,8 @@ function paintThread() {
     const slot = cmEl("pl-slot");
     if (slot) {
         const blocked = !!(p && p.blocked);
-        slot.innerHTML = '<button type="button" class="td-mini" id="thread-block-btn" aria-pressed="' +
+        slot.innerHTML = (blocked ? '' : '<button type="button" class="td-mini dm-call-btn" id="thread-call-btn" onclick="dmStartCall()" aria-label="语音通话">语音</button>')
+            + '<button type="button" class="td-mini" id="thread-block-btn" aria-pressed="' +
             (blocked ? "true" : "false") + '" onclick="toggleBlock()">' + (blocked ? "取消拉黑" : "拉黑") + "</button>"
             + '<button type="button" class="td-mini" onclick="openBubbleTheme()">气泡</button>';
     }
@@ -1972,6 +1976,11 @@ const dmUi = { threadId: 0, generation: 0, panel: "", tab: "official", query: ""
     searchSeq: 0, results: [], busy: false, composing: false, record: null, draft: null, caret: [0, 0],
     stickBottom: true };
 const dmSearchCache = new Map();
+const dmCall = {
+    state: "idle", id: "", peer: null, role: "", pc: null, stream: null, audio: null,
+    offer: null, pendingIce: [], localIce: [], timer: 0, ring: 0, timeout: 0,
+    startedAt: 0, muted: false, speaker: true, reason: "", endTimer: 0
+};
 const dmOfficial = { items: [], byId: new Map(), loaded: false, task: null };
 const DM_AUDIO_MAX = 5 * 1024 * 1024;
 function dmScope() {
@@ -2807,6 +2816,7 @@ async function connectChat() {
         sock.onclose = () => {
             if (!dmAccountAlive(scope) || cm.ws !== sock) return;
             cm.ws = null;
+            if (["incoming", "outgoing", "connecting", "active"].includes(dmCall.state)) dmCallFinish("实时连接断了");
             cm.wsRetry++;
             setWsState("closed");
             clearTimeout(cm.wsTimer);
@@ -2823,6 +2833,357 @@ function wsSend(obj) {
     try { cm.ws.send(JSON.stringify(obj)); return true; } catch (e) { return false; }
 }
 
+/* ── 语音通话（WebRTC + 现有聊天 WebSocket 信令）────────────── */
+function dmCallSupported() {
+    return typeof RTCPeerConnection === "function" && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+function dmCallName(peer) {
+    return String((peer && (peer.name || peer.nickname || peer.username)) || "对方").slice(0, 40);
+}
+function dmCallLayer() {
+    let layer = cmEl("dm-call-layer");
+    if (!layer) {
+        layer = document.createElement("section");
+        layer.id = "dm-call-layer";
+        layer.className = "dm-call-layer";
+        layer.setAttribute("role", "dialog");
+        layer.setAttribute("aria-modal", "true");
+        document.body.appendChild(layer);
+    }
+    return layer;
+}
+function dmCallPaintControls() {
+    const mute = cmEl("dm-call-mute");
+    if (mute) mute.textContent = dmCall.muted ? "取消静音" : "静音";
+    const speaker = cmEl("dm-call-speaker");
+    if (speaker) speaker.textContent = dmCall.speaker ? "听筒" : "扬声器";
+}
+function dmCallTick() {
+    if (!dmCall.startedAt) return;
+    const seconds = Math.max(0, Math.floor((Date.now() - dmCall.startedAt) / 1000));
+    cmText("dm-call-timer", Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0"));
+}
+function dmCallRender() {
+    const layer = dmCallLayer();
+    if (dmCall.state === "idle") {
+        layer.hidden = true;
+        layer.innerHTML = "";
+        return;
+    }
+    layer.hidden = false;
+    const peer = dmCall.peer || {};
+    const name = escapeHtml(dmCallName(peer));
+    const avatar = '<div class="dm-call-avatar">' + cmAvatarInner(peer) + "</div>";
+    let body = "";
+    if (dmCall.state === "incoming") {
+        body = '<p class="dm-call-kicker">语音通话邀请</p><h2>' + name + '</h2><p class="dm-call-sub">邀请你语音通话</p>'
+            + '<div class="dm-call-actions"><button type="button" class="dm-call-btn-reject" onclick="dmRejectCall()">拒绝</button>'
+            + '<button type="button" class="dm-call-btn-accept" onclick="dmAcceptCall()">接听</button></div>';
+    } else if (dmCall.state === "outgoing") {
+        body = '<p class="dm-call-kicker">正在呼叫</p><h2>' + name + '</h2><p class="dm-call-sub">等待对方接听…</p>'
+            + '<div class="dm-call-actions"><button type="button" class="dm-call-btn-hang" onclick="dmCancelCall()">取消</button></div>';
+    } else if (dmCall.state === "connecting") {
+        body = '<p class="dm-call-kicker">语音通话</p><h2>' + name + '</h2><p class="dm-call-sub">正在连接…</p>'
+            + '<div class="dm-call-actions"><button type="button" class="dm-call-btn-hang" onclick="dmEndCall()">挂断</button></div>';
+    } else if (dmCall.state === "active") {
+        const canSpeaker = !!(window.AndroidBridge && typeof window.AndroidBridge.setVoiceCallSpeaker === "function");
+        body = '<p class="dm-call-kicker">语音通话中</p><h2>' + name + '</h2><p class="dm-call-timer" id="dm-call-timer">0:00</p>'
+            + '<div class="dm-call-controls"><button type="button" id="dm-call-mute" class="dm-call-control" onclick="dmToggleMute()">静音</button>'
+            + (canSpeaker ? '<button type="button" id="dm-call-speaker" class="dm-call-control" onclick="dmToggleSpeaker()">听筒</button>' : '')
+            + '<button type="button" class="dm-call-control dm-call-btn-hang" onclick="dmEndCall()">挂断</button></div>';
+    } else if (dmCall.state === "ended") {
+        body = '<p class="dm-call-kicker">语音通话</p><h2>' + name + '</h2><p class="dm-call-sub">' + escapeHtml(dmCall.reason || "通话结束") + '</p>';
+    }
+    layer.innerHTML = '<div class="dm-call-card">' + avatar + body + '</div>';
+    if (dmCall.state === "active") {
+        dmCallPaintControls();
+        dmCallTick();
+    }
+}
+function dmCallRingStop() {
+    clearInterval(dmCall.ring);
+    dmCall.ring = 0;
+}
+function dmCallRingStart() {
+    dmCallRingStop();
+    const beep = () => {
+        try {
+            if (window.AndroidBridge && window.AndroidBridge.playBeep) window.AndroidBridge.playBeep();
+            if (window.AndroidBridge && window.AndroidBridge.vibrate) window.AndroidBridge.vibrate(400);
+        } catch (e) { /* 浏览器里没有原生桥，静默 */ }
+    };
+    beep();
+    dmCall.ring = setInterval(beep, 1900);
+}
+function dmCallAudioStart() {
+    try {
+        if (window.AndroidBridge && window.AndroidBridge.startVoiceCallAudio) {
+            window.AndroidBridge.startVoiceCallAudio(!!dmCall.speaker);
+        }
+    } catch (e) { /* 路由失败不阻断媒体 */ }
+}
+function dmCallAudioStop() {
+    try {
+        if (window.AndroidBridge && window.AndroidBridge.stopVoiceCallAudio) window.AndroidBridge.stopVoiceCallAudio();
+    } catch (e) {}
+}
+function dmCallAttachRemote(stream) {
+    let audio = dmCall.audio;
+    if (!audio) {
+        audio = document.createElement("audio");
+        audio.id = "dm-call-audio";
+        audio.autoplay = true;
+        audio.setAttribute("playsinline", "");
+        audio.style.display = "none";
+        document.body.appendChild(audio);
+        dmCall.audio = audio;
+    }
+    audio.srcObject = stream;
+    const played = audio.play();
+    if (played && played.catch) played.catch(() => callNativeToast("点一下屏幕让通话声音播放"));
+}
+function dmCallCleanupMedia() {
+    clearInterval(dmCall.timer); dmCall.timer = 0;
+    clearTimeout(dmCall.timeout); dmCall.timeout = 0;
+    clearTimeout(dmCall.endTimer); dmCall.endTimer = 0;
+    dmCallRingStop();
+    const pc = dmCall.pc;
+    dmCall.pc = null;
+    if (pc) {
+        pc.onicecandidate = null;
+        pc.ontrack = null;
+        pc.onconnectionstatechange = null;
+        try { pc.close(); } catch (e) {}
+    }
+    if (dmCall.stream) {
+        dmCall.stream.getTracks().forEach(track => { try { track.stop(); } catch (e) {} });
+        dmCall.stream = null;
+    }
+    if (dmCall.audio) {
+        try { dmCall.audio.srcObject = null; dmCall.audio.remove(); } catch (e) {}
+        dmCall.audio = null;
+    }
+    dmCallAudioStop();
+}
+function dmCallReset() {
+    dmCallCleanupMedia();
+    dmCall.state = "idle"; dmCall.id = ""; dmCall.peer = null; dmCall.role = "";
+    dmCall.offer = null; dmCall.pendingIce = []; dmCall.localIce = [];
+    dmCall.startedAt = 0; dmCall.muted = false; dmCall.speaker = true; dmCall.reason = "";
+    dmCallRender();
+}
+function dmCallFinish(reason) {
+    if (dmCall.state === "idle" || dmCall.state === "ended") return;
+    const wasActive = ["outgoing", "connecting", "active"].includes(dmCall.state);
+    dmCallCleanupMedia();
+    dmCall.state = "ended";
+    dmCall.reason = reason || (wasActive ? "通话已结束" : "通话结束");
+    dmCall.startedAt = 0;
+    dmCallRender();
+    dmCall.endTimer = setTimeout(() => { if (dmCall.state === "ended") dmCallReset(); }, 1800);
+}
+function dmCallFlushLocalIce() {
+    if (!dmCall.id) return;
+    const queued = dmCall.localIce.splice(0);
+    queued.forEach(candidate => wsSend({ t: "call_ice", call_id: dmCall.id, candidate }));
+}
+function dmCallFlushRemoteIce() {
+    if (!dmCall.pc || !dmCall.pc.remoteDescription) return;
+    const queued = dmCall.pendingIce.splice(0);
+    queued.forEach(candidate => dmCall.pc.addIceCandidate(candidate).catch(() => {}));
+}
+function dmCallWirePeer(pc) {
+    pc.onicecandidate = event => {
+        if (!event.candidate) return;
+        const candidate = event.candidate.toJSON ? event.candidate.toJSON() : {
+            candidate: event.candidate.candidate, sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex
+        };
+        if (dmCall.id) wsSend({ t: "call_ice", call_id: dmCall.id, candidate });
+        else dmCall.localIce.push(candidate);
+    };
+    pc.ontrack = event => {
+        const stream = (event.streams && event.streams[0]) || new MediaStream([event.track]);
+        dmCallAttachRemote(stream);
+    };
+    pc.onconnectionstatechange = () => {
+        const state = pc.connectionState;
+        if (state === "connected") dmCallSetActive();
+        else if (state === "failed") dmCallFinish("连接失败，可能双方网络不支持");
+        else if (state === "closed" && dmCall.state === "active") dmCallFinish("通话已结束");
+    };
+}
+function dmCallSetActive() {
+    if (dmCall.state === "active") return;
+    if (!["outgoing", "connecting", "incoming"].includes(dmCall.state)) return;
+    clearTimeout(dmCall.timeout); dmCall.timeout = 0;
+    dmCall.state = "active"; dmCall.startedAt = Date.now();
+    dmCallAudioStart();
+    clearInterval(dmCall.timer);
+    dmCall.timer = setInterval(dmCallTick, 1000);
+    dmCallRender();
+}
+async function dmCallMedia(pc) {
+    const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+    });
+    dmCall.stream = stream;
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    return stream;
+}
+async function dmCallIceServers() {
+    const result = await getJson("/api/rtc/ice");
+    return Array.isArray(result.ice_servers) ? result.ice_servers : [];
+}
+function dmCallNewPeer(iceServers) {
+    const pc = new RTCPeerConnection({
+        iceServers,
+        iceTransportPolicy: window.__QS_FORCE_RELAY__ ? "relay" : "all"
+    });
+    dmCall.pc = pc;
+    dmCallWirePeer(pc);
+    return pc;
+}
+async function dmStartCall() {
+    if (dmCall.state !== "idle") { callNativeToast("现在已经在通话里了"); return; }
+    if (!cm.thread) return;
+    const peer = cm.thread.partner;
+    if (!peer || peer.blocked) { callNativeToast("现在不能给这个人打电话"); return; }
+    if (!dmCallSupported()) { callNativeToast("当前客户端不支持语音通话，请升级系统 WebView"); return; }
+    if (!wsOpen()) { callNativeToast("实时连接还没连上，正在重连"); connectChat(); return; }
+    const allowed = await dmEnsureMicrophone();
+    if (!allowed) { dmMicHelp(); return; }
+    dmCancelRecording(); dmClosePanels(); dmBlurKeyboard();
+    dmCall.state = "outgoing"; dmCall.peer = { id: peer.id, name: cmName(peer) };
+    dmCall.role = "caller"; dmCall.id = ""; dmCall.offer = null; dmCall.pendingIce = []; dmCall.localIce = [];
+    dmCall.muted = false; dmCall.speaker = true; dmCall.reason = "";
+    dmCallRender();
+    try {
+        const iceServers = await dmCallIceServers();
+        const pc = dmCallNewPeer(iceServers);
+        await dmCallMedia(pc);
+        const offer = await pc.createOffer({ offerToReceiveAudio: true });
+        await pc.setLocalDescription(offer);
+        if (!wsSend({ t: "call_invite", to: peer.id, sdp: { type: offer.type, sdp: offer.sdp } })) {
+            throw new Error("实时连接没连上");
+        }
+        dmCall.timeout = setTimeout(() => {
+            if (dmCall.state === "outgoing") {
+                if (dmCall.id) wsSend({ t: "call_cancel", call_id: dmCall.id });
+                dmCallFinish("对方没有接听");
+            }
+        }, 45000);
+    } catch (error) {
+        dmCallFinish("呼叫失败：" + (error.message || "网络不通"));
+    }
+}
+async function dmAcceptCall() {
+    if (dmCall.state !== "incoming" || !dmCall.offer) return;
+    dmCallRingStop();
+    const allowed = await dmEnsureMicrophone();
+    if (!allowed) {
+        if (dmCall.id) wsSend({ t: "call_reject", call_id: dmCall.id });
+        dmCallFinish("麦克风权限未获准");
+        dmMicHelp();
+        return;
+    }
+    dmCall.state = "connecting";
+    dmCallRender();
+    try {
+        const iceServers = await dmCallIceServers();
+        const pc = dmCallNewPeer(iceServers);
+        await dmCallMedia(pc);
+        await pc.setRemoteDescription(dmCall.offer);
+        dmCallFlushRemoteIce();
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        if (!wsSend({ t: "call_accept", call_id: dmCall.id, sdp: { type: answer.type, sdp: answer.sdp } })) {
+            throw new Error("实时连接没连上");
+        }
+    } catch (error) {
+        if (dmCall.id) wsSend({ t: "call_reject", call_id: dmCall.id });
+        dmCallFinish("接听失败：" + (error.message || "网络不通"));
+    }
+}
+function dmRejectCall() {
+    if (dmCall.id) wsSend({ t: "call_reject", call_id: dmCall.id });
+    dmCallFinish("已拒绝");
+}
+function dmCancelCall() {
+    if (dmCall.id) wsSend({ t: "call_cancel", call_id: dmCall.id });
+    dmCallFinish("已取消");
+}
+function dmEndCall() {
+    if (dmCall.id) wsSend({ t: "call_end", call_id: dmCall.id });
+    dmCallFinish("通话已结束");
+}
+function dmToggleMute() {
+    if (!dmCall.stream) return;
+    dmCall.muted = !dmCall.muted;
+    dmCall.stream.getAudioTracks().forEach(track => { track.enabled = !dmCall.muted; });
+    dmCallPaintControls();
+}
+function dmToggleSpeaker() {
+    dmCall.speaker = !dmCall.speaker;
+    try {
+        if (window.AndroidBridge && window.AndroidBridge.setVoiceCallSpeaker) {
+            window.AndroidBridge.setVoiceCallSpeaker(dmCall.speaker);
+        }
+    } catch (e) {}
+    dmCallPaintControls();
+}
+function dmHandleCallEvent(data) {
+    const kind = data && data.t;
+    if (!kind) return;
+    if (kind === "call_invite") {
+        if (dmCall.state !== "idle") {
+            wsSend({ t: "call_reject", call_id: data.call_id });
+            return;
+        }
+        if (!dmCallSupported()) {
+            wsSend({ t: "call_reject", call_id: data.call_id });
+            callNativeToast("当前客户端不支持语音通话");
+            return;
+        }
+        dmCall.state = "incoming"; dmCall.id = data.call_id; dmCall.peer = data.from || null;
+        dmCall.role = "callee"; dmCall.offer = data.sdp; dmCall.pendingIce = []; dmCall.localIce = [];
+        dmCall.muted = false; dmCall.speaker = true; dmCall.reason = "";
+        dmCallRender(); dmCallRingStart();
+        return;
+    }
+    if (kind === "call_ringing") {
+        if (dmCall.state !== "outgoing") return;
+        dmCall.id = data.call_id;
+        if (data.peer) dmCall.peer = data.peer;
+        dmCallRender(); dmCallFlushLocalIce();
+        return;
+    }
+    if (kind === "call_accept") {
+        if (!dmCall.pc || !data.sdp) return;
+        dmCall.pc.setRemoteDescription(data.sdp).then(() => {
+            dmCallFlushRemoteIce();
+            if (dmCall.state === "outgoing") { dmCall.state = "connecting"; dmCallRender(); }
+        }).catch(() => dmCallFinish("接听失败"));
+        return;
+    }
+    if (kind === "call_active") {
+        if (dmCall.state === "connecting" || dmCall.state === "incoming") dmCallRender();
+        return;
+    }
+    if (kind === "call_ice") {
+        if (!data.candidate) return;
+        if (dmCall.pc && dmCall.pc.remoteDescription) dmCall.pc.addIceCandidate(data.candidate).catch(() => {});
+        else dmCall.pendingIce.push(data.candidate);
+        return;
+    }
+    if (kind === "call_reject") { dmCallFinish(data.reason || "对方拒绝了"); return; }
+    if (kind === "call_cancel") { dmCallFinish(data.reason || "对方取消了"); return; }
+    if (kind === "call_timeout") { dmCallFinish(data.reason || "对方没有接听"); return; }
+    if (kind === "call_end") { dmCallFinish(data.reason || "对方已挂断"); return; }
+    if (kind === "call_busy") { dmCallFinish(data.detail || "对方正在通话"); return; }
+    if (kind === "call_unavailable") { dmCallFinish(data.detail || "对方不在线"); return; }
+    if (kind === "call_error") { dmCallFinish(data.detail || "通话失败"); }
+}
 function handleWsEvent(ev) {
     let data = null;
     try { data = JSON.parse(ev.data); } catch (e) { return; }
@@ -2852,6 +3213,8 @@ function handleWsEvent(ev) {
         cm.bubbles = cm.bubbles.map(b => Number(b.id) === Number(data.message_id)
             ? Object.assign({}, b, { recalled_at: data.recalled_at || "just now" }) : b);
         if (cm.thread) paintThread();
+    } else if (typeof data.t === "string" && data.t.startsWith("call_")) {
+        dmHandleCallEvent(data);
     }
 }
 

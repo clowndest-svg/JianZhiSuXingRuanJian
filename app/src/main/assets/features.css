@@ -471,6 +471,21 @@ body.qs-page-open{overflow:hidden}
 .dm-draft p{margin:3px 0;font-size:11px;color:#64748B}
 .dm-audio{width:220px;max-width:100%;font-size:12px;color:#334155;background:#fff;padding:8px;border-radius:12px;box-sizing:border-box}
 .dm-audio audio{display:block;width:100%;height:42px;margin-top:5px}
+.dm-call-layer{position:fixed;inset:0;z-index:1400;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(6,20,15,.55);backdrop-filter:blur(6px)}
+.dm-call-layer[hidden]{display:none}
+.dm-call-card{width:min(330px,100%);padding:26px 20px 20px;border-radius:24px;background:#fff;text-align:center;box-shadow:0 24px 70px rgba(6,20,15,.35)}
+.dm-call-avatar{display:flex;justify-content:center;margin-bottom:10px}
+.dm-call-avatar .cm-avatar{width:84px;height:84px;flex-basis:84px;font-size:30px;border:4px solid #E7F8F1}
+.dm-call-kicker{margin:0;font-size:11.5px;letter-spacing:.08em;color:#047857;font-weight:800}
+.dm-call-card h2{margin:6px 0 4px;font-size:20px;color:#0F172A;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dm-call-sub{margin:0;min-height:18px;font-size:12.5px;color:#64748B}
+.dm-call-timer{margin:8px 0 2px;font-size:24px;font-weight:800;color:#0F172A;font-variant-numeric:tabular-nums}
+.dm-call-actions,.dm-call-controls{display:flex;gap:10px;justify-content:center;margin-top:18px;flex-wrap:wrap}
+.dm-call-actions button,.dm-call-control{border:0;border-radius:999px;font:inherit;font-size:13px;font-weight:700;min-height:44px;padding:10px 20px;color:#fff}
+.dm-call-btn-accept{flex:1 1 0;max-width:140px;background:#047857}
+.dm-call-btn-reject,.dm-call-btn-hang{flex:1 1 0;max-width:140px;background:#DC2626}
+.dm-call-control{min-width:78px;padding:10px 14px;background:#F1F5F9;color:#334155}
+.dm-call-control.dm-call-btn-hang{background:#DC2626;color:#fff}
 .dm-message{width:100%}
 @media(max-width:360px){.dm-tools{gap:3px}.dm-tool{width:30px;height:34px;min-height:34px}.dm-tools .dm-send{padding:8px;font-size:12px}.dm-sticker-tabs button{font-size:11px;padding:7px 4px}.dm-audio{width:175px}}
 .dm-media-img{display:block;max-width:min(62vw,230px);max-height:300px;border-radius:12px;object-fit:cover;cursor:zoom-in}

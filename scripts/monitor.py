@@ -1,15 +1,23 @@
 """Local operational checks; emits only aggregate numbers and service states."""
-import json,re,shutil,subprocess,time,urllib.request,ssl
+import json,re,shutil,socket,struct,subprocess,time,urllib.request,ssl
 from pathlib import Path
 root=Path('/opt/qingsu');problems=[];report={'checked_at':int(time.time())}
 public_base=(root/'site-base').read_text().strip() if (root/'site-base').is_file() else 'https://124.220.54.64'
 if public_base not in ('https://124.220.54.64','https://scientificexploration.art'):raise SystemExit('Invalid active public site')
-for unit in ('qingsu','qingsu-llama','qingsu-backup.timer','qingsu-cert-renew.timer'):
+for unit in ('qingsu','qingsu-llama','qingsu-backup.timer','qingsu-cert-renew.timer','coturn'):
     state=subprocess.run(['systemctl','is-active',unit],capture_output=True,text=True).stdout.strip();report[unit]=state
     if state!='active':problems.append(unit)
 try:
     with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(public_base+'/health/ready',timeout=10) as r:report['ready']=r.status
 except Exception:problems.append('https_readiness')
+try:
+    probe=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);probe.settimeout(2)
+    probe.sendto(struct.pack('!HHI',0x0001,0,0x2112A442)+bytes.fromhex('00112233445566778899aabb'),('127.0.0.1',3478))
+    data,_=probe.recvfrom(256);probe.close()
+    report['turn']=len(data)>=20 and struct.unpack('!H',data[:2])[0]==0x0101
+except Exception:
+    report['turn']=False
+if not report['turn']:problems.append('turn')
 report['free_disk_mb']=shutil.disk_usage(root).free//1024//1024
 if report['free_disk_mb']<512:problems.append('low_disk')
 backups=list((root/'backups/scheduled').glob('bundle-*.p7m'))

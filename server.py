@@ -1,6 +1,7 @@
 import csv
 from functools import lru_cache
 import hmac
+import base64
 import math
 import uuid
 import logging
@@ -75,11 +76,21 @@ app.add_middleware(
 )
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, timeout=5, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
+    # busy_timeout 必须先于 journal_mode：两个 worker 同时冷启动时，后到的
+    # PRAGMA 会在拿不到锁时直接报 database is locked，而不是等锁。
     conn.execute("PRAGMA busy_timeout=5000")
+    for attempt in range(20):
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            break
+        except sqlite3.OperationalError as error:
+            if "locked" not in str(error) or attempt == 19:
+                conn.close()
+                raise
+            time.sleep(0.05)
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 def init_db():
@@ -3549,7 +3560,8 @@ def health():
                     "present": {n: os.path.exists(os.path.join(KEY_DIR, n))
                                 for n in ("media-signing.key", "ws-secret.key")}}
     info["chat"] = {"online": len(_WS_HUB), "sockets": int(sum(len(v) for v in _WS_HUB.values())),
-                    "rejected": int(_ws_stats["rejected"]), "redis": bool(redis_up())}
+                    "rejected": int(_ws_stats["rejected"]), "redis": bool(redis_up()),
+                    "turn": bool(turn_secret()), "calls": len(_CALLS)}
     # 限流计数存在哪，必须一眼看得见：Redis 在就是全局一份（多进程也准），
     # 退回进程内内存时每个进程各算一份——将来加 --workers 时这条会悄悄放宽 N 倍。
     info["rate"] = {"store": "redis" if redis_up() else "memory",
@@ -3657,10 +3669,28 @@ DM_AUDIO_MAX = 5 * 1024 * 1024
 DM_AUDIO_SEC_MAX = 600
 FOLLOW_RATE_LIMIT = 20
 FEEDBACK_RATE_LIMIT = 5
+CALL_RATE_LIMIT = 6
+CALL_RING_SECONDS = 45
+TURN_HOST = os.environ.get("QINGSU_TURN_HOST", "124.220.54.64")
+TURN_PORT = int(os.environ.get("QINGSU_TURN_PORT", "3478"))
+TURN_TTL = 3600
 
 
 def ws_secret():
     return _load_or_create_key("ws-secret.key")
+
+
+def turn_secret():
+    """TURN REST 共享密钥。缺失时只发 STUN，不把不可用伪装成可用。"""
+    override = (os.environ.get("QINGSU_TURN_SECRET") or "").strip()
+    if override:
+        return override if re.fullmatch(r"[0-9A-Za-z_-]{24,128}", override) else ""
+    try:
+        with open(os.path.join(KEY_DIR, "turn-secret"), "r", encoding="ascii") as handle:
+            value = handle.read().strip()
+    except (OSError, UnicodeError):
+        return ""
+    return value if re.fullmatch(r"[0-9a-f]{32,128}", value) else ""
 
 
 _presence_mem = {}
@@ -4822,6 +4852,28 @@ def chat_ticket(request: Request, user: dict = Depends(get_current_user)):
     return {"code": 0, "ticket": token, "expires_in": chat.TICKET_TTL, "ws_path": "/ws/chat"}
 
 
+@app.get("/api/rtc/ice")
+def rtc_ice(user: dict = Depends(get_current_user)):
+    ok, _where, _count = rate_hit("rtc-ice:%d" % user["id"], 30, 60)
+    if not ok:
+        raise HTTPException(status_code=429, detail="请求太频繁了，稍后再试")
+    secret = turn_secret()
+    stun = "stun:%s:%d" % (TURN_HOST, TURN_PORT)
+    if not secret:
+        return {"code": 0, "turn": False, "ttl": 0,
+                "ice_servers": [{"urls": [stun]}],
+                "detail": "TURN 未配置，只尝试点对点连接"}
+    expiry = int(time.time()) + TURN_TTL
+    username = "%d:%d" % (expiry, user["id"])
+    credential = base64.b64encode(
+        hmac.new(secret.encode("ascii"), username.encode("ascii"), hashlib.sha1).digest()
+    ).decode("ascii")
+    return {"code": 0, "turn": True, "ttl": TURN_TTL, "ice_servers": [{
+        "urls": [stun, "turn:%s:%d?transport=udp" % (TURN_HOST, TURN_PORT)],
+        "username": username, "credential": credential,
+    }]}
+
+
 def _valid_video(path: str) -> str:
     """只认 MP4 / WebM：容器头对不上的一律拒。MOV 虽然也是 ftyp，
     但 Android WebView 多半放不了，宁可不收也不给用户一个转圈的黑框。"""
@@ -5225,6 +5277,173 @@ _WS_HUB = {}
 _WS_LOOPS = {}
 _ws_stats = {"peaks": 0, "rejected": 0, "handed_off": 0}
 
+_CALLS = {}
+_CALL_BY_USER = {}
+
+
+def _call_peer(uid):
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT id, username, nickname FROM users WHERE id=?", (int(uid),)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    name = re.sub(r"[\x00-\x1f\x7f]", " ", str(row["nickname"] or row["username"] or "")).strip()
+    return {"id": int(uid), "name": name[:40] or ("用户%d" % int(uid))}
+
+
+def _call_cleanup(call_id, *, event=None, targets=(), reason=""):
+    call = _CALLS.pop(call_id, None)
+    if not call:
+        return
+    _CALL_BY_USER.pop(call.get("from"), None)
+    _CALL_BY_USER.pop(call.get("to"), None)
+    task = call.get("task")
+    try:
+        current = asyncio.current_task()
+    except RuntimeError:
+        current = None
+    if task and task is not current and not task.done():
+        task.cancel()
+    if event:
+        for uid in targets:
+            _push(int(uid), {"t": event, "call_id": call_id, "reason": reason})
+
+
+async def _call_timeout(call_id):
+    await asyncio.sleep(CALL_RING_SECONDS)
+    call = _CALLS.get(call_id)
+    if not call or call.get("state") != "ringing":
+        return
+    for uid in (call["from"], call["to"]):
+        _push(uid, {"t": "call_timeout", "call_id": call_id, "reason": "对方没有接听"})
+    _call_cleanup(call_id)
+
+
+def _call_sdp(value):
+    if not isinstance(value, dict) or value.get("type") not in ("offer", "answer"):
+        raise ValueError("通话描述不正确")
+    sdp = value.get("sdp")
+    if not isinstance(sdp, str) or not 1 <= len(sdp) <= 65536:
+        raise ValueError("通话描述过长或为空")
+    return {"type": value["type"], "sdp": sdp}
+
+
+def _call_candidate(value):
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("网络候选不正确")
+    candidate = value.get("candidate", "")
+    if not isinstance(candidate, str) or len(candidate) > 4096:
+        raise ValueError("网络候选过长")
+    result = {"candidate": candidate}
+    for key in ("sdpMid", "sdpMLineIndex", "usernameFragment"):
+        if key in value:
+            item = value[key]
+            if isinstance(item, (str, int, float)) or item is None:
+                result[key] = item
+    return result
+
+
+def _call_participant(call_id, uid):
+    if not isinstance(call_id, str) or not re.fullmatch(r"c[A-Za-z0-9_-]{8,40}", call_id):
+        raise ValueError("通话编号不正确")
+    call = _CALLS.get(call_id)
+    if not call or uid not in (call["from"], call["to"]):
+        raise ValueError("通话不在了")
+    return call
+
+
+async def _handle_call(ws, uid, kind, data):
+    if len(json.dumps(data, separators=(",", ":"))) > 96 * 1024:
+        await ws.send_json({"t": "call_error", "detail": "通话信令太大"})
+        return
+    if kind == "call_invite":
+        ok, _where, _count = rate_hit("call:%d" % uid, CALL_RATE_LIMIT, 60)
+        if not ok:
+            await ws.send_json({"t": "call_error", "detail": "呼叫太频繁了，稍后再试"})
+            return
+        to = data.get("to")
+        if type(to) is not int or to <= 0 or to == uid:
+            await ws.send_json({"t": "call_error", "detail": "呼叫对象不正确"})
+            return
+        sdp = _call_sdp(data.get("sdp"))
+        if sdp["type"] != "offer":
+            raise ValueError("呼叫描述不正确")
+        me, peer = _call_peer(uid), _call_peer(to)
+        if not me or not peer:
+            await ws.send_json({"t": "call_error", "detail": "找不到这个用户"})
+            return
+        conn = get_db()
+        try:
+            blocked = _blocked(conn, to, uid) or _blocked(conn, uid, to)
+        finally:
+            conn.close()
+        if blocked:
+            await ws.send_json({"t": "call_error", "detail": "对方不接受你的私信"})
+            return
+        if uid in _CALL_BY_USER or to in _CALL_BY_USER:
+            await ws.send_json({"t": "call_busy", "detail": "你或对方正在另一通电话里"})
+            return
+        if not _WS_HUB.get(to):
+            await ws.send_json({"t": "call_unavailable",
+                                "detail": "对方不在线，语音通话需要双方都在 App 内"})
+            return
+        call_id = "c" + secrets.token_urlsafe(9)
+        task = asyncio.create_task(_call_timeout(call_id))
+        _CALLS[call_id] = {"from": uid, "to": to, "state": "ringing",
+                           "created": time.time(), "task": task}
+        _CALL_BY_USER[uid] = call_id
+        _CALL_BY_USER[to] = call_id
+        await ws.send_json({"t": "call_ringing", "call_id": call_id, "peer": peer,
+                            "expires": int(time.time()) + CALL_RING_SECONDS})
+        _push(to, {"t": "call_invite", "call_id": call_id, "from": me, "sdp": sdp})
+        return
+    call_id = data.get("call_id")
+    if kind == "call_accept":
+        call = _call_participant(call_id, uid)
+        if call["to"] != uid or call["state"] != "ringing":
+            raise ValueError("这通电话已经不能接听")
+        sdp = _call_sdp(data.get("sdp"))
+        if sdp["type"] != "answer":
+            raise ValueError("接听描述不正确")
+        task = call.get("task")
+        if task and not task.done():
+            task.cancel()
+        call["state"] = "active"
+        call["accepted_at"] = time.time()
+        _push(call["from"], {"t": "call_accept", "call_id": call_id,
+                             "from": _call_peer(uid), "sdp": sdp})
+        await ws.send_json({"t": "call_active", "call_id": call_id,
+                            "peer": _call_peer(call["from"])})
+        return
+    if kind == "call_ice":
+        call = _call_participant(call_id, uid)
+        other = call["to"] if call["from"] == uid else call["from"]
+        _push(other, {"t": "call_ice", "call_id": call_id,
+                      "candidate": _call_candidate(data.get("candidate"))})
+        return
+    if kind == "call_reject":
+        call = _call_participant(call_id, uid)
+        if call["to"] != uid:
+            raise ValueError("只有接听方可以拒绝")
+        _call_cleanup(call_id, event="call_reject", targets=(call["from"],), reason="对方拒绝了")
+        return
+    if kind == "call_cancel":
+        call = _call_participant(call_id, uid)
+        if call["from"] != uid:
+            raise ValueError("只有呼叫方可以取消")
+        _call_cleanup(call_id, event="call_cancel", targets=(call["to"],), reason="对方取消了")
+        return
+    if kind == "call_end":
+        call = _call_participant(call_id, uid)
+        other = call["to"] if call["from"] == uid else call["from"]
+        _call_cleanup(call_id, event="call_end", targets=(other,), reason="对方已挂断")
+        return
+    await ws.send_json({"t": "call_error", "detail": "不认识的通话消息"})
+
 
 @app.websocket("/ws/chat")
 async def chat_socket(ws: WebSocket, ticket: str = ""):
@@ -5293,6 +5512,11 @@ async def chat_socket(ws: WebSocket, ticket: str = ""):
                     if marked:
                         _push(int(data.get("with") or 0), {"t": "read", "by": uid, "marked": marked})
                     await ws.send_json({"t": "read", "with": data.get("with"), "marked": marked})
+                elif isinstance(kind, str) and kind.startswith("call_"):
+                    try:
+                        await _handle_call(ws, uid, kind, data)
+                    except ValueError as error:
+                        await ws.send_json({"t": "call_error", "detail": str(error)})
                 else:
                     await ws.send_json({"t": "error", "detail": "不认识的消息类型"})
             except HTTPException as error:
@@ -5315,6 +5539,11 @@ async def chat_socket(ws: WebSocket, ticket: str = ""):
             ok, _ = _redis_cmd(["DEL", chat.presence_key(uid)])
             if not ok:
                 _presence_mem.pop(uid, None)
+            call_id = _CALL_BY_USER.get(uid)
+            call = _CALLS.get(call_id) if call_id else None
+            if call:
+                other = call["to"] if call["from"] == uid else call["from"]
+                _call_cleanup(call_id, event="call_end", targets=(other,), reason="对方断线了")
 
 
 # ── 意见反馈 ───────────────────────────────────────────────────────────

@@ -1,14 +1,18 @@
 package com.fitcoach.shapemaster;
 
+import android.app.Activity;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.os.Build;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 import android.widget.Toast;
@@ -19,6 +23,8 @@ public class WebAppInterface {
     private final Context context;
     private final WebView webView;
     private static final String CHANNEL_ID = "shapemaster_reminders";
+    private AudioManager audioManager;
+    private AudioFocusRequest audioFocusRequest;
 
     public WebAppInterface(Context context, WebView webView) {
         this.context = context;
@@ -60,6 +66,71 @@ public class WebAppInterface {
     @JavascriptInterface
     public void openAppSettings() {
         openAppSettingsPage();
+    }
+
+    @JavascriptInterface
+    public void startVoiceCallAudio(boolean speaker) {
+        if (!(context instanceof Activity)) return;
+        Activity activity = (Activity) context;
+        activity.runOnUiThread(() -> {
+            try {
+                if (audioManager == null) audioManager = (AudioManager) activity.getSystemService(Context.AUDIO_SERVICE);
+                if (audioManager != null) {
+                    audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                    audioManager.setSpeakerphoneOn(speaker);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        AudioAttributes attrs = new AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
+                        audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                                .setAudioAttributes(attrs).build();
+                        audioManager.requestAudioFocus(audioFocusRequest);
+                    } else {
+                        audioManager.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL,
+                                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
+                    }
+                }
+                activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            } catch (Exception ignored) {
+                // Audio routing is best-effort; WebRTC still carries the call.
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void setVoiceCallSpeaker(boolean speaker) {
+        if (!(context instanceof Activity)) return;
+        Activity activity = (Activity) context;
+        activity.runOnUiThread(() -> {
+            try {
+                if (audioManager == null) audioManager = (AudioManager) activity.getSystemService(Context.AUDIO_SERVICE);
+                if (audioManager != null) audioManager.setSpeakerphoneOn(speaker);
+            } catch (Exception ignored) {
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void stopVoiceCallAudio() {
+        if (!(context instanceof Activity)) return;
+        Activity activity = (Activity) context;
+        activity.runOnUiThread(() -> {
+            try {
+                if (audioManager == null) audioManager = (AudioManager) activity.getSystemService(Context.AUDIO_SERVICE);
+                if (audioManager != null) {
+                    audioManager.setSpeakerphoneOn(false);
+                    audioManager.setMode(AudioManager.MODE_NORMAL);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        if (audioFocusRequest != null) audioManager.abandonAudioFocusRequest(audioFocusRequest);
+                        audioFocusRequest = null;
+                    } else {
+                        audioManager.abandonAudioFocus(null);
+                    }
+                }
+                activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            } catch (Exception ignored) {
+            }
+        });
     }
 
     @JavascriptInterface

@@ -1,0 +1,23 @@
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_blocking_and_mutual_follow_boundaries (__main__.ChatMedia.test_blocking_and_mutual_follow_boundaries) ... ok
+test_fake_audio_and_oversized_cleaned (__main__.ChatMedia.test_fake_audio_and_oversized_cleaned) ... ok
+test_missing_and_stolen_voice_rejected (__main__.ChatMedia.test_missing_and_stolen_voice_rejected) ... WARNING:root:key_regenerated name=media-signing.key 此前签发的签名链接与 WS 票据已全部失效
+ok
+test_network_import_metadata_and_outage (__main__.ChatMedia.test_network_import_metadata_and_outage) ... ok
+test_official_manifest_assets_and_validation (__main__.ChatMedia.test_official_manifest_assets_and_validation) ... ok
+test_sticker_search_route_reports_fallback_sources (__main__.ChatMedia.test_sticker_search_route_reports_fallback_sources) ... ok
+test_sticker_type_owner_and_invalid_content (__main__.ChatMedia.test_sticker_type_owner_and_invalid_content) ... ok
+test_sticker_upload_send_replay_and_recall (__main__.ChatMedia.test_sticker_upload_send_replay_and_recall) ... ok
+test_video_track_disguised_as_audio_and_long_voice (__main__.ChatMedia.test_video_track_disguised_as_audio_and_long_voice) ... ok
+test_voice_all_containers_and_authoritative_duration (__main__.ChatMedia.test_voice_all_containers_and_authoritative_duration) ... ok
+test_chinese_sources_fallback_import_and_boundaries (__main__.ProviderSecurity.test_chinese_sources_fallback_import_and_boundaries) ... ok
+test_media_ssrf_boundaries (__main__.ProviderSecurity.test_media_ssrf_boundaries) ... ok
+test_meme_catalog_search_import_and_source_boundaries (__main__.ProviderSecurity.test_meme_catalog_search_import_and_source_boundaries) ... ok
+test_openmoji_catalog_import_and_user_binding (__main__.ProviderSecurity.test_openmoji_catalog_import_and_user_binding) ... ok
+test_signed_ids_are_user_bound_expiring_and_tamper_proof (__main__.ProviderSecurity.test_signed_ids_are_user_bound_expiring_and_tamper_proof) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 16.591s
+
+OK

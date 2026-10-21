@@ -512,6 +512,11 @@ class NativeMediaContractTest(unittest.TestCase):
         for token in ("dmEnsureMicrophone", "dmMicHelp", "NotReadable", "microphonePermissionState"):
             self.assertIn(token, features)
         self.assertNotIn("麦克风不可用，未录音；请检查设备后重试", features)
+        for token in ("startVoiceCallAudio", "setVoiceCallSpeaker", "stopVoiceCallAudio"):
+            self.assertIn(token, bridge)
+        manifest = ET.parse(MANIFEST).getroot()
+        permissions = [item.get(ANDROID_NS + "name") for item in manifest.findall("uses-permission")]
+        self.assertIn("android.permission.MODIFY_AUDIO_SETTINGS", permissions)
 
     def test_only_literal_audio_allowlist_is_granted(self):
         grants = re.findall(r"\b\w+\.grant\((.*?)\);", self.source, flags=re.DOTALL)

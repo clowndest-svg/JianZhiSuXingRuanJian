@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 51;
+const APP_BUILD = 52;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -427,6 +427,8 @@ async function initAuthAndData() {
         state.token = savedToken;
         state.user = saved;
         updateUserUI(displayName(state.user));
+        // 来电不要求用户先打开消息页：恢复会话后就把实时连接拉起来。
+        if (typeof connectChat === "function") connectChat();
         await syncRemoteDashboard();
         await syncRemoteCharts();
     } else {
