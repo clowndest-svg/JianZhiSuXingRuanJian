@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 59;
+const APP_BUILD = 60;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -176,6 +176,10 @@ let state = {
 
 const INITIAL_STATE = JSON.parse(JSON.stringify(state));
 let sessionGeneration = 0;
+// 档案写入串行化：选身材/选场景/保存表单可能连着触发，后一次必须覆盖前一次；
+// 并发的档案写还会把旧身高体重写回去（r176 实测过）。
+let profileWriteSeq = 0;
+let profileSaveChain = Promise.resolve();
 
 // 常见外卖数据库
 const TAKEOUT_DB = {
@@ -545,6 +549,14 @@ function postApi(path, body, opts) {
     pendingWrites.set(key,task);return task;
 }
 
+/** 档案写入按调用顺序排队：先选的场景不能反过来把后保存的身高体重覆盖掉。 */
+function queueProfileUpdate(body) {
+    profileWriteSeq++;
+    const run = () => postApi("/api/profile/update", body).finally(() => { profileWriteSeq++; });
+    profileSaveChain = profileSaveChain.catch(() => {}).then(run);
+    return profileSaveChain;
+}
+
 // 被封号时把话说清楚：只报"网络不通"或让人停在空白页，等于把服务端的决定藏起来了。
 function handleAccountBanned(detail) {
     localStorage.removeItem(TOKEN_KEY);
@@ -654,7 +666,7 @@ function applyDashboardData(data) {
         targetWeightJin: sp.target_weight_jin,
         goalType: sp.goal_type,
         diningMode: sp.dining_mode,
-        scene: sp.scene
+        scene: SCENE_META[sp.scene] ? sp.scene : "home"
     };
     state.todayConsumed = data.today_consumed || 0;
     state.todayBurned = data.today_burned || 0;
@@ -698,6 +710,7 @@ function applyDashboardData(data) {
 async function syncRemoteDashboard() {
     if (!state.token) return;
     const generation=sessionGeneration;
+    const writeSeq=profileWriteSeq;
     try {
         const res = await fetch(`${API_BASE}/api/dashboard`, {
             headers: { "Authorization": `Bearer ${state.token}` }
@@ -709,6 +722,7 @@ async function syncRemoteDashboard() {
         }
         const data = await res.json();
         if (generation !== sessionGeneration) return;
+        if (writeSeq !== profileWriteSeq) return;
         if (!res.ok) throw new Error("HTTP " + res.status);
         applyDashboardData(data);
         renderHabitMatrix();
@@ -721,12 +735,14 @@ async function syncRemoteDashboard() {
 async function syncRemoteCharts() {
     if (!state.token) return;
     const generation=sessionGeneration;
+    const writeSeq=profileWriteSeq;
     try {
         const res = await fetch(`${API_BASE}/api/charts`, {
             headers: { "Authorization": `Bearer ${state.token}` }
         });
         const data = await res.json();
         if (generation !== sessionGeneration) return;
+        if (writeSeq !== profileWriteSeq) return;
         if (data.weight_history) {
             state.weightHistory = data.weight_history;
             state.deficitHistory = data.deficit_history;
@@ -1103,10 +1119,13 @@ async function saveWeight() {
 // 真实训练打卡
 async function completeWorkoutToday() {
     try {
+        const plan = buildWorkoutPlan(state.profile.gender, state.profile.goalType, currentSceneKey());
+        const kcal = Math.round(timerPlannedMinutes * plan.scene.kcalPerMin);
         const data = await postApi("/api/workout/complete",
-            { duration_minutes: timerPlannedMinutes, cal_burned: Math.round(timerPlannedMinutes * 11), plan_name: "专属塑形训练（估算消耗）" });
+            { duration_minutes: timerPlannedMinutes, cal_burned: kcal, plan_name: plan.title });
         state.workoutDoneToday = true;
         callNativeToast(data.msg || "🏆 今日训练打卡成功！");
+        updateWorkoutCompleteButton();
         callNativeVibrate(200);
         callNativeBeep();
         await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
@@ -1788,9 +1807,14 @@ function pickDiningOption(value) {
 }
 
 function pickProfileScene(value) {
+    if (!SCENE_META[value]) return;
+    const prev = currentSceneKey();
     const el = document.getElementById("prof-scene");
     if (el) el.value = value;
     paintChoice("prof-scene-cards", value);
+    state.profile.scene = value;
+    refreshPlanViews();
+    if (value !== prev && state.token) saveSceneSilent(value, prev);
 }
 
 function pickRegisterGender(value) {
@@ -1975,6 +1999,7 @@ async function switchAccount() {
 
 function resetPrivateUI(){
     renderDashboard();renderMealDiary();renderWaterCups();renderCharts();renderCyclePhotos();
+    renderWorkoutExercises();renderTargetPhysiqueCard();
     const chat=document.getElementById('chat-messages-box');if(chat)chat.innerHTML='';
     for(const id of ['img-base-photo','img-cur-photo']){const el=document.getElementById(id);if(el)el.removeAttribute('src');}
     for(const id of ['input-meal-text','input-weight','cycle-input-weight','cycle-input-waist','file-cycle-photo-input']){const el=document.getElementById(id);if(el)el.value='';}
@@ -2125,6 +2150,228 @@ function getShapeData(gender, goalType) {
     return { gender: g, key: mappedKey, data: shapes[mappedKey] };
 }
 
+// 目标身材与训练场景是两个维度：身材决定练哪 4 个重点，场景决定在哪儿练、
+// 用什么器械、做几组几次。只有组合起来才是一份能执行的计划。
+const SCENE_META = {
+    home: {
+        name: "居家自重", icon: "🏠", equipment: "瑜伽垫 + 一张椅子，约 1㎡ 空间",
+        mainMinutes: 25, cardioMinutes: 20, kcalPerMin: 8,
+        cardio: "客厅原地快走 20 分钟（微喘、能说话）",
+        formNote: "自重完成；放慢动作、全程不憋气。"
+    },
+    band: {
+        name: "弹力带塑形", icon: "🎗️", equipment: "15-25 磅弹力带 + 椅子或门锚",
+        mainMinutes: 30, cardioMinutes: 20, kcalPerMin: 9,
+        cardio: "弹力带侧向行走 + 快走 20 分钟",
+        formNote: "先确认弹力带固定牢，选能标准完成 12 次以上的阻力。"
+    },
+    cardio: {
+        name: "户外刷脂", icon: "🏃", equipment: "运动鞋 + 计时器，一段平坦路线",
+        mainMinutes: 20, cardioMinutes: 25, kcalPerMin: 9,
+        cardio: "快走或慢跑 25 分钟（能说话、微喘）",
+        formNote: "主课按 40 秒计时循环，动作连贯、呼吸不断；关节痛立即停。"
+    },
+    gym: {
+        name: "健身房器械", icon: "🏋️", equipment: "哑铃/杠铃 + 固定器械 + 跑步机",
+        mainMinutes: 35, cardioMinutes: 15, kcalPerMin: 10,
+        cardio: "跑步机坡度快走 15 分钟（不扶把手）",
+        formNote: "先用轻重量热身 1 组，再把器械调到关节不痛、能完成目标次数的阻力。"
+    }
+};
+const SCENE_ORDER = ["home", "band", "cardio", "gym"];
+const SCENE_SETS = {
+    home: { compound: "15次 × 4组", accessory: "20次 × 3组", core: "15次 × 3组", hold: "40-45秒 × 3组", cardio: "20-25 分钟" },
+    band: { compound: "12-15次 × 4组", accessory: "15-20次 × 4组", core: "15次 × 3组", hold: "45秒 × 3组", cardio: "20-25 分钟" },
+    cardio: { compound: "40秒 × 3轮", accessory: "40秒 × 3轮", core: "40秒 × 3轮", hold: "30秒 × 3轮", cardio: "25-30 分钟" },
+    gym: { compound: "8-12次 × 4组", accessory: "12-15次 × 4组", core: "12-15次 × 3-4组", hold: "45-60秒 × 3-4组", cardio: "15-20 分钟" }
+};
+
+// 每个身材固定 4 个训练重点（slot），场景只替换同一重点下的动作版本。
+// 这样切换场景不会改变目标，但一定会改变动作、器械、组次和默认时长。
+const WORKOUT_PLANS = {
+    female_hourglass: {
+        focus: "臀大肌 / 臀中肌 + 腹横肌，练腰臀比与马甲线",
+        slots: [
+            { kind: "compound", target: "翘臀主项", cue: "脚跟下压送髋，顶点夹臀 2 秒，不靠腰顶。",
+              names: { home: "自重臀桥", band: "弹力带臀桥", cardio: "臀桥 + 侧向点地", gym: "杠铃/哑铃臀推" },
+              steps: { gym: "scene:hip_thrust" } },
+            { kind: "core", target: "下腹抗伸展", cue: "腰椎贴地，对侧手脚缓慢伸出，呼气收紧下腹。",
+              names: { home: "死虫式", band: "弹力带死虫抗旋", cardio: "死虫交替（计时）", gym: "绳索 Pallof 抗旋" },
+              steps: { gym: "scene:pallof" } },
+            { kind: "accessory", perSide: true, target: "臀中肌 / 假胯宽", cue: "脚跟并拢开膝，骨盆不后倒；侧步时膝盖对准脚尖。",
+              names: { home: "侧卧蚌式 + 侧向跨步", band: "弹力带蚌式 + 侧向行走", cardio: "侧向跨步触地", gym: "髋外展机" },
+              steps: { gym: "scene:hip_abduction_machine" } },
+            { kind: "core", target: "后链稳定 / 骨盆", cue: "四点跪位，对侧手脚伸出，骨盆保持水平，不塌腰。",
+              names: { home: "鸟狗式", band: "弹力带鸟狗伸展", cardio: "鸟狗 + 提膝", gym: "山羊挺身" },
+              steps: { gym: "scene:back_extension" } }
+        ]
+    },
+    female_lean: {
+        focus: "全身去脂 + 拉长线条，重点消水肿与假胯宽",
+        slots: [
+            { kind: "compound", target: "下肢线条", cue: "脚尖外展 45°，膝盖对准脚尖，直上直下。",
+              names: { home: "芭蕾宽距深蹲", band: "弹力带宽距深蹲", cardio: "芭蕾深蹲 + 踮脚", gym: "史密斯机宽距深蹲" } },
+            { kind: "accessory", perSide: true, target: "臀腿连接处", cue: "支撑腿微屈，骨盆不翻转，腿伸直向后/侧抬起。",
+              names: { home: "站姿后踢 + 侧抬腿", band: "弹力带后踢 + 侧抬腿", cardio: "站姿后踢交替（计时）", gym: "绳索后踢（每侧）" } },
+            { kind: "accessory", target: "手臂 / 副乳", cue: "肘约 45° 夹，胸贴近再推起，不耸肩。",
+              names: { home: "跪姿俯卧撑", band: "弹力带站姿推胸", cardio: "站姿推墙（计时）", gym: "坐姿推胸机" },
+              steps: { gym: "scene:chest_press" } },
+            { kind: "cardio", target: "低冲击刷脂", cue: "能说话但唱不了歌，落地轻，膝盖不内扣。",
+              names: { home: "客厅超慢跑 / 原地小步", band: "弹力带侧向行走 + 快走", cardio: "户外快走 / 慢跑", gym: "跑步机坡度快走" } }
+        ]
+    },
+    female_athletic: {
+        focus: "渐进抗阻 + 微肌线条，练直角肩、马甲线与臀腿力量",
+        slots: [
+            { kind: "compound", target: "臀腿力量", cue: "下蹲至髋低于膝，胸不塌，脚跟发力站起。",
+              names: { home: "自重暂停深蹲", band: "弹力带高脚杯深蹲", cardio: "自重深蹲（计时）", gym: "杠铃 / 史密斯深蹲" },
+              steps: { gym: "scene:barbell_squat" } },
+            { kind: "compound", target: "髋链 / 臀腿后侧", cue: "屈髋把臀向后推，背平直，腿后侧有拉伸感再站起。",
+              names: { home: "书包 / 水瓶罗马尼亚硬拉", band: "弹力带罗马尼亚硬拉", cardio: "单腿臀桥（计时）", gym: "杠铃罗马尼亚硬拉" },
+              steps: { cardio: "female_hourglass:0" } },
+            { kind: "core", target: "腹直肌 / 下腹", cue: "下背贴地，卷起时呼气，不用手拽头。",
+              names: { home: "卷腹 + 仰卧举腿", band: "弹力带卷腹 + 站姿提膝", cardio: "仰卧举腿（计时）", gym: "绳索卷腹 + 悬垂举腿" },
+              steps: { gym: "scene:cable_crunch" } },
+            { kind: "accessory", target: "肩背 / 直角肩", cue: "肩胛后收下沉，肘带动，不耸肩。",
+              names: { home: "俯卧 Y-T 抬臂", band: "弹力带面拉 + 俯身飞鸟", cardio: "俯卧 Y-T（计时）", gym: "绳索面拉 + 反向飞鸟" },
+              steps: { gym: "scene:facepull" } }
+        ]
+    },
+    female_steady: {
+        focus: "零跳跃低冲击 + 护膝，稳步降围度、击退内脏脂肪",
+        slots: [
+            { kind: "compound", target: "下肢基础力量", cue: "臀部向后坐，轻触椅面即起，膝盖不内扣。",
+              names: { home: "椅子辅助半蹲", band: "弹力带椅子半蹲", cardio: "椅子半蹲（计时）", gym: "腿举机" },
+              steps: { gym: "scene:leg_press" } },
+            { kind: "accessory", target: "上肢推", cue: "身体一条直线，肘 45°，推起时肩胛前伸。",
+              names: { home: "靠墙俯卧撑", band: "弹力带坐姿推胸", cardio: "站姿推墙（计时）", gym: "坐姿推胸机" },
+              steps: { gym: "scene:chest_press" } },
+            { kind: "core", target: "核心 / 平衡", cue: "站直，抬膝同时对侧肘下探，落地站稳再换边。",
+              names: { home: "站姿对角提膝", band: "弹力带对角提膝", cardio: "对角提膝（计时）", gym: "站姿绳索抗旋" },
+              steps: { gym: "scene:cable_rotation" } },
+            { kind: "cardio", target: "低冲击有氧", cue: "大步摆臂，微微出汗、能说话；膝盖不痛为准。",
+              names: { home: "平地快走", band: "弹力带侧向行走 + 快走", cardio: "户外快走", gym: "椭圆机 / 低阻力单车" },
+              steps: { gym: "scene:bike" } }
+        ]
+    },
+    male_v_taper: {
+        focus: "背阔肌宽度 + 三角肌中束 + 下腹，练 V 形倒三角",
+        slots: [
+            { kind: "compound", target: "背阔肌宽度", cue: "肩胛先下沉，肘向身体两侧拉，顶端夹背 1 秒。",
+              names: { home: "桌下反向划船", band: "弹力带高位下拉", cardio: "桌下反向划船（计时）", gym: "高位下拉 / 辅助引体" },
+              steps: { home: "scene:table_row", cardio: "scene:table_row" } },
+            { kind: "accessory", target: "三角肌中束", cue: "肘微屈抬至肩高，手腕不高于肘，不耸肩甩。",
+              names: { home: "水瓶侧平举", band: "弹力带侧平举", cardio: "水瓶侧平举（计时）", gym: "哑铃侧平举" } },
+            { kind: "core", target: "下腹 / 人鱼线", cue: "下背贴地，用下腹卷起骨盆，不拱腰。",
+              names: { home: "反向卷腹 + 剪刀腿", band: "弹力带反向卷腹", cardio: "仰卧剪刀腿（计时）", gym: "悬垂举腿" },
+              steps: { gym: "scene:hanging_leg_raise" } },
+            { kind: "accessory", target: "胸肌中缝 / 上胸", cue: "胸贴近手再推起，肘不外飞，肩前侧不痛为准。",
+              names: { home: "钻石俯卧撑", band: "弹力带俯卧撑", cardio: "钻石俯卧撑（计时）", gym: "器械推胸 / 窄距卧推" },
+              steps: { gym: "scene:chest_press" } }
+        ]
+    },
+    male_lean: {
+        focus: "平腹 + 挺拔肩颈，消除腰腹游泳圈与圆肩驼背",
+        slots: [
+            { kind: "compound", target: "上肢推 / 核心", cue: "身体一条直线，肘 45°，下放至胸离地一拳。",
+              names: { home: "标准俯卧撑多握距", band: "弹力带俯卧撑", cardio: "俯卧撑（计时）", gym: "器械推胸" },
+              steps: { gym: "scene:chest_press" } },
+            { kind: "hold", target: "腹横肌 / 抗旋", cue: "肩在腕正上方，臀夹紧，胸腔转向斜上方，骨盆不晃。",
+              names: { home: "平板支撑转体", band: "弹力带平板转体", cardio: "平板支撑转体（计时）", gym: "站姿绳索抗旋" },
+              steps: { gym: "scene:pallof" } },
+            { kind: "accessory", target: "肩胛 / 体态", cue: "后脑上背贴墙，肋骨不下压，肩不上耸。",
+              names: { home: "靠墙 W-Y 滑动", band: "弹力带 W-Y 拉开", cardio: "靠墙 W-Y（计时）", gym: "面拉 + 反向飞鸟" },
+              steps: { band: "scene:band_wy", gym: "scene:facepull" } },
+            { kind: "cardio", target: "坡度刷脂", cue: "微喘能说话，身体直立不扶把手。",
+              names: { home: "原地快走 + 高抬腿间歇", band: "弹力带侧向行走 + 快走", cardio: "户外快走 / 慢跑", gym: "跑步机坡度快走" },
+              steps: { home: "scene:walk_liss" } }
+        ]
+    },
+    male_muscular: {
+        focus: "胸背腿大肌群 + 手臂，练厚实胸背与粗壮手臂",
+        slots: [
+            { kind: "compound", target: "下肢大肌群", cue: "下蹲至髋低于膝，背平直，脚跟发力站起。",
+              names: { home: "书包负重深蹲", band: "弹力带深蹲", cardio: "自重深蹲（计时）", gym: "杠铃深蹲" },
+              steps: { gym: "scene:barbell_squat" } },
+            { kind: "compound", target: "胸大肌", cue: "肩胛后收，下放至胸前一拳，推起不锁死肘。",
+              names: { home: "宽距 / 上斜俯卧撑", band: "弹力带站姿推胸", cardio: "宽距俯卧撑（计时）", gym: "杠铃卧推" },
+              steps: { gym: "scene:barbell_bench" } },
+            { kind: "compound", target: "背部厚度", cue: "背平直，肘贴身体向后拉，顶端停 1 秒。",
+              names: { home: "桌下反向划船", band: "弹力带单臂划船", cardio: "桌下反向划船（计时）", gym: "单臂哑铃划船" },
+              steps: { home: "scene:table_row", cardio: "scene:table_row" } },
+            { kind: "accessory", target: "肱三头肌", cue: "肩不耸、肘不外飞，下放到不痛的范围。",
+              names: { home: "窄距俯卧撑 + 椅子臂屈伸", band: "弹力带下压", cardio: "窄距俯卧撑（计时）", gym: "绳索下压 + 窄距卧推" },
+              steps: { gym: "scene:triceps_pushdown" } }
+        ]
+    },
+    male_steady: {
+        focus: "击退内脏脂肪 + 护膝，专攻向心性大肚子",
+        slots: [
+            { kind: "cardio", target: "低冲击有氧", cue: "阻力以能维持 25-30 分钟为准，坐姿挺直不趴把手。",
+              names: { home: "原地低冲击快走", band: "弹力带侧向行走 + 快走", cardio: "户外快走 / 椭圆机", gym: "椭圆机 / 动感单车" },
+              steps: { home: "scene:walk_liss", band: "scene:walk_liss", cardio: "scene:walk_liss", gym: "scene:bike" } },
+            { kind: "core", target: "腰腹抗扭", cue: "躯干左右转，眼随肩走，慢速有控制。",
+              names: { home: "坐姿俄罗斯转体", band: "弹力带俄罗斯转体", cardio: "站姿转体（计时）", gym: "绳索俄罗斯转体" },
+              steps: { gym: "scene:cable_rotation" } },
+            { kind: "compound", target: "下肢 / 护膝", cue: "屈髋后坐，轻触即起，膝盖对准脚尖。",
+              names: { home: "椅子半蹲", band: "弹力带椅子半蹲", cardio: "椅子半蹲（计时）", gym: "腿举机" },
+              steps: { gym: "scene:leg_press" } },
+            { kind: "accessory", target: "胸廓 / 夹胸", cue: "挺胸沉肩，双臂向前夹，回位 2 秒不耸肩。",
+              names: { home: "墙壁俯卧撑", band: "弹力带站姿夹胸", cardio: "站姿推墙（计时）", gym: "坐姿夹胸机" },
+              steps: { gym: "scene:pec_deck" } }
+        ]
+    }
+};
+
+function shapeShortTitle(title) {
+    const t = String(title || "").trim();
+    const noIcon = t.indexOf(" ") >= 0 ? t.slice(t.indexOf(" ") + 1) : t;
+    return noIcon.split(" · ")[0].trim() || t;
+}
+
+function currentSceneKey() {
+    const s = state && state.profile ? state.profile.scene : "home";
+    return SCENE_META[s] ? s : "home";
+}
+
+function buildWorkoutPlan(gender, goalType, sceneKey) {
+    const info = getShapeData(gender, goalType);
+    const shapeKey = info.key;
+    const key = SCENE_META[sceneKey] ? sceneKey : "home";
+    const scene = SCENE_META[key];
+    const def = WORKOUT_PLANS[shapeKey] || WORKOUT_PLANS.female_hourglass;
+    const scheme = SCENE_SETS[key] || SCENE_SETS.home;
+    const exercises = def.slots.map(function (slot, idx) {
+        const names = slot.names || {};
+        const name = names[key] || names.home || ("动作 " + (idx + 1));
+        let reps = scheme[slot.kind] || scheme.accessory;
+        if (slot.perSide) reps += "（每侧）";
+        const stepsKey = (slot.steps && slot.steps[key]) || (shapeKey + ":" + idx);
+        return {
+            name: (idx + 1) + ". " + name,
+            reps: reps,
+            tip: slot.cue,
+            stepsKey: stepsKey,
+            poseKey: (typeof SCENE_STEP_POSE !== "undefined" && SCENE_STEP_POSE[stepsKey]) || stepsKey
+        };
+    });
+    const cardioSlotIndex = def.slots.findIndex(function (s) { return s.kind === "cardio"; });
+    return {
+        shapeKey: shapeKey,
+        shapeTitle: info.data.title,
+        shapeShort: shapeShortTitle(info.data.title),
+        sceneKey: key,
+        scene: scene,
+        title: shapeShortTitle(info.data.title) + " · " + scene.name,
+        focus: def.focus,
+        minutes: scene.mainMinutes,
+        cardioMinutes: scene.cardioMinutes,
+        hasCardioSlot: cardioSlotIndex >= 0,
+        cardioSlotIndex: cardioSlotIndex,
+        exercises: exercises
+    };
+}
+
 // 动态渲染身材卡片至指定网格容器
 function renderBodyShapeCards(containerId, gender, activeKey) {
     const box = document.getElementById(containerId);
@@ -2181,8 +2428,7 @@ function switchShapeGender(gender, updateProfile = true) {
     renderBodyShapeCards("main-body-shapes-grid", g, currentInfo.key);
     renderBodyShapeCards("modal-body-shapes-grid", g, currentInfo.key);
 
-    renderTargetPhysiqueCard();
-    renderWorkoutExercises();
+    refreshPlanViews();
 }
 
 function onProfileGenderChanged(gender) {
@@ -2210,7 +2456,8 @@ function selectVisualGoalShape(key, showToast = true) {
 
     const info = getShapeData(g, key);
     if (showToast) {
-        callNativeToast(`已选身材：【${info.data.title}】，系统已更新代谢方案与训练！`);
+        const scene = SCENE_META[currentSceneKey()] || SCENE_META.home;
+        callNativeToast(`已选身材：【${info.data.title}】× 当前场景【${scene.name}】，训练计划已更新`);
         callNativeVibrate(50);
     }
 
@@ -2729,15 +2976,18 @@ function openProfileModal() {
     document.getElementById("prof-weight-jin").value = (p.weightJin == null ? "" : p.weightJin);
     document.getElementById("prof-target-jin").value = (p.targetWeightJin == null ? "" : p.targetWeightJin);
     syncTargetWeightPlaceholder();
-    document.getElementById("prof-scene").value = p.scene || "home";
     
     const diningEl = document.getElementById("prof-dining-mode");
     if (diningEl) diningEl.value = state.diningMode || p.diningMode || "takeout";
     paintChoice("prof-dining-cards", diningEl ? diningEl.value : "takeout");
     const sceneEl = document.getElementById("prof-scene");
-    if (sceneEl) { sceneEl.value = p.scene || "home"; paintChoice("prof-scene-cards", sceneEl.value); }
+    if (sceneEl) {
+        sceneEl.value = SCENE_META[p.scene] ? p.scene : "home";
+        paintChoice("prof-scene-cards", sceneEl.value);
+    }
 
     switchShapeGender(g, false);
+    paintProfilePlanPreview();
     document.getElementById("profile-modal").classList.add("show");
 }
 
@@ -2760,27 +3010,31 @@ async function saveCustomProfile() {
         callNativeToast("数值超出合理范围（年龄 18~100 / 身高 80~250cm / 体重 40~600 斤）");
         return;
     }
-    const scene = document.getElementById("prof-scene").value;
+    const sceneEl = document.getElementById("prof-scene");
+    const scene = (sceneEl && SCENE_META[sceneEl.value]) ? sceneEl.value : currentSceneKey();
     const diningMode = document.getElementById("prof-dining-mode") ? document.getElementById("prof-dining-mode").value : "takeout";
 
     try {
-        await postApi("/api/profile/update", {
+        await queueProfileUpdate({
             gender, age, height, weight_jin: weightJin,
             target_weight_jin: targetWeightJin, goal_type: state.profile.goalType,
             dining_mode: diningMode, scene
         });
         closeProfileModal();
-        callNativeToast("🎉 专属身材方案已定制保存！");
-        callNativeVibrate(150);
-        // 先把顶栏按刚保存的值画出来：dashboard 若慢一拍或失败，也不会看起来"没生效"
+        // 先把顶栏和训练页按刚保存的值画出来：dashboard 若慢一拍或失败，也不会看起来"没生效"
         state.profile.height = height;
         state.profile.weightJin = weightJin;
         state.profile.targetWeightJin = targetWeightJin;
+        state.profile.scene = scene;
         state.currentWeightJin = weightJin;
         if (state.calculated) {
             state.calculated.summaryText = `${height}cm · ${weightJin}斤 · ${getGoalName(state.profile.goalType)}`;
         }
         renderDashboard();
+        refreshPlanViews();
+        const savedPlan = buildWorkoutPlan(state.profile.gender, state.profile.goalType, scene);
+        callNativeToast(`🎉 已保存【${savedPlan.title}】，训练计划已按新组合更新！`);
+        callNativeVibrate(150);
         await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
     } catch (e) {
         reportWriteFailure(e, "档案方案");
@@ -2791,22 +3045,15 @@ async function saveProfileSilent() {
     if (!state.token) return;
     try {
         const p = state.profile;
-        await fetch(`${API_BASE}/api/profile/update`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${state.token}`
-            },
-            body: JSON.stringify({
-                gender: p.gender,
-                age: p.age,
-                height: p.height,
-                weight_jin: p.weightJin,
-                target_weight_jin: p.targetWeightJin,
-                goal_type: p.goalType,
-                dining_mode: p.diningMode,
-                scene: p.scene
-            })
+        await queueProfileUpdate({
+            gender: p.gender,
+            age: p.age,
+            height: p.height,
+            weight_jin: p.weightJin,
+            target_weight_jin: p.targetWeightJin,
+            goal_type: p.goalType,
+            dining_mode: p.diningMode,
+            scene: p.scene
         });
         await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
     } catch(e) {
@@ -2875,6 +3122,7 @@ function renderTargetPhysiqueCard() {
 
     const info = getShapeData(state.profile.gender, state.profile.goalType);
     const cur = info.data;
+    const plan = buildWorkoutPlan(state.profile.gender, state.profile.goalType, currentSceneKey());
     const genderTag = (info.gender === "male") ? "👨 男士专属形体" : "👩 女士专属形体";
 
     card.innerHTML = `
@@ -2888,7 +3136,9 @@ function renderTargetPhysiqueCard() {
             </div>
             <div style="font-size: 11px; color: var(--text-muted); line-height: 1.4; margin-bottom: 4px;">${cur.desc}</div>
             <div style="font-size: 10.5px; color: var(--primary-dark); font-weight: 700; margin-bottom: 2px;">🥗 饮食重点：${cur.dietSpec}</div>
-            <div style="font-size: 10.5px; color: #2563EB; font-weight: 700;">🏋️ 训练专攻：${cur.workoutSpec}</div>
+            <div style="font-size: 10.5px; color: #2563EB; font-weight: 700; margin-bottom: 2px;">🏋️ 训练专攻：${cur.workoutSpec}</div>
+            <div style="font-size: 10.5px; color: #7C3AED; font-weight: 700; margin-bottom: 4px;">${plan.scene.icon} 当前场景：${plan.scene.name} · 主课约 ${plan.minutes} 分钟 · ${plan.scene.equipment}</div>
+            <button type="button" class="mini-link" onclick="switchTab('workout')">查看目标 × 场景生成的训练计划 →</button>
         </div>
     `;
 }
@@ -2896,126 +3146,23 @@ function renderTargetPhysiqueCard() {
 // 动态生成动作库 (男女分流 8款针对性训练库)
 function renderWorkoutExercises() {
     const container = document.getElementById("workout-exercises-card");
-    const badge = document.getElementById("workout-plan-badge");
-    const callout = document.getElementById("workout-summary-callout");
     if (!container) return;
+    const plan = buildWorkoutPlan(state.profile.gender, state.profile.goalType, currentSceneKey());
+    paintWorkoutContext(plan);
 
-    const info = getShapeData(state.profile.gender, state.profile.goalType);
-    const key = info.key;
-
-    let planTitle = "";
-    let calloutHtml = "";
-    let list = [];
-
-    switch(key) {
-        // 女性专属动作库
-        case "female_hourglass":
-            planTitle = "⏳ S型沙漏 · 核心马甲线与翘臀雕刻";
-            calloutHtml = "<strong>形态专攻：</strong> 激活臀大肌与臀中肌上部，强化腹横肌收紧内脏腰围，打造0.7极致腰臀比！";
-            list = [
-                { name: "1. 仰卧臀桥顶峰收缩 (Glute Bridge)", reps: "20次 × 4组", tip: "脚后跟踏地顶起，顶峰夹紧臀大肌2秒，雕刻饱满翘臀线条。" },
-                { name: "2. 死虫子腹横肌抗旋 (Dead Bug)", reps: "16次 × 3组", tip: "腰椎紧贴地面，对角线手脚延伸，内收腹横肌，强力紧致下腹围度。" },
-                { name: "3. 弹力带侧向行走与蚌式开合", reps: "15次 × 3组", tip: "膝盖上方套弹力带，激活臀中肌，消除假胯宽并拉长腿部线条。" },
-                { name: "4. 跪姿超人式核心支撑", reps: "15次 × 3组", tip: "对角伸展维持躯干稳定，收紧后侧链条与下背部，改善骨盆前倾。" }
-            ];
-            break;
-
-        case "female_lean":
-            planTitle = "🏃 修长轻盈 · 芭蕾普拉提去水肿显瘦";
-            calloutHtml = "<strong>形态专攻：</strong> 肌肉离心拉长无水肿，低冲击不粗腿，配合30分钟超慢跑全身高效刷脂！";
-            list = [
-                { name: "1. 芭蕾式宽距深蹲 (Plie Squats)", reps: "20次 × 3组", tip: "脚尖外展45度，直上直下拉长内收肌，紧致大腿内侧线条。" },
-                { name: "2. 站姿直腿后踢与侧抬腿", reps: "20次 × 3组", tip: "轻量高频，收紧臀腿连接处，消除臀下松弛泡芙脂肪。" },
-                { name: "3. 跪姿俯卧撑 / 弹力带推胸", reps: "12次 × 3组", tip: "收紧手臂拜拜肉与副乳，塑造修长紧致的直角肩臂线条。" },
-                { name: "4. 30分钟超慢跑 (Zone2燃脂心率)", reps: "持续 30分钟", tip: "平稳微喘，高频刷脂排水肿，完全保护下肢关节体感轻盈。" }
-            ];
-            break;
-
-        case "female_athletic":
-            planTitle = "🏋️ 紧致力量 · 健美微肌与直角肩背";
-            calloutHtml = "<strong>形态专攻：</strong> 渐进式抗阻复合动作，提升骨骼肌率与静息代谢率，打造紧致直角肩、马甲线分块！";
-            list = [
-                { name: "1. 高脚杯负重深蹲 (Goblet Squats)", reps: "12次 × 4组", tip: "胸前持负重下蹲，全腿及臀大肌高负荷离心刺激，强效拉升代谢。" },
-                { name: "2. 罗马尼亚硬拉 (RDL)", reps: "12次 × 4组", tip: "屈髋微屈膝，感知腘绳肌与臀肌强力受拉，挺拔臀腿线条。" },
-                { name: "3. 仰卧卷腹 + 悬垂提膝", reps: "15次 × 4组", tip: "下背贴地卷起上半身，充分挤压腹直肌雕刻块状腹肌轮廓。" },
-                { name: "4. 弹力带面拉与俯身飞鸟", reps: "15次 × 4组", tip: "强化三角肌后束与上背菱形肌，改善圆肩驼背，立现气质直角肩。" }
-            ];
-            break;
-
-        case "female_steady":
-            planTitle = "📉 稳健脱脂 · 零跳跃低冲击膝盖保护";
-            calloutHtml = "<strong>形态专攻：</strong> 椅子半蹲与零冲击核心动作，100%保护膝关节半月板，大基数平稳脱脂防反弹！";
-            list = [
-                { name: "1. 椅子辅助半蹲 (Chair Squats)", reps: "15次 × 3组", tip: "触椅即起，膝盖不内扣，大腿发力，保护膝关节并高效消耗能量。" },
-                { name: "2. 靠墙推胸俯卧撑 (Wall Push-ups)", reps: "15次 × 3组", tip: "双手推墙收紧手臂与肩背，零重力负担唤醒上肢肌力。" },
-                { name: "3. 站姿对角提膝 (Knee to Elbow)", reps: "20次 × 3组", tip: "提膝触肘核心收紧，低冲击零跳跃，平稳刺激腹部代谢。" },
-                { name: "4. 30分钟平地快步走", reps: "持续 30分钟", tip: "大步摆臂平稳快走，心率稳定在燃脂区间，避免软骨磨损。" }
-            ];
-            break;
-
-        // 男性专属动作库
-        case "male_v_taper":
-            planTitle = "👑 经典倒三角 · 宽肩阔背铠甲腹肌";
-            calloutHtml = "<strong>形态专攻：</strong> 聚焦背阔肌宽度、三角肌中束与下腹人鱼线，以低体脂塑造威猛V-Taper霸气倒三角！";
-            list = [
-                { name: "1. 引体向上 / 弹力带高位下拉", reps: "10-12次 × 4组", tip: "沉肩下拉挤压背阔肌两侧，加宽上半身V-Taper倒三角轮廓。" },
-                { name: "2. 哑铃/水瓶站姿侧平举 (Lateral Raises)", reps: "15次 × 4组", tip: "肘微屈平举至水平，精准轰炸三角肌中束，加宽肩部骨架感。" },
-                { name: "3. 仰卧双腿反向卷腹与剪刀腿", reps: "15次 × 4组", tip: "下腹收紧骨盆后倾，强力刻画下腹铠甲腹肌与前锯肌人鱼线。" },
-                { name: "4. 钻石俯卧撑 + 上斜俯卧撑", reps: "12次 × 3组", tip: "强化胸肌中缝与上胸线条，提升上肢爆发力与饱满轮廓。" }
-            ];
-            break;
-
-        case "male_lean":
-            planTitle = "👔 修长衣架子 · 挺拔肩背穿衣有型";
-            calloutHtml = "<strong>形态专攻：</strong> 消除腰腹部游泳圈，矫正含胸驼背，强化核心抗屈曲，穿衬衫西装如衣架子！";
-            list = [
-                { name: "1. 标准俯卧撑多握距循环", reps: "15次 × 3组", tip: "宽窄距交替，激活胸大肌与核心稳定性，增强上身挺拔感。" },
-                { name: "2. 核心平板支撑转体 (Plank Twist)", reps: "45秒 × 3组", tip: "收紧腹横肌与侧腹斜肌，消除腰部两侧松垮赘肉。" },
-                { name: "3. 靠墙 W-Y 肩胛滑动", reps: "15次 × 3组", tip: "后脑肩胛贴墙滑动，打开胸廓纠正圆肩驼背，拉长颈部线条。" },
-                { name: "4. 25分钟跑步机大坡度快走", reps: "持续 25分钟", tip: "坡度8-10，速度5km/h，高倾角燃脂保护膝盖消平小肚子。" }
-            ];
-            break;
-
-        case "male_muscular":
-            planTitle = "💪 饱满力量 · 厚实胸大肌与粗壮麒麟臂";
-            calloutHtml = "<strong>形态专攻：</strong> 大重量高抗阻复合动作，刺激睾酮分泌与肌纤维肥大，打造澎湃肌肉量！";
-            list = [
-                { name: "1. 负重深蹲 / 爆发力半蹲跳", reps: "10次 × 4组", tip: "深蹲强化臀腿大肌群，拉升全身睾酮与高代谢合成环境。" },
-                { name: "2. 深度离心俯卧撑 / 哑铃卧推", reps: "10-12次 × 4组", tip: "下落3秒缓慢离心，爆发力推起顶峰夹胸，深度撕裂胸肌。" },
-                { name: "3. 俯身单臂哑铃划船 (One-arm Rows)", reps: "12次 × 4组", tip: "背阔肌主导向后提拉，增加背部厚度与倒三角饱满度。" },
-                { name: "4. 窄距俯卧撑 + 椅子臂屈伸", reps: "12-15次 × 4组", tip: "轰炸肱三头肌外侧头，快速充血围度粗壮麒麟臂。" }
-            ];
-            break;
-
-        case "male_steady":
-        default:
-            planTitle = "📉 啤酒肚专项 · 击退内脏脂肪与脂肪肝";
-            calloutHtml = "<strong>形态专攻：</strong> 专项击退向心性腹部脂肪，保护承重膝关节，配合核心转体紧致下腹壁！";
-            list = [
-                { name: "1. 动感单车/椭圆机恒速刷脂", reps: "25-30分钟", tip: "零膝盖落地冲击，高效消耗内脏周围储积甘油三酯。" },
-                { name: "2. 坐姿核心俄罗斯转体 (Russian Twists)", reps: "20次 × 3组", tip: "双脚微抬，躯干左右旋转，收紧内脏肌壁消减腰围。" },
-                { name: "3. 椅子辅助半蹲 (Chair Squats)", reps: "15次 × 3组", tip: "触椅即起保护半月板，维持基础代谢，防止减脂掉肌肉。" },
-                { name: "4. 弹力带站姿水平夹胸", reps: "15次 × 3组", tip: "挺胸沉肩双臂前夹，打开胸廓，改善大肚引发的骨盆前倾。" }
-            ];
-            break;
-    }
-
-    if (badge) badge.innerText = planTitle;
-    if (callout) callout.innerHTML = calloutHtml;
-
-    let html = `<div style="font-weight: 700; font-size: 13.5px; color: var(--text-main); margin-bottom: 4px;">📋 【${planTitle}】的 4 个动作循环：</div>`
-        + `<div style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">下面的倒计时就是给这 4 个动作用的：一轮约 ${timerSeconds / 60} 分钟，做完按【记录今日训练打卡】。</div>`;
-    list.forEach((item, idx) => {
-        const meta = EX_STEPS[key + ":" + idx] || {};
+    let html = `<div style="font-weight: 700; font-size: 13.5px; color: var(--text-main); margin-bottom: 4px;">📋 【${escapeHtml(plan.title)}】的 4 个动作循环：</div>`
+        + `<div style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">主课约 ${plan.minutes} 分钟；下面倒计时对应这 4 个动作，默认时长随场景变化；${plan.sceneKey === "cardio" ? "按 40 秒计时循环，轮间休息 20 秒。" : "组间休息 45-60 秒。"}做完按【记录今日训练打卡】。</div>`;
+    plan.exercises.forEach((item, idx) => {
+        const meta = exerciseSteps(item.stepsKey);
         const steps = (meta.steps || []).map((x, i) => `<li>${i + 1}. ${x}</li>`).join("");
         const wrong = meta.wrong ? `<div class="ex-wrong">常见错误：${meta.wrong}</div>` : "";
         html += `
             <div class="exercise-card">
                 <div class="exercise-header">
-                    <span class="exercise-name">${item.name}</span>
-                    <span class="exercise-reps">${item.reps}</span>
+                    <span class="exercise-name">${escapeHtml(item.name)}</span>
+                    <span class="exercise-reps">${escapeHtml(item.reps)}</span>
                 </div>
-                <div class="exercise-tip">${item.tip}</div>
+                <div class="exercise-tip">${escapeHtml(item.tip)}</div>
                 <div class="ex-actions">
                     <button class="ex-btn" onclick="openExerciseDetail(${idx})">动作流程与示意动画</button>
                     <button class="ex-btn ghost" onclick="toggleExerciseSteps(${idx})">只看要点</button>
@@ -3027,8 +3174,128 @@ function renderWorkoutExercises() {
         `;
     });
     container.innerHTML = html;
-    window.__currentExercises = list;
-    window.__currentExKey = key;
+    window.__currentExercises = plan.exercises;
+    window.__currentExKey = plan.shapeKey;
+
+    paintWorkoutSceneSwitch();
+    const planId = plan.shapeKey + "|" + plan.sceneKey;
+    if (planId !== lastWorkoutPlanId) {
+        lastWorkoutPlanId = planId;
+        if (!isTimerRunning) resetTimer(plan.minutes, "main");
+        paintTimerButtons(plan);
+        updateWorkoutCompleteButton();
+    }
+}
+
+/** 把"为什么是这份计划"写在训练页顶部：目标身材 + 场景 + 器械 + 时长。 */
+function paintWorkoutContext(plan) {
+    const title = document.getElementById("workout-context-title");
+    if (title) title.innerHTML = `${escapeHtml(plan.shapeTitle)} <span class="plan-x">×</span> ${plan.scene.icon} ${escapeHtml(plan.scene.name)}`;
+    const badge = document.getElementById("workout-plan-badge");
+    if (badge) badge.innerText = plan.title;
+    const meta = document.getElementById("workout-context-meta");
+    if (meta) meta.innerHTML = `<span class="plan-meta-pill">🎯 ${escapeHtml(plan.focus)}</span>`
+        + `<span class="plan-meta-pill">🧰 ${escapeHtml(plan.scene.equipment)}</span>`
+        + `<span class="plan-meta-pill">⏱️ 主课 ${plan.minutes} 分</span>`;
+    const callout = document.getElementById("workout-summary-callout");
+    if (callout) {
+        const cardioLine = plan.hasCardioSlot
+            ? `第 ${plan.cardioSlotIndex + 1} 个动作「${escapeHtml(plan.exercises[plan.cardioSlotIndex].name.replace(/^\d+\.\s*/, ""))}」${escapeHtml(plan.exercises[plan.cardioSlotIndex].reps)}`
+            : `可选加练：${escapeHtml(plan.scene.cardio)}`;
+        callout.innerHTML = `<strong>目标 × 场景 = 这份计划：</strong>目标身材决定练哪里和吃多少，训练场景决定器械、动作版本和默认时长。<br>`
+            + `<strong>🎯 目标：</strong>${escapeHtml(plan.focus)}<br>`
+            + `<strong>🏋️ 场景：</strong>${plan.scene.icon} ${escapeHtml(plan.scene.name)} · ${escapeHtml(plan.scene.equipment)}<br>`
+            + `<strong>🧭 主课：</strong>4 个动作循环，约 ${plan.minutes} 分钟；${plan.sceneKey === "cardio" ? "每个动作 40 秒 × 3 轮，轮间休息 20 秒。" : "组间休息 45-60 秒。"}<br>`
+            + `<strong>🏁 有氧：</strong>${cardioLine}`;
+    }
+}
+
+function paintWorkoutSceneSwitch() {
+    const key = currentSceneKey();
+    document.querySelectorAll("#workout-scene-switch .scene-btn").forEach(function (btn) {
+        const on = btn.getAttribute("data-value") === key;
+        btn.classList.toggle("active", on);
+        btn.setAttribute("aria-checked", on ? "true" : "false");
+    });
+}
+
+/** 训练页直接切场景：换动作、换默认时长，并写回服务端；失败就退回原场景。 */
+async function switchWorkoutScene(value) {
+    if (!SCENE_META[value] || value === currentSceneKey()) return;
+    const prev = currentSceneKey();
+    state.profile.scene = value;
+    renderWorkoutExercises();
+    renderTargetPhysiqueCard();
+    paintProfilePlanPreview();
+    const plan = buildWorkoutPlan(state.profile.gender, state.profile.goalType, value);
+    callNativeToast(`已切换【${plan.scene.name}】：动作和默认时长已换成 ${plan.minutes} 分钟版本`);
+    callNativeVibrate(50);
+    if (state.token) {
+        try {
+            await queueProfileUpdate({ scene: value });
+        } catch (e) {
+            if (state.profile.scene === value) {
+                state.profile.scene = prev;
+                renderWorkoutExercises();
+                renderTargetPhysiqueCard();
+                paintProfilePlanPreview();
+            }
+            reportWriteFailure(e, "训练场景");
+        }
+    }
+}
+
+async function saveSceneSilent(value, prev) {
+    if (!state.token) return;
+    try {
+        await queueProfileUpdate({ scene: value });
+    } catch (e) {
+        if (state.profile.scene === value) {
+            state.profile.scene = prev;
+            const el = document.getElementById("prof-scene");
+            if (el) el.value = prev;
+            paintChoice("prof-scene-cards", prev);
+            renderWorkoutExercises();
+            renderTargetPhysiqueCard();
+            paintProfilePlanPreview();
+        }
+        reportWriteFailure(e, "训练场景");
+    }
+}
+
+/** 档案弹窗里的实时预览：选身材或场景时，先让人看到组合结果再保存。 */
+function paintProfilePlanPreview() {
+    const el = document.getElementById("prof-plan-preview");
+    if (!el) return;
+    const sceneEl = document.getElementById("prof-scene");
+    const sceneKey = (sceneEl && SCENE_META[sceneEl.value]) ? sceneEl.value : currentSceneKey();
+    const plan = buildWorkoutPlan(state.profile.gender, state.profile.goalType, sceneKey);
+    el.innerHTML = `<div class="plan-combo-title">${plan.shapeTitle} <span>×</span> ${plan.scene.icon} ${escapeHtml(plan.scene.name)}</div>`
+        + `<div class="plan-combo-line">🎯 ${escapeHtml(plan.focus)}</div>`
+        + `<div class="plan-combo-line">🧰 ${escapeHtml(plan.scene.equipment)}</div>`
+        + `<div class="plan-combo-line">⏱️ 主课 ${plan.minutes} 分钟 · 4 个动作${plan.hasCardioSlot ? `（第 ${plan.cardioSlotIndex + 1} 个是有氧）` : ""}</div>`
+        + `<div class="plan-combo-line">🍽️ 热量缺口与宏量由目标身材决定；切场景只换训练版本，不改热量预算。</div>`;
+}
+
+function paintTimerButtons(plan) {
+    const main = document.getElementById("btn-timer-main");
+    if (main) main.innerText = `重置主课 ${plan.minutes} 分`;
+    const cardio = document.getElementById("btn-timer-cardio");
+    if (cardio) cardio.innerText = `有氧加练 ${plan.scene.cardioMinutes} 分`;
+}
+
+function updateWorkoutCompleteButton() {
+    const btn = document.getElementById("btn-complete-workout");
+    if (!btn) return;
+    const plan = buildWorkoutPlan(state.profile.gender, state.profile.goalType, currentSceneKey());
+    const kcal = Math.round(timerPlannedMinutes * plan.scene.kcalPerMin);
+    btn.innerText = `🏆 记录今日训练打卡（按 ${timerPlannedMinutes} 分钟 ≈ ${kcal} kcal 估算）`;
+}
+
+function refreshPlanViews() {
+    renderWorkoutExercises();
+    renderTargetPhysiqueCard();
+    paintProfilePlanPreview();
 }
 
 // 每个动作的标准分解与常见错误，按「身形key:组内序号」定位。
@@ -3067,6 +3334,55 @@ const EX_STEPS = {
     "male_steady:2": { steps: ["椅背当扶手，屈髋后坐", "轻触椅面即站起，重心在脚跟", "膝盖对准脚尖，不内扣"], wrong: "蹲得太深导致膝痛，深度以不痛为准" },
     "male_steady:3": { steps: ["弹力带固定在身后齐胸高", "双臂向前平举夹胸，肩胛后收下沉", "回位 2 秒，不耸肩"], wrong: "含胸驼背用手臂硬推，胸没感觉" },
 };
+
+// 场景替换动作的要点：只在动作本身换了器械/身体位置时单独写，
+// 其余场景版本沿用上面同动作族的 32 条要点。
+const SCENE_STEPS = {
+    "scene:hip_thrust": { steps: ["上背靠在训练凳边缘，双脚与髋同宽", "负重放在髋部，收紧下巴和肋骨", "脚跟发力顶髋至躯干水平，顶端夹臀 2 秒"], wrong: "顶腰代偿、下巴上扬，腰先酸就停下" },
+    "scene:hip_abduction_machine": { steps: ["坐稳，髋部贴紧靠垫，双脚踩踏板", "用臀中肌把双腿向外打开，停 1 秒", "控制 2 秒回位，不让配重砸下"], wrong: "身体后仰或借惯性甩开，练不到臀中肌" },
+    "scene:chest_press": { steps: ["调整座椅，握把与胸线齐平", "肩胛后收，推至手臂接近伸直但不锁肘", "控制 2 秒回位，胸有拉伸感"], wrong: "耸肩、肘抬太高，肩前侧先痛" },
+    "scene:leg_press": { steps: ["双脚与肩同宽踩踏板，膝盖对准脚尖", "下放至髋膝约 90 度，腰背贴紧靠垫", "脚跟发力推起，膝盖不锁死"], wrong: "下放过深导致腰部离开靠垫、膝盖内扣" },
+    "scene:cable_crunch": { steps: ["绳索卷腹：跪在高位绳索前，用腹部卷起躯干", "悬垂举腿：肩胛下沉，用下腹把膝盖抬向胸口", "两个动作交替完成，控制回位不借惯性"], wrong: "用手臂拉绳或摆腿借力，腹部没有卷曲" },
+    "scene:pallof": { steps: ["侧对绳索站立，双手把绳把抱在胸前", "收紧核心，把绳把向前推远并停 2 秒", "全程躯干不旋转，控制回位"], wrong: "身体被绳索拉转、耸肩，重量太大" },
+    "scene:back_extension": { steps: ["俯卧在罗马椅或垫上，髋部在垫边", "收紧臀部，把躯干抬到与腿一条线", "停 1 秒缓慢下放，不超伸"], wrong: "用腰猛甩抬高、超过中立位，腰椎受压" },
+    "scene:walk_liss": { steps: ["保持能说话但唱不了歌的强度", "步幅自然，脚跟过渡到全掌，膝盖不内扣", "前后各 3 分钟慢走过渡"], wrong: "低头看手机含胸、步幅过大，膝盖先累" },
+    "scene:bike": { steps: ["调好座椅高度，踩到最低点时膝盖微屈", "坐姿挺直，不趴把手，阻力以能维持 25 分钟为准", "前后各 2 分钟低阻力收尾"], wrong: "座椅过低、膝盖内扣，骑完膝前侧痛" },
+    "scene:table_row": { steps: ["仰卧在稳固桌下，双手握住桌沿，身体一条直线", "肩胛先下沉，把胸口拉向桌沿", "控制 2 秒下放，脚跟着地"], wrong: "桌子不稳、耸肩甩身体；先确认桌腿固定" },
+    "scene:barbell_squat": { steps: ["杠铃放在上背，脚与肩同宽，脚尖略外展", "吸气收紧核心，下蹲至髋低于膝", "脚跟发力站起，膝盖对准脚尖"], wrong: "弯腰低头、膝盖内扣；先用空杆练动作" },
+    "scene:barbell_bench": { steps: ["肩胛后收贴凳，双脚踩实地面", "杠铃下放至胸前一拳，肘约 45 度", "推起至手臂接近伸直，不锁肘"], wrong: "肩膀前送、臀部离凳；需要保护者时别硬上重量" },
+    "scene:triceps_pushdown": { steps: ["绳索调到高位，屈肘握住绳把", "肘贴身体，向下压至手臂伸直", "控制 2 秒回位，肩不耸"], wrong: "肘向外飞、身体前压借力" },
+    "scene:hanging_leg_raise": { steps: ["双手握杠悬垂，肩胛下沉", "用下腹把膝盖抬向胸口，骨盆后卷", "控制下放，不晃身体"], wrong: "靠摆腿和惯性甩上去，肩膀先累" },
+    "scene:cable_rotation": { steps: ["侧对绳索站立，双手握住绳把", "保持髋部稳定，把绳把拉向身体另一侧", "控制回位，眼随手动"], wrong: "靠腰猛转、膝盖跟着晃；重量以能控制为准" },
+    "scene:band_wy": { steps: ["弹力带固定在与肩同高处，双手握住两端", "先做 W：肘贴身体向后拉，肩胛后收", "再做 Y：双臂向上斜举，肋骨不外翻"], wrong: "耸肩、腰部代偿；带子太短会拉不动" },
+    "scene:pec_deck": { steps: ["调整座椅，握把与胸线齐平", "肩胛后收，双臂向中间夹胸", "控制 2 秒回位，胸有拉伸感"], wrong: "耸肩、肘部过度弯曲，变成推举" },
+    "scene:facepull": { steps: ["绳索调到面部高度，双手握住绳把", "肘高于腕，向脸两侧拉开", "肩胛后收，控制 2 秒回位"], wrong: "重量太大变成耸肩和甩臂" },
+};
+
+// 新动作没有专属姿态表时，借同动作族的现有火柴人示意。
+const SCENE_STEP_POSE = {
+    "scene:hip_thrust": "female_hourglass:0",
+    "scene:hip_abduction_machine": "female_hourglass:2",
+    "scene:chest_press": "female_lean:2",
+    "scene:leg_press": "female_steady:0",
+    "scene:cable_crunch": "female_athletic:2",
+    "scene:pallof": "male_lean:1",
+    "scene:back_extension": "female_hourglass:3",
+    "scene:walk_liss": "female_lean:3",
+    "scene:bike": "male_steady:0",
+    "scene:table_row": "male_v_taper:0",
+    "scene:barbell_squat": "female_athletic:0",
+    "scene:barbell_bench": "male_muscular:1",
+    "scene:triceps_pushdown": "male_muscular:3",
+    "scene:hanging_leg_raise": "male_v_taper:2",
+    "scene:cable_rotation": "male_steady:1",
+    "scene:band_wy": "male_lean:2",
+    "scene:pec_deck": "male_steady:3",
+    "scene:facepull": "male_lean:2",
+};
+
+function exerciseSteps(key) {
+    return EX_STEPS[key] || SCENE_STEPS[key] || {};
+}
 
 // ============ 第五批后续：逐动作详情 + 火柴人示意动画 ============
 // 为什么不是真人视频：仓库里没有教程素材也没有转载授权，内置别人的视频是侵权。
@@ -3510,7 +3826,10 @@ function poseFromTable(key, arch, t) {
 }
 
 function currentExKey(idx) {
-    return (window.__currentExKey || "female_hourglass") + ":" + idx;
+    const list = window.__currentExercises || [];
+    const item = list[idx];
+    return (item && (item.poseKey || item.stepsKey))
+        || ((window.__currentExKey || "female_hourglass") + ":" + idx);
 }
 
 function closeExerciseDetail() {
@@ -3524,10 +3843,11 @@ function openExerciseDetail(idx) {
     const list = window.__currentExercises || [];
     const item = list[idx];
     if (!item) { callNativeToast("这个动作还没载入，先回到训练计划再点"); return; }
-    const key = (state.profile && state.profile.goalType ? state.profile.goalType : "female_hourglass") + ":" + idx;
-    const meta = EX_STEPS[key] || {};
+    const fallbackKey = (state.profile && state.profile.goalType ? state.profile.goalType : "female_hourglass") + ":" + idx;
+    const itemKey = item.stepsKey || fallbackKey;
+    const meta = exerciseSteps(itemKey);
     const arch = detectArchetype(meta, item);
-    const poseKey = currentExKey(idx);
+    const poseKey = item.poseKey || itemKey;
     exActivePoseKey = poseKey;
     exActiveArch = arch;
     const nameEl = document.getElementById("ex-detail-name");
@@ -3640,6 +3960,7 @@ let timerInterval = null;
 let timerSeconds = 20 * 60;
 let isTimerRunning = false;
 let liveBurnedKcal = 0;
+let lastWorkoutPlanId = "";
 
 function setupTimer() {
     updateTimerDisplay();
@@ -3668,10 +3989,11 @@ function toggleTimer() {
         callNativeToast("▶ 训练计时已开始！消耗仅为估算，请按实际训练打卡。");
         callNativeVibrate(50);
 
+        const rate = buildWorkoutPlan(state.profile.gender, state.profile.goalType, currentSceneKey()).scene.kcalPerMin;
         timerInterval = setInterval(() => {
             if (timerSeconds > 0) {
                 timerSeconds=Math.max(0,Math.ceil((timerDeadline-Date.now())/1000));
-                liveBurnedKcal=(timerPlannedMinutes*60-timerSeconds)*11/60; // approx 11 kcal/min during resistance
+                liveBurnedKcal=(timerPlannedMinutes*60-timerSeconds)*rate/60;
                 updateTimerDisplay();
             } else {
                 clearInterval(timerInterval);
@@ -3686,23 +4008,31 @@ function toggleTimer() {
     }
 }
 
-function resetTimer(mins) {
+function resetTimer(mins, mode) {
     clearInterval(timerInterval);
     isTimerRunning = false;
-    timerPlannedMinutes=mins;
-    timerSeconds = mins * 60;
+    const plan = buildWorkoutPlan(state.profile.gender, state.profile.goalType, currentSceneKey());
+    const isCardio = mode === "cardio";
+    const minutes = Number.isFinite(mins) && mins > 0
+        ? mins
+        : (isCardio ? plan.scene.cardioMinutes : plan.minutes);
+    timerPlannedMinutes = minutes;
+    timerSeconds = minutes * 60;
     liveBurnedKcal = 0;
     const btn = document.getElementById("btn-timer-toggle");
     if (btn) { btn.innerText = "开始训练"; btn.style.background = "#10B981"; }
     const label = document.getElementById("timer-label");
     if (label) {
-        const info = getShapeData(state.profile.gender, state.profile.goalType);
-        const plan = (info.data && info.data.title) || "当前身形";
-        label.innerText = mins === 25
-            ? `⏱️ 有氧倒计时 25 分钟 · 对应【${plan}】的有氧替换`
-            : `⏱️ 抗阻倒计时 ${mins} 分钟 · 对应【${plan}】上面那 4 个动作`;
+        label.innerText = isCardio
+            ? `⏱️ 有氧加练 ${minutes} 分钟 · ${plan.scene.cardio}`
+            : `⏱️ 主课 ${minutes} 分钟 · 【${plan.title}】的 4 个动作`;
     }
     updateTimerDisplay();
+    updateWorkoutCompleteButton();
+}
+
+function resetTimerCardio() {
+    resetTimer(null, "cardio");
 }
 
 // ==========================================
@@ -3815,6 +4145,10 @@ function switchTab(tabName) {
     }
     if (typeof cmRoute === "function") cmRoute(tabName);
 
+    if (tabName === "workout") {
+        renderWorkoutExercises();
+        renderTargetPhysiqueCard();
+    }
     if (tabName === "charts") {
         setTimeout(renderCharts, 50);
     }

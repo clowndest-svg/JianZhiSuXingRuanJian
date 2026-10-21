@@ -16,6 +16,7 @@ const child = spawn(process.env.QINGSU_TEST_PYTHON || 'python', ['-c',
 const log = fs.createWriteStream(path.join(folder,'server.log'));child.stdout.pipe(log);child.stderr.pipe(log);
 let browser;
 const checks=[];
+const pageErrors=[];
 const shotsDir=process.env.QINGSU_SHOTS_DIR;
 if(shotsDir)fs.mkdirSync(shotsDir,{recursive:true});
 const shot=(page,name)=>shotsDir?page.screenshot({path:path.join(shotsDir,name)}):Promise.resolve();
@@ -24,7 +25,7 @@ try {
   browser = await chromium.launch({headless:true,...(process.env.QINGSU_CHROME_PATH ? {executablePath:process.env.QINGSU_CHROME_PATH} : {}),args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
   const context=await browser.newContext({viewport:{width:393,height:850},permissions:['microphone']});
   const page=await context.newPage();
-  const errors=[];page.on('pageerror',e=>errors.push(String(e)));
+  page.on('pageerror',e=>pageErrors.push(String(e)));
   const build=Number(/versionCode\s+(\d+)/.exec(fs.readFileSync(path.join(root,'app/build.gradle'),'utf8'))[1]);
   const api=async(url,body,token)=>{
     const r=await fetch(base+url,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-App-Build':String(build),...(token?{Authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});
@@ -253,12 +254,55 @@ try {
   await page.locator('#prof-weight-jin').fill('138.5');
   await page.locator('#prof-scene-cards .choice-card[data-value="band"]').click();
   assert.equal(await page.locator('#prof-scene').inputValue(),'band');
+  assert.match(await page.locator('#prof-plan-preview').innerText(),/弹力带塑形/);
+  await shot(page,'profile-scene-band.png');
   await page.evaluate(()=>saveCustomProfile());
   await page.waitForFunction(()=>{const t=document.getElementById('header-profile-summary')?.innerText||'';return /173cm/.test(t)&&/138\.5斤/.test(t);},null,{timeout:15000});
   const dash=await api('/api/dashboard',null,a.token);
   assert.equal(dash.current_weight_jin,138.5);
   assert.equal(dash.profile.height,173);
   checks.push('saving the profile updates the header weight and height immediately');
+  // 训练计划必须由「目标身材 × 场景」共同决定；切场景不刷新页面
+  await page.evaluate(()=>switchTab('workout'));
+  await page.waitForFunction(()=>document.querySelector('#workout-scene-switch .scene-btn[data-value="band"]')?.classList.contains('active'),null,{timeout:10000});
+  assert.match(await page.locator('#workout-context-title').innerText(),/弹力带塑形/);
+  assert.match(await page.locator('#workout-exercises-card').innerText(),/弹力带臀桥/);
+  assert.equal(await page.locator('#btn-timer-main').innerText(),'重置主课 30 分');
+  assert.equal(await page.locator('#timer-display').innerText(),'30:00');
+  await shot(page,'workout-band.png');
+  checks.push('profile scene selection changes the workout plan and timer');
+  await page.evaluate(()=>{window.__sceneSwitchNoReload=1;});
+  await page.locator('#workout-scene-switch .scene-btn[data-value="gym"]').click();
+  await page.waitForFunction(()=>document.querySelector('#workout-scene-switch .scene-btn[data-value="gym"]')?.classList.contains('active'),null,{timeout:10000});
+  assert.match(await page.locator('#workout-exercises-card').innerText(),/杠铃\/哑铃臀推/);
+  assert.equal(await page.evaluate(()=>window.__sceneSwitchNoReload===1),true,'scene switch must not reload the page');
+  let sceneSaved=false;
+  for(let i=0;i<60;i++){const d=await api('/api/dashboard',null,a.token);if(d.profile.scene==='gym'){sceneSaved=true;break;}await new Promise(r=>setTimeout(r,100));}
+  assert.equal(sceneSaved,true,'scene switch must persist');
+  await shot(page,'workout-gym.png');
+  checks.push('workout-tab scene switch updates the plan immediately and persists without reload');
+  await page.evaluate(()=>openProfileModal());
+  await page.locator('#modal-body-shapes-grid #shape-card-female_lean').click();
+  await page.waitForFunction(()=>document.querySelector('#workout-exercises-card')?.innerText.includes('史密斯机宽距深蹲'),null,{timeout:10000});
+  assert.match(await page.locator('#workout-context-title').innerText(),/修长轻盈/);
+  assert.equal(await page.locator('#workout-scene-switch .scene-btn[data-value="gym"]').evaluate(el=>el.classList.contains('active')),true);
+  await shot(page,'profile-plan-preview.png');
+  await page.evaluate(()=>closeProfileModal());
+  await page.setViewportSize({width:320,height:740});
+  await page.waitForTimeout(120);
+  await page.evaluate(()=>{const t=document.getElementById('web-toast-container');if(t)t.remove();});
+  const narrow=await page.evaluate(()=>{
+    const p=document.getElementById('panel-workout');
+    return {doc:document.documentElement.scrollWidth,body:document.body.scrollWidth,w:innerWidth,
+            panel:p?p.getBoundingClientRect().width:0,panelScroll:p?p.scrollWidth:0};
+  });
+  assert.ok(narrow.doc<=321&&narrow.body<=321&&narrow.panelScroll<=321,JSON.stringify(narrow));
+  await shot(page,'workout-320.png');
+  await page.setViewportSize({width:393,height:850});
+  let shapeSaved=false;
+  for(let i=0;i<40;i++){const d=await api('/api/dashboard',null,a.token);if(d.profile.goal_type==='female_lean'){shapeSaved=true;break;}await new Promise(r=>setTimeout(r,100));}
+  assert.equal(shapeSaved,true,'body shape must persist while the scene stays gym');
+  checks.push('changing body shape keeps the scene and regenerates that scene version');
   // 账号入口：个人中心要能切换账号/退出登录
   await page.evaluate(()=>openAccountCenter());
   await page.waitForSelector('#account-tools-dialog[open]');
@@ -278,12 +322,21 @@ try {
   // An old response must not insert data into a later account.
   const scope=await page.evaluate(()=>{window.oldScope=dmScope();cmGeneration++;state.token='new-account';cm.pending={};cm.bubbles=[];dmAck('old',{id:999,from_id:1,to_id:2,body:'OLD'},window.oldScope);return cm.bubbles.length;});
   assert.equal(scope,0);checks.push('cleanup and late account response rejection');
-  assert.deepEqual(errors,[]);
-  fs.writeFileSync(path.join(folder,'result.json'),JSON.stringify({checks,errors},null,2));
-  console.log(JSON.stringify({folder,checks,errors},null,2));
+  assert.deepEqual(pageErrors,[]);
+  fs.writeFileSync(path.join(folder,'result.json'),JSON.stringify({checks,errors:pageErrors},null,2));
+  console.log(JSON.stringify({folder,checks,errors:pageErrors},null,2));
 } catch (error) {
   const page=browser?.contexts()[0]?.pages()[0];
-  if(page)await page.screenshot({path:path.join(folder,'failure.png')}).catch(()=>{});
+  console.error('PAGE_ERRORS', pageErrors);
+  if(page){
+    const diag=await page.evaluate(()=>({
+      header: document.getElementById('header-profile-summary')?.innerText||'',
+      modal: document.getElementById('profile-modal')?.className||'',
+      toast: (document.getElementById('native-toast')?.innerText)||''
+    })).catch(()=>null);
+    console.error('DIAG', diag);
+    await page.screenshot({path:path.join(folder,'failure.png')}).catch(()=>{});
+  }
   throw error;
 } finally {
   if(browser)await browser.close();

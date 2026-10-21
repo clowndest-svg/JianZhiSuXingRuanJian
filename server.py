@@ -1020,6 +1020,15 @@ class ProfileUpdateReq(ValidatedModel):
     dining_mode: Optional[str] = None
     scene: Optional[str] = None
 
+# 目标身材与训练场景是训练计划的两个输入，不能存任意字符串：
+# 老账号的 tone/loss/muscle/tight 仍兼容，新账号使用具体身材 key。
+VALID_SCENES = {"home", "band", "cardio", "gym"}
+VALID_GOAL_TYPES = {
+    "tone", "loss", "muscle", "tight",
+    "female_hourglass", "female_lean", "female_athletic", "female_steady",
+    "male_v_taper", "male_lean", "male_muscular", "male_steady",
+}
+
 class FoodLogReq(ValidatedModel):
     slot: str
     food_name: str
@@ -1100,6 +1109,8 @@ def _body_or_400(age, height, weight_jin, target_weight_jin):
 def register(req: RegisterReq, request: Request):
     if req.special_population:raise HTTPException(400,'本版本只提供一般成人记录预算，不适用于孕哺期或需要个性化营养治疗的情况')
     body = _body_or_400(req.age, req.height, req.weight_jin, req.target_weight_jin)
+    if req.goal_type and req.goal_type not in VALID_GOAL_TYPES:
+        raise HTTPException(status_code=400, detail="目标身材不在可选范围内")
     email = mailer.normalize(req.email or "")
     # 新客户端（57+）注册必须带邮箱验证码；邮件通道都没接好时降级为老流程并留日志，
     # 不能因为邮件服务挂掉就把所有新用户锁在门外。
@@ -1318,6 +1329,10 @@ def get_me(user: dict = Depends(get_current_user)):
 
 @app.post("/api/profile/update")
 def update_profile(req: ProfileUpdateReq, user: dict = Depends(get_current_user)):
+    if req.goal_type is not None and req.goal_type not in VALID_GOAL_TYPES:
+        raise HTTPException(status_code=400, detail="目标身材不在可选范围内")
+    if req.scene is not None and req.scene not in VALID_SCENES:
+        raise HTTPException(status_code=400, detail="训练场景不在可选范围内（home/band/cardio/gym）")
     conn = get_db()
     try:
         c = conn.cursor()

@@ -32,6 +32,24 @@ class Integration(unittest.TestCase):
     def test_validation(self):
         for path,data in [('/api/food/log',{'slot':'早餐','food_name':'x','cal':-1}),('/api/weight/log',{'weight_jin':-1}),('/api/workout/complete',{'duration_minutes':-1}),('/api/register',dict(self.body,username='',password=''))]:
             with self.subTest(path=path):self.assertEqual(self.c.post(path,headers=self.auth,json=data).status_code,422)
+    def test_profile_scene_and_goal_validation(self):
+        bad_scene = self.c.post('/api/profile/update', headers=self.auth, json={'scene': 'moon'})
+        self.assertEqual(bad_scene.status_code, 400)
+        bad_goal = self.c.post('/api/profile/update', headers=self.auth, json={'goal_type': 'alien'})
+        self.assertEqual(bad_goal.status_code, 400)
+        ok = self.c.post('/api/profile/update', headers=self.auth,
+                         json={'scene': 'gym', 'goal_type': 'male_lean'})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        d = self.c.get('/api/dashboard', headers=self.auth).json()
+        self.assertEqual(d['profile']['scene'], 'gym')
+        self.assertEqual(d['profile']['goal_type'], 'male_lean')
+        # 场景单独更新不能把目标身材冲掉，反之亦然
+        self.c.post('/api/profile/update', headers=self.auth, json={'height': 171})
+        d = self.c.get('/api/dashboard', headers=self.auth).json()
+        self.assertEqual((d['profile']['scene'], d['profile']['goal_type']), ('gym', 'male_lean'))
+        self.assertEqual(self.c.post('/api/profile/update', headers=self.auth,
+                                     json={'goal_type': 'tone'}).status_code, 200)
+
     def test_initial_state_and_share(self):
         d=self.c.get('/api/dashboard',headers=self.auth).json()
         self.assertEqual(d['cycle_day'],1);self.assertEqual(d['consecutive_slacking_days'],0)

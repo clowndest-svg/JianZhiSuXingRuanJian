@@ -825,3 +825,29 @@ body.desktop-view .ex-detail{max-width:min(500px,calc(100vw - 24px))}
 @media (prefers-reduced-motion:reduce){.cmt-pop,.cm-hearted::after{animation:none}}
 /* Period summaries and opt-in shared goals. */
 .period-stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}.period-stats div{padding:12px;background:#f1f8f3;border-radius:12px}.period-stats dt{font-size:12px;color:#526359}.period-stats dd{margin:6px 0 0;font-weight:700;font-size:18px}.period-table{max-height:40vh;overflow:auto}.period-table table{width:100%;border-collapse:collapse;font-size:13px}.period-table th,.period-table td{text-align:left;padding:9px 5px;border-bottom:1px solid #e2ebe4}.goal-card{padding:16px;border:1px solid #d7e3da;border-radius:14px;margin-top:12px}.goal-card p{font-size:13px}.goal-card strong{float:right}.td-field input,.td-field select{max-width:100%;box-sizing:border-box}
+
+/* 训练计划：目标身材 × 训练场景，两个维度共同决定动作与时长 */
+.workout-context-card{padding:14px}
+.workout-context-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.workout-context-kicker{font-size:10.5px;font-weight:800;letter-spacing:.08em;color:#7C3AED;text-transform:uppercase}
+.workout-context-title{margin-top:3px;font-size:16px;font-weight:800;color:#0F172A;line-height:1.35;overflow-wrap:anywhere}
+.plan-x{color:#A78BFA;font-weight:700;padding:0 2px}
+.mini-link{border:0;background:transparent;color:#047857;font:inherit;font-size:12px;font-weight:700;padding:4px 0;white-space:nowrap;cursor:pointer}
+.scene-switch{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:11px}
+.scene-btn{display:flex;align-items:center;gap:8px;min-height:48px;padding:8px 10px;border:1.5px solid #E2E8F0;border-radius:12px;background:#fff;color:#0F172A;text-align:left;font:inherit;cursor:pointer}
+.scene-btn.active{border-color:#10B981;background:#F0FDF4;box-shadow:0 0 0 2px rgba(16,185,129,.12)}
+.scene-ico{font-size:19px;line-height:1;flex:0 0 auto}
+.scene-name{display:flex;flex-direction:column;line-height:1.2;min-width:0}
+.scene-name b{font-size:12.5px;font-weight:800;color:#0F172A}
+.scene-name small{font-size:10.5px;color:#64748B;margin-top:2px}
+.workout-context-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.plan-meta-pill{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;line-height:1.35;padding:3px 8px;border-radius:99px;background:#F8FAFC;border:1px solid #E2E8F0;color:#475569;max-width:100%;overflow-wrap:anywhere}
+.plan-combo-preview{margin-top:9px;padding:10px 11px;border:1px dashed #C7D2FE;border-radius:12px;background:#F5F3FF}
+.plan-combo-title{font-size:12.5px;font-weight:800;color:#4C1D95;line-height:1.35;margin-bottom:4px;overflow-wrap:anywhere}
+.plan-combo-title span{color:#8B5CF6;padding:0 2px}
+.plan-combo-line{font-size:11px;line-height:1.55;color:#475569;overflow-wrap:anywhere}
+.form-group > .field-hint{margin:4px 0 8px}
+#panel-workout .timer-controls{flex-wrap:wrap;row-gap:8px}
+#panel-workout .timer-btn{padding:8px 14px}
+#btn-complete-workout{line-height:1.45;padding:12px 10px;height:auto}
+@media (min-width:640px){.scene-switch{grid-template-columns:repeat(4,minmax(0,1fr))}}

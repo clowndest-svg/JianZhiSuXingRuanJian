@@ -691,11 +691,37 @@
 
             <div class="card-title" style="margin-bottom: 8px;">
                 <span class="title-left">🏋️ 专属形体训练计划</span>
-                <span style="font-size: 11px; color: var(--primary-dark); font-weight: 600;" id="workout-plan-badge">留肌塑形方案</span>
+                <span style="font-size: 11px; color: var(--primary-dark); font-weight: 600;" id="workout-plan-badge">训练方案</span>
+            </div>
+
+            <!-- 目标身材 × 训练场景：两个维度共同决定下面这份计划 -->
+            <div class="card workout-context-card">
+                <div class="workout-context-top">
+                    <div>
+                        <div class="workout-context-kicker">目标身材 × 训练场景</div>
+                        <div class="workout-context-title" id="workout-context-title">正在读取你的组合…</div>
+                    </div>
+                    <button type="button" class="mini-link" onclick="openProfileModal()">改目标 / 场景</button>
+                </div>
+                <div class="scene-switch" id="workout-scene-switch" role="radiogroup" aria-label="切换训练场景">
+                    <button type="button" class="scene-btn" data-value="home" role="radio" aria-checked="false" onclick="switchWorkoutScene('home')">
+                        <span class="scene-ico">🏠</span><span class="scene-name"><b>居家自重</b><small>无器械</small></span>
+                    </button>
+                    <button type="button" class="scene-btn" data-value="band" role="radio" aria-checked="false" onclick="switchWorkoutScene('band')">
+                        <span class="scene-ico">🎗️</span><span class="scene-name"><b>弹力带</b><small>轻器械</small></span>
+                    </button>
+                    <button type="button" class="scene-btn" data-value="cardio" role="radio" aria-checked="false" onclick="switchWorkoutScene('cardio')">
+                        <span class="scene-ico">🏃</span><span class="scene-name"><b>户外刷脂</b><small>零器械</small></span>
+                    </button>
+                    <button type="button" class="scene-btn" data-value="gym" role="radio" aria-checked="false" onclick="switchWorkoutScene('gym')">
+                        <span class="scene-ico">🏋️</span><span class="scene-name"><b>健身房</b><small>器械</small></span>
+                    </button>
+                </div>
+                <div class="workout-context-meta" id="workout-context-meta"></div>
             </div>
 
             <div class="callout" id="workout-summary-callout">
-                <strong>训练结构建议：</strong> 20分钟抗阻塑形（先力量消耗糖原） ➔ 25分钟快走/慢跑有氧（根据体感调整强度）。练后晚餐补足蛋白质支持恢复！
+                <strong>目标 × 场景 = 这份计划：</strong>目标身材决定练哪里和吃多少，训练场景决定器械、动作版本和时长。选好后这里会列出动作、时长和有氧安排。
             </div>
 
             <!-- 动态动作库容器 (由JS根据用户选定的目标生成) -->
@@ -717,15 +743,15 @@
 
                 <div class="timer-controls">
                     <button class="timer-btn start" id="btn-timer-toggle" onclick="toggleTimer()">开始训练</button>
-                    <button class="timer-btn reset" onclick="resetTimer(20)">重置20分</button>
-                    <button class="timer-btn reset" onclick="resetTimer(25)">切为有氧25分</button>
+                    <button class="timer-btn reset" id="btn-timer-main" onclick="resetTimer()">重置主课</button>
+                    <button class="timer-btn reset" id="btn-timer-cardio" onclick="resetTimerCardio()">有氧加练</button>
                 </div>
             </div>
 
             <!-- 完成训练打卡 -->
             <div class="card">
-                <button class="btn-primary" onclick="completeWorkoutToday()">
-                    🏆 记录今日训练打卡（按 220 kcal 计入）
+                <button class="btn-primary" id="btn-complete-workout" onclick="completeWorkoutToday()">
+                    🏆 记录今日训练打卡（按实际时长估算）
                 </button>
             </div>
 
@@ -1222,7 +1248,7 @@
                             <button type="button" class="gender-mini-btn" id="modal-tab-male" onclick="onProfileGenderChanged('male')">👨 男性款 (4款)</button>
                         </div>
                     </div>
-                    <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">点击挑选心仪体型，系统将全自动定制专属代谢卡路里与训练规划：</div>
+                    <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">点击挑选理想体型：它决定训练重点和饮食方向；下面的场景决定在哪儿练、用什么器械。</div>
                     
                     <div class="body-shape-selector-grid" id="modal-body-shapes-grid">
                         <!-- JS 根据当前性别动态渲染 4 款专属身材卡片 -->
@@ -1252,29 +1278,31 @@
                 <!-- 训练计划场景选择 -->
                 <div class="form-group">
                     <div class="form-label">形体训练计划场景</div>
+                    <div class="field-hint">目标身材决定热量缺口、宏量比例和训练重点；场景只决定在哪儿练、用什么器械，不改变热量目标。</div>
+                    <div class="plan-combo-preview" id="prof-plan-preview"><div class="plan-combo-line">选好身材和场景后，这里显示组合结果</div></div>
                     <input type="hidden" id="prof-scene" value="home">
                     <div class="choice-list" id="prof-scene-cards" role="radiogroup" aria-label="形体训练计划场景">
                         <button type="button" class="choice-card active" data-value="home" role="radio" aria-checked="true" onclick="pickProfileScene('home')">
                             <span class="choice-emoji">🏠</span>
-                            <span class="choice-body"><b>居家自重经典循环</b><small>深蹲 · 臀桥 · 俯卧撑 · 快走</small></span>
+                            <span class="choice-body"><b>居家自重</b><small>无器械 · 瑜伽垫 + 椅子</small></span>
                         </button>
                         <button type="button" class="choice-card" data-value="band" role="radio" aria-checked="false" onclick="pickProfileScene('band')">
                             <span class="choice-emoji">🎗️</span>
-                            <span class="choice-body"><b>弹力带 / 轻器械塑形</b><small>背部肩线与胸腹紧致</small></span>
+                            <span class="choice-body"><b>弹力带 / 轻器械</b><small>一根弹力带 · 椅子或门锚</small></span>
                         </button>
                         <button type="button" class="choice-card" data-value="cardio" role="radio" aria-checked="false" onclick="pickProfileScene('cardio')">
                             <span class="choice-emoji">🏃</span>
-                            <span class="choice-body"><b>户外快走慢跑刷脂</b><small>高频燃脂心率模式</small></span>
+                            <span class="choice-body"><b>户外刷脂</b><small>零器械 · 平坦路线 + 计时</small></span>
                         </button>
                         <button type="button" class="choice-card" data-value="gym" role="radio" aria-checked="false" onclick="pickProfileScene('gym')">
                             <span class="choice-emoji">🏋️</span>
-                            <span class="choice-body"><b>健身房器械力量进阶</b><small>大重量复合动作</small></span>
+                            <span class="choice-body"><b>健身房器械</b><small>固定器械 + 哑铃 / 杠铃</small></span>
                         </button>
                     </div>
                 </div>
 
                 <button class="btn-primary" style="margin-top: 14px;" onclick="saveCustomProfile()">
-                    💾 立即保存并重新计算代谢与食谱
+                    💾 立即保存并更新代谢 / 食谱 / 训练计划
                 </button>
             </div>
         </div>

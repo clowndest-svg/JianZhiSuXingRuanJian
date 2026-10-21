@@ -535,7 +535,7 @@ const htmlSrc = srcOf("app/src/main/assets/index.html");
 const cssSrc = srcOf("app/src/main/assets/style.css");
 
 // 动作要点：32 条，每条 3 步 + 1 条常见错误
-const exBlock = jsSrc.slice(jsSrc.indexOf("const EX_STEPS"), jsSrc.indexOf("function toggleExerciseSteps"));
+const exBlock = jsSrc.slice(jsSrc.indexOf("const EX_STEPS"), jsSrc.indexOf("const SCENE_STEPS"));
 const exKeys = [...exBlock.matchAll(/"[a-z_]+:\d":/g)].map(m => m[0]);
 check("动作要点覆盖 32 个动作", exKeys.length === 32, exKeys.length);
 const badSteps = [...exBlock.matchAll(/steps: \[([^\]]*)\]/g)].filter(m => (m[1].match(/", "/g) || []).length + 1 < 3);
@@ -543,6 +543,17 @@ check("每条要点至少 3 步", badSteps.length === 0, badSteps.length);
 check("每条都写了常见错误", (exBlock.match(/wrong: "/g) || []).length === 32,
       (exBlock.match(/wrong: "/g) || []).length);
 check("要点不含疗效承诺", !/立刻见效|一周瘦|月瘦\d+斤|保证/.test(exBlock), "");
+
+// 场景替换动作的要点必须同样完整，不能只换个名字就端上来
+const sceneStepsBlock = jsSrc.slice(jsSrc.indexOf("const SCENE_STEPS"), jsSrc.indexOf("const SCENE_STEP_POSE"));
+const sceneStepKeys = [...sceneStepsBlock.matchAll(/"scene:[a-z_]+":/g)].map(m => m[0]);
+check("场景替换动作要点覆盖 18 个动作", sceneStepKeys.length === 18, sceneStepKeys.length);
+const badSceneSteps = [...sceneStepsBlock.matchAll(/steps: \[([^\]]*)\]/g)]
+  .filter(m => (m[1].match(/", "/g) || []).length + 1 < 3);
+check("场景替换动作每条至少 3 步", badSceneSteps.length === 0, badSceneSteps.length);
+check("场景替换动作每条都写常见错误", (sceneStepsBlock.match(/wrong: "/g) || []).length === 18,
+      (sceneStepsBlock.match(/wrong: "/g) || []).length);
+check("场景替换动作要点不含疗效承诺", !/立刻见效|一周瘦|月瘦\d+斤|保证/.test(sceneStepsBlock), "");
 
 // 渲染出的动作卡带两个按钮
 sandbox.__fetchHandler = () => Promise.resolve(okJson({ code: 0 }));
@@ -557,6 +568,112 @@ check("要点已渲染进卡片", exHtml.includes("肩胛先下沉"), "");
 run(h.context, `toggleExerciseSteps(0)`);
 check("点开后要点容器加 open 类",
       run(h.context, `document.getElementById("ex-steps-0").classList.contains("open")`), "");
+
+// ===== 目标身材 × 训练场景：8×4 组合都必须真的生成计划 =====
+const planMatrix = JSON.parse(run(h.context, `(function(){
+  if (typeof buildWorkoutPlan !== "function") return JSON.stringify([]);
+  var out = [];
+  for (var gi = 0; gi < 2; gi++) {
+    var g = gi ? "male" : "female";
+    var keys = Object.keys(BODY_SHAPES_DATA[g]);
+    for (var ki = 0; ki < keys.length; ki++) {
+      var sigs = [];
+      for (var si = 0; si < SCENE_ORDER.length; si++) {
+        var sc = SCENE_ORDER[si];
+        var p = buildWorkoutPlan(g, keys[ki], sc);
+        var names = p.exercises.map(function(e){ return e.name.replace(/^\\d+\\.\\s*/, ""); });
+        var reps = p.exercises.map(function(e){ return e.reps; });
+        sigs.push(names.join("|") + "~" + reps.join("|"));
+        out.push({g:g, k:keys[ki], s:sc, n:p.exercises.length, names:names, reps:reps,
+                  minutes:p.minutes, equipment:p.scene.equipment,
+                  steps:p.exercises.map(function(e){ return e.stepsKey; })});
+      }
+      out.push({shape:keys[ki], unique: new Set(sigs).size});
+    }
+  }
+  return JSON.stringify(out);
+})()`));
+const planRows = planMatrix.filter(x => x.n !== undefined);
+const shapeRows = planMatrix.filter(x => x.unique !== undefined);
+check("8 种身材 × 4 种场景都生成 4 个动作",
+      planRows.length === 32 && planRows.every(x => x.n === 4), planRows.length);
+check("每个组合的 4 个动作都有名字和组次",
+      planRows.every(x => x.names.length === 4 && x.names.every(v => v && v.length >= 2)
+        && x.reps.length === 4 && x.reps.every(v => v && v.length >= 2)), "");
+check("每种身材的 4 个场景方案互不相同",
+      shapeRows.length === 8 && shapeRows.every(x => x.unique === 4),
+      JSON.stringify(shapeRows.map(x => [x.shape, x.unique])));
+check("每个组合都带场景器械与默认时长",
+      planRows.every(x => x.equipment && x.minutes > 0), "");
+check("场景替换动作都指向真实要点",
+      planRows.every(x => x.steps.every(k => /^[a-z_]+:\d+$|^scene:[a-z_]+$/.test(k))), "");
+
+run(h.context, `state.profile.gender="male"; state.profile.goalType="male_v_taper";
+                state.profile.scene="gym"; isTimerRunning=false; renderWorkoutExercises();`);
+const gymExHtml = String(run(h.context, `document.getElementById("workout-exercises-card").innerHTML`));
+check("切到健身房后动作换成器械版",
+      gymExHtml.includes("高位下拉 / 辅助引体") && gymExHtml.includes("哑铃侧平举"),
+      gymExHtml.slice(0, 180));
+check("切到健身房后默认时长变成 35 分",
+      run(h.context, `timerSeconds`) === 35 * 60, run(h.context, `timerSeconds`));
+check("训练页写明目标 × 场景",
+      String(run(h.context, `document.getElementById("workout-context-title").innerText`)).includes("健身房器械"), "");
+check("主课/有氧按钮按场景赋值",
+      String(run(h.context, `document.getElementById("btn-timer-main").innerText`)).includes("35")
+      && String(run(h.context, `document.getElementById("btn-timer-cardio").innerText`)).includes("15"), "");
+
+run(h.context, `state.profile.scene="band"; renderWorkoutExercises();`);
+const bandExHtml = String(run(h.context, `document.getElementById("workout-exercises-card").innerHTML`));
+check("切到弹力带后动作真的换了",
+      bandExHtml.includes("弹力带高位下拉") && !bandExHtml.includes("高位下拉 / 辅助引体"),
+      bandExHtml.slice(0, 180));
+check("切场景后计时默认值跟着换",
+      run(h.context, `timerSeconds`) === 30 * 60, run(h.context, `timerSeconds`));
+
+const hasSceneSwitch = run(h.context, `typeof switchWorkoutScene === "function"`);
+if (hasSceneSwitch) {
+  log.fetches.length = 0;
+  sandbox.__fetchHandler = () => Promise.resolve(okJson({ code: 0 }));
+  run(h.context, `state.token="tk"; state.profile.scene="gym"; switchWorkoutScene("home")`);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+  const sceneUpdate = log.fetches.find(f => String(f[0]).includes("/api/profile/update"));
+  check("训练页切场景会写回服务端",
+        !!sceneUpdate && String((sceneUpdate[1] || {}).body || "").includes('"scene":"home"'),
+        sceneUpdate ? String(sceneUpdate[1].body) : "no request");
+  check("切场景后本机状态立即生效", run(h.context, `state.profile.scene`) === "home", "");
+} else {
+  check("训练页切场景会写回服务端", false, "switchWorkoutScene missing");
+  check("切场景后本机状态立即生效", false, "switchWorkoutScene missing");
+}
+
+// 档案写入串行化：先选场景、后点保存时，后一次必须等前一次真的写完，
+// 否则先发后到的旧身高体重会把新保存的值覆盖回去（r176 实测过一次）。
+run(h.context, `state.token="tk"; state.profile.gender="female"; state.profile.goalType="female_hourglass";
+  ["prof-age","prof-height","prof-weight-jin","prof-target-jin"].forEach((id,i)=>document.getElementById(id).value=["30","170","140","120"][i]);
+  document.getElementById("prof-scene").value="home"; document.getElementById("prof-dining-mode").value="takeout";`);
+let releaseFirst = null;
+log.fetches.length = 0;
+sandbox.__fetchHandler = (u) => {
+  if (String(u).includes("/api/profile/update") && !releaseFirst) {
+    return new Promise(resolve => { releaseFirst = () => resolve(okJson({ code: 0 })); });
+  }
+  return Promise.resolve(okJson({ code: 0, metrics: {}, profile: {}, today_meals: [] }));
+};
+run(h.context, `pickProfileScene("band")`);
+await new Promise(r => setImmediate(r));
+const firstUpdates = log.fetches.filter(f => String(f[0]).includes("/api/profile/update")).length;
+run(h.context, `saveCustomProfile()`);
+await new Promise(r => setImmediate(r));
+const blockedUpdates = log.fetches.filter(f => String(f[0]).includes("/api/profile/update")).length;
+check("后一次档案保存会等前一次写完", firstUpdates === 1 && blockedUpdates === 1, `${firstUpdates}/${blockedUpdates}`);
+if (releaseFirst) releaseFirst();
+await new Promise(r => setImmediate(r));
+await new Promise(r => setImmediate(r));
+const orderedUpdates = log.fetches.filter(f => String(f[0]).includes("/api/profile/update"));
+check("两次档案写入按调用顺序发出",
+      orderedUpdates.length >= 2 && String(orderedUpdates[1][1].body).includes('"height"'),
+      orderedUpdates.map(x => String(x[1].body)).join(" | "));
 
 // 视频跳转：走原生桥，不内置声称
 let opened = null;
@@ -949,7 +1066,9 @@ check("各原型全相位不出现反关节", JB.length === 0, JB);
 const jsSrcForEx = fs.readFileSync(path.join(ROOT, "app/src/main/assets/app.js"), "utf8");
 check("动作卡调用详情层而不是只展开文字",
       jsSrcForEx.includes("openExerciseDetail(${idx})"), "");
-check("身形 key 与要点表同源", jsSrcForEx.includes("window.__currentExKey = key;"), "");
+check("身形 key 与要点表同源",
+      jsSrcForEx.includes("window.__currentExKey = plan.shapeKey")
+      && jsSrcForEx.includes("(shapeKey + \":\" + idx)"), "");
 // 真数据姿态表：32 条都要能取到，插值后骨长不能漂
 const POSE_SRC = fs.readFileSync(path.join(ROOT, "app/src/main/assets/exercise_poses.json"), "utf8");
 const POSES = JSON.parse(POSE_SRC);
