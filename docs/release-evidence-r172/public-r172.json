@@ -1,0 +1,17 @@
+{
+  "build": 56,
+  "checks": [
+    "left button switches modes and voice mode pre-warms the microphone",
+    "warm microphone starts recording in 14ms; bubble 12ms; confirm 353ms",
+    "voice and text messages deliver on production",
+    "real on-host ASR: \"今天下午三点开会，别忘了带电脑。\" in 409ms, visible to both sides",
+    "call page mute/minimize/restore and hangup on production"
+  ],
+  "timing": {
+    "micMs": 14,
+    "bubbleMs": 12,
+    "confirmMs": 353,
+    "asrMs": 409
+  },
+  "transcript": "今天下午三点开会，别忘了带电脑。"
+}

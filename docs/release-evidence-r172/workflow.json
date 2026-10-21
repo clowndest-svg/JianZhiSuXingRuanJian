@@ -1,0 +1,12 @@
+{
+  "id": 39626233344,
+  "head_sha": "0bb164abc8d3653b2b4cd99d1c56cc0a914c41e9",
+  "status": "completed",
+  "conclusion": "success",
+  "jobs": {
+    "android": "success",
+    "integration": "success",
+    "deploy": "success"
+  },
+  "signed_apk": "CI built and signed build 56"
+}

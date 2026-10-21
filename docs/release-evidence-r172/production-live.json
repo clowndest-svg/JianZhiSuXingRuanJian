@@ -1,0 +1,30 @@
+{
+  "release": "r39626233344",
+  "source_revision": "0bb164abc8d3653b2b4cd99d1c56cc0a914c41e9",
+  "status": "ok",
+  "build": 56,
+  "version_name": "2.2.11",
+  "apk_sha256": "100fb7eee12ce75f4c962ae9d21faabd0e27cfeeba98e7870e7d3e05ec32feae",
+  "apk_size": 5447190,
+  "apk_certificate_sha256": "c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f",
+  "asr": "on-host paraformer+ct-punc",
+  "public": {
+    "build": 56,
+    "checks": [
+      "left button switches modes and voice mode pre-warms the microphone",
+      "warm microphone starts recording in 14ms; bubble 12ms; confirm 353ms",
+      "voice and text messages deliver on production",
+      "real on-host ASR: \"今天下午三点开会，别忘了带电脑。\" in 409ms, visible to both sides",
+      "call page mute/minimize/restore and hangup on production"
+    ],
+    "timing": {
+      "micMs": 14,
+      "bubbleMs": 12,
+      "confirmMs": 353,
+      "asrMs": 409
+    },
+    "transcript": "今天下午三点开会，别忘了带电脑。"
+  },
+  "rate_store": "redis",
+  "min_build_override": 0
+}

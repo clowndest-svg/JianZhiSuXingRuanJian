@@ -1,0 +1,11 @@
+{
+  "matched_source_revision": "0bb164abc8d3653b2b4cd99d1c56cc0a914c41e9",
+  "files": {
+    "server.py": "338adf1ade0482839d9bd4097ce491b73e9dbb5f520814ea15ddc5130bb46871",
+    "app_modules/asr.py": "cac40d8f9ebaf936d7fb067265ce5c845729a62ee1a7d9fbd67ecfba6bafe51e",
+    "app_modules/audio.py": "5197e09abde29b8c57c782b4c7112f393570a3689f734d5089871c1557735c23"
+  },
+  "ops_files": {
+    "/opt/qingsu/asr-server.py": "7c7960d1f202e20b2aaad18a01cfbec5a83deef5d0a61ff0b4712cc594f3e6de"
+  }
+}
