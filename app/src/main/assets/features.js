@@ -352,15 +352,23 @@ async function refreshAccount(){
 function cachedAvatar(){ try{ return localStorage.getItem('QINGSU_AVATAR_DATA')||''; }catch(e){ return ''; } }
 function rememberAvatar(url){
     try{
-        if(!url){ localStorage.removeItem('QINGSU_AVATAR_DATA'); return; }
+        if(!url){ localStorage.removeItem('QINGSU_AVATAR_DATA'); localStorage.removeItem('QINGSU_AVATAR_SRC'); return; }
         // 头像走签名链接，15 分钟就过期，直接缓存 URL 过一晚就是坏图。
         // 缓存成 data URL：冷启动先画这一张，账号接口回来后再用新的。
         const full=/^(data:|https?:)/.test(url)?url:API_BASE+url;
         if(/^data:image\//.test(full)){ try{localStorage.setItem('QINGSU_AVATAR_DATA',full);}catch(e){} return; }
+        const path=full.split('?')[0];
+        // 同一张头像不重复下载；签名串每次刷新都会变，只比路径
+        if(localStorage.getItem('QINGSU_AVATAR_SRC')===path&&cachedAvatar())return;
         fetch(full).then(r=>r.ok?r.blob():null).then(blob=>{
             if(!blob||blob.size>300*1024)return;
             const reader=new FileReader();
-            reader.onload=()=>{ try{localStorage.setItem('QINGSU_AVATAR_DATA',String(reader.result||''));}catch(e){} };
+            reader.onload=()=>{
+                try{
+                    localStorage.setItem('QINGSU_AVATAR_DATA',String(reader.result||''));
+                    localStorage.setItem('QINGSU_AVATAR_SRC',path);
+                }catch(e){}
+            };
             reader.readAsDataURL(blob);
         }).catch(()=>{});
     }catch(e){}
@@ -456,6 +464,15 @@ async function openAccountCenter(){
         <div class="td-actions"><button type="button" class="td-btn" onclick="changePassword()">修改密码</button></div>
         <p id="pw-status" class="td-status" role="status"></p>
         <p class="td-note">改成功后其他设备会掉线需要重新登录，这台机器不受影响。</p>
+      </div>
+      <div class="td-group-label">账号</div>
+      <div class="td-group">
+        ${tdValueRow('当前登录',escapeHtml(((a.user&&(a.user.nickname||a.user.username))||state.user&&(state.user.nickname||state.user.username)||'—')))}
+        <div class="td-actions">
+          <button type="button" class="td-btn" onclick="switchAccount()">切换账号</button>
+          <button type="button" class="td-btn-danger" onclick="logoutUser()">退出登录</button>
+        </div>
+        <p class="td-note">切换账号会退出当前账号并直接弹出登录框，不用等整页刷新。</p>
       </div>
       <div class="td-group-label">去过的城市</div>
       <div class="td-group">${(a.cities_seen||[]).length
@@ -907,7 +924,7 @@ function cmCardHTML(p, withId) {
     const coverSrc = API_BASE + (thumbs[0] || imgs[0] || "");
     const fullSrc = API_BASE + (imgs[0] || "");
     const cover = hasImg
-        ? '<img src="' + escapeHtml(coverSrc) + '" alt="帖子配图" loading="lazy"'
+        ? '<img src="' + escapeHtml(coverSrc) + '" alt="帖子配图" loading="lazy" decoding="async"'
           + ' onclick="event.stopPropagation();viewPostImage(\'' +
           escapeHtml(fullSrc).replace(/'/g, "%27") + '\')"'
           + ' ondblclick="dblLikePost(' + p.id + ',this)">'

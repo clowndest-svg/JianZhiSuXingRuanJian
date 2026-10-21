@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 57;
+const APP_BUILD = 58;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -429,8 +429,7 @@ async function initAuthAndData() {
         updateUserUI(displayName(state.user));
         // 来电不要求用户先打开消息页：恢复会话后就把实时连接拉起来。
         if (typeof connectChat === "function") connectChat();
-        await syncRemoteDashboard();
-        await syncRemoteCharts();
+        await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
     } else {
         updateUserUI(null);
         openAuthModal();
@@ -984,8 +983,7 @@ async function logNaturalMeal() {
         callNativeToast(data.msg || "记录成功！");
         callNativeVibrate(80);
         input.value = "";
-        await syncRemoteDashboard();
-        await syncRemoteCharts();
+        await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
     } catch (e) {
         reportWriteFailure(e, "这餐饮食");
     }
@@ -997,12 +995,12 @@ async function editMealRecord(id) {
     if(value===null)return;
     const cal=Number(value);
     if(!Number.isFinite(cal)||cal<0||cal>10000){callNativeToast("请填写0–10000之间的热量");return;}
-    try{await postApi(`/api/records/food/${id}/update`,{cal});await syncRemoteDashboard();await syncRemoteCharts();wbRows=null;}
+    try{await postApi(`/api/records/food/${id}/update`,{cal});await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);wbRows=null;}
     catch(e){reportWriteFailure(e,"餐食修正");}
 }
 async function deleteMealRecord(id) {
     if(!window.confirm("删除这笔餐食记录？相关统计会重新计算。"))return;
-    try{await postApi(`/api/records/food/${id}/delete`,{});await syncRemoteDashboard();await syncRemoteCharts();wbRows=null;}
+    try{await postApi(`/api/records/food/${id}/delete`,{});await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);wbRows=null;}
     catch(e){reportWriteFailure(e,"餐食删除");}
 }
 function renderMealDiary() {
@@ -1096,8 +1094,7 @@ async function saveWeight() {
         callNativeToast(data.msg || "体重打卡成功！");
         callNativeVibrate(100);
         input.value = "";
-        await syncRemoteDashboard();
-        await syncRemoteCharts();
+        await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
     } catch (e) {
         reportWriteFailure(e, "体重打卡");
     }
@@ -1112,8 +1109,7 @@ async function completeWorkoutToday() {
         callNativeToast(data.msg || "🏆 今日训练打卡成功！");
         callNativeVibrate(200);
         callNativeBeep();
-        await syncRemoteDashboard();
-        await syncRemoteCharts();
+        await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
     } catch (e) {
         reportWriteFailure(e, "训练打卡");
     }
@@ -1156,8 +1152,7 @@ async function upgradeCyclePlan() {
         callNativeToast(data.msg || "🎉 周期身材照已记录！");
         callNativeVibrate(250);
         callNativeBeep();
-        await syncRemoteDashboard();
-        await syncRemoteCharts();
+        await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
     } catch (e) {
         reportWriteFailure(e, "周期身材照");
     }
@@ -1765,16 +1760,43 @@ function switchAuthTab(tab) {
     const formR = document.getElementById("auth-form-register");
 
     if (tab === "login") {
-        btnL.classList.add("active");
-        btnR.classList.remove("active");
+        btnL.classList.add("active"); btnR.classList.remove("active");
+        btnL.setAttribute("aria-selected", "true"); btnR.setAttribute("aria-selected", "false");
         formL.style.display = "block";
         formR.style.display = "none";
     } else {
-        btnR.classList.add("active");
-        btnL.classList.remove("active");
+        btnR.classList.add("active"); btnL.classList.remove("active");
+        btnR.setAttribute("aria-selected", "true"); btnL.setAttribute("aria-selected", "false");
         formR.style.display = "block";
         formL.style.display = "none";
     }
+}
+
+function paintChoice(groupId, value) {
+    document.querySelectorAll("#" + groupId + " .choice-card, #" + groupId + " .seg-toggle button").forEach(function (btn) {
+        const on = btn.getAttribute("data-value") === String(value);
+        btn.classList.toggle("active", on);
+        if (btn.getAttribute("role") === "radio") btn.setAttribute("aria-checked", on ? "true" : "false");
+    });
+}
+
+function pickDiningOption(value) {
+    const el = document.getElementById("prof-dining-mode");
+    if (el) el.value = value;
+    paintChoice("prof-dining-cards", value);
+    if (typeof syncDiningMode === "function") syncDiningMode(value);
+}
+
+function pickProfileScene(value) {
+    const el = document.getElementById("prof-scene");
+    if (el) el.value = value;
+    paintChoice("prof-scene-cards", value);
+}
+
+function pickRegisterGender(value) {
+    const el = document.getElementById("reg-gender");
+    if (el) el.value = value;
+    paintChoice("reg-gender-seg", value);
 }
 
 function toggleEmailLogin() {
@@ -1824,8 +1846,7 @@ async function applyAuthSuccess(data, message) {
     closeAuthModal();
     callNativeToast(message);
     callNativeVibrate(100);
-    await syncRemoteDashboard();
-    await syncRemoteCharts();
+    await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
     if (typeof refreshAccount === "function") refreshAccount().catch(() => {});
 }
 
@@ -1865,8 +1886,7 @@ async function submitLogin() {
             closeAuthModal();
             callNativeToast(`🎉 欢迎回来，${escapeHtml(displayName(data))}！专属真实档案已同步！`);
             callNativeVibrate(100);
-            await syncRemoteDashboard();
-            await syncRemoteCharts();
+            await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
         } else {
             callNativeToast(data.detail || "登录失败，请核对密码");
         }
@@ -1919,8 +1939,7 @@ async function submitRegister() {
             closeAuthModal();
             callNativeToast(`🎉 注册成功！专属公网地址已开通！`);
             callNativeVibrate(150);
-            await syncRemoteDashboard();
-            await syncRemoteCharts();
+            await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
         } else {
             callNativeToast(data.detail || "注册失败，该用户名可能已被占用");
         }
@@ -1929,17 +1948,29 @@ async function submitRegister() {
     }
 }
 
-async function logoutUser() {
+async function logoutUser(reload = true) {
     try { if (state.token) await rawPostApi("/api/logout",{}); }
     catch(e) { callNativeToast("本机已退出；网络异常，服务器会话尚未撤销"); }
     sessionGeneration++;
-    localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(USER_KEY);localStorage.removeItem("QINGSU_AVATAR_DATA");
+    localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(USER_KEY);localStorage.removeItem("QINGSU_AVATAR_DATA");localStorage.removeItem("QINGSU_AVATAR_SRC");
     state=JSON.parse(JSON.stringify(INITIAL_STATE)); wbRows=null;
     uncertainWrites.clear();pendingWrites.clear();
     resetPrivateUI();updateUserUI(null);
     const chat=document.getElementById("chat-messages-box");if(chat)chat.innerHTML="";
-    closeAuthModal();openAuthModal();
-    if (window.location.reload) window.location.reload();
+    closeAuthModal();
+    if (reload) {
+        openAuthModal();
+        if (window.location.reload) window.location.reload();
+    }
+}
+
+/** 切换账号：清会话但不刷新页面，直接弹登录框，换号不用等整页重载。 */
+async function switchAccount() {
+    const dlg = document.getElementById("account-tools-dialog");
+    if (dlg && dlg.open) dlg.close();
+    await logoutUser(false);
+    openAuthModal();
+    callNativeToast("已退出当前账号，请登录另一个账号");
 }
 
 function resetPrivateUI(){
@@ -2702,6 +2733,9 @@ function openProfileModal() {
     
     const diningEl = document.getElementById("prof-dining-mode");
     if (diningEl) diningEl.value = state.diningMode || p.diningMode || "takeout";
+    paintChoice("prof-dining-cards", diningEl ? diningEl.value : "takeout");
+    const sceneEl = document.getElementById("prof-scene");
+    if (sceneEl) { sceneEl.value = p.scene || "home"; paintChoice("prof-scene-cards", sceneEl.value); }
 
     switchShapeGender(g, false);
     document.getElementById("profile-modal").classList.add("show");
@@ -2738,8 +2772,16 @@ async function saveCustomProfile() {
         closeProfileModal();
         callNativeToast("🎉 专属身材方案已定制保存！");
         callNativeVibrate(150);
-        await syncRemoteDashboard();
-        await syncRemoteCharts();
+        // 先把顶栏按刚保存的值画出来：dashboard 若慢一拍或失败，也不会看起来"没生效"
+        state.profile.height = height;
+        state.profile.weightJin = weightJin;
+        state.profile.targetWeightJin = targetWeightJin;
+        state.currentWeightJin = weightJin;
+        if (state.calculated) {
+            state.calculated.summaryText = `${height}cm · ${weightJin}斤 · ${getGoalName(state.profile.goalType)}`;
+        }
+        renderDashboard();
+        await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
     } catch (e) {
         reportWriteFailure(e, "档案方案");
     }
@@ -2766,8 +2808,7 @@ async function saveProfileSilent() {
                 scene: p.scene
             })
         });
-        await syncRemoteDashboard();
-        await syncRemoteCharts();
+        await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
     } catch(e) {
         console.warn("Silent profile sync error", e);
     }
@@ -3889,8 +3930,7 @@ async function forceEatTakeout() {
         const d = await postApi("/api/food/log",
             { slot: "晚餐", food_name: (a.name || "外卖") + "（坚持下单）", cal: a.cal });
         callNativeToast(`已按审核估算把 ${d.cal || a.cal} kcal 记入今日晚餐。加练不会自动出现，需要你自己打卡。`);
-        await syncRemoteDashboard();
-        await syncRemoteCharts();
+        await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
     } catch (e) {
         reportWriteFailure(e, "这笔外卖记账");
     }

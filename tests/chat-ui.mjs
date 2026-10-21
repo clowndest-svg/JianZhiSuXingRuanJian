@@ -247,6 +247,25 @@ try {
     assert.match(delivered.message.sticker_meta.license,/未声明/);
     checks.push('LIVE network meme catalog search/import/send with original source');
   }
+  // 档案保存：顶栏的身高与体重都要立刻变，训练场景选择要走自定义卡片
+  await page.evaluate(()=>openProfileModal());
+  await page.locator('#prof-height').fill('173');
+  await page.locator('#prof-weight-jin').fill('138.5');
+  await page.locator('#prof-scene-cards .choice-card[data-value="band"]').click();
+  assert.equal(await page.locator('#prof-scene').inputValue(),'band');
+  await page.evaluate(()=>saveCustomProfile());
+  await page.waitForFunction(()=>{const t=document.getElementById('header-profile-summary')?.innerText||'';return /173cm/.test(t)&&/138\.5斤/.test(t);},null,{timeout:15000});
+  const dash=await api('/api/dashboard',null,a.token);
+  assert.equal(dash.current_weight_jin,138.5);
+  assert.equal(dash.profile.height,173);
+  checks.push('saving the profile updates the header weight and height immediately');
+  // 账号入口：个人中心要能切换账号/退出登录
+  await page.evaluate(()=>openAccountCenter());
+  await page.waitForSelector('#account-tools-dialog[open]');
+  const accountText=await page.locator('#account-tools-dialog').textContent();
+  assert.match(accountText,/切换账号/);assert.match(accountText,/退出登录/);
+  await page.evaluate(()=>document.getElementById('account-tools-dialog').close());
+  checks.push('account center exposes switch-account and logout');
   await page.evaluate(()=>dmCleanup());
   assert.equal(await page.evaluate(()=>dmUi.record===null&&dmUi.draft===null),true);
   // An old response must not insert data into a later account.

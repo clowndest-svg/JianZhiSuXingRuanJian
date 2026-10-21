@@ -2475,9 +2475,10 @@ def main():
           'internal = ("消息存法", "判据", "验收方式"' in _vj
           and "bullets = [b for b in bullets if not any(word in b for word in internal)]" in _vj, "")
     _up = _repo_file("app/src/main/java/com/fitcoach/shapemaster/UpdateManager.java")
-    check("更新弹窗改用自定义正文（有行距与字号，不再是一坨默认小字）",
-          "setView(body)" in _up and "COMPLEX_UNIT_SP, 15f" in _up
-          and "setLineSpacing(" in _up, "")
+    check("更新弹窗改用自定义正文（可滚动、有行距与字号，不再是一坨默认小字）",
+          ("setView(body)" in _up or "setView(scroll)" in _up)
+          and "COMPLEX_UNIT_SP, 15f" in _up
+          and "setLineSpacing(" in _up and "ScrollView" in _up, "")
     check("更新弹窗不硬编没量过的下载速度",
           "0.33 MB/s" not in _up and "UpdateCopy.body(" in _up, "")
     check("弹窗文案抽成纯 Java 类，能脱离 Android 运行时真跑",

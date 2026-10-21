@@ -135,9 +135,16 @@ public final class UpdateManager {
         body.setLineSpacing(6f * density, 1.08f);
         body.setPadding((int) (24 * density), (int) (10 * density),
                 (int) (24 * density), (int) (6 * density));
+        // 更新说明一长就把按钮挤出屏幕：套一层可滚动容器，高度封顶在屏幕一半左右。
+        body.setMaxHeight(Math.round(act.getResources().getDisplayMetrics().heightPixels * 0.52f));
+        body.setVerticalScrollBarEnabled(true);
+        android.widget.ScrollView scroll = new android.widget.ScrollView(act);
+        scroll.addView(body, new android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT));
         new android.app.AlertDialog.Builder(act)
                 .setTitle("发现新版本 " + (name.isEmpty() ? r : name))
-                .setView(body)
+                .setView(scroll)
                 .setPositiveButton("去下载", (d, w) -> {
                     try {
                         Intent it = new Intent(Intent.ACTION_VIEW, Uri.parse(url));

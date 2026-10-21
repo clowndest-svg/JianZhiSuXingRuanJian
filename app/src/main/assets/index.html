@@ -1231,23 +1231,46 @@
 
                 <!-- 就餐模式选择 (满足用户需求：上班没时间做菜只能点外卖) -->
                 <div class="form-group">
-                    <label class="form-label" for="prof-dining-mode">平时就餐生活方式</label>
-                    <select id="prof-dining-mode" class="input-control" onchange="syncDiningMode(this.value)">
-                        <option value="cook">🍳 自己做菜备餐（精细控油控盐）</option>
-                        <option value="takeout">🛵 上班族纯外卖（靠外卖智能控卡吃瘦）</option>
-                        <option value="hybrid">🍱 混合模式（中午外卖 + 早晚自制）</option>
-                    </select>
+                    <div class="form-label">平时就餐生活方式</div>
+                    <input type="hidden" id="prof-dining-mode" value="takeout">
+                    <div class="choice-list" id="prof-dining-cards" role="radiogroup" aria-label="平时就餐生活方式">
+                        <button type="button" class="choice-card" data-value="cook" role="radio" aria-checked="false" onclick="pickDiningOption('cook')">
+                            <span class="choice-emoji">🍳</span>
+                            <span class="choice-body"><b>自己做菜备餐</b><small>精细控油控盐</small></span>
+                        </button>
+                        <button type="button" class="choice-card active" data-value="takeout" role="radio" aria-checked="true" onclick="pickDiningOption('takeout')">
+                            <span class="choice-emoji">🛵</span>
+                            <span class="choice-body"><b>上班族纯外卖</b><small>靠外卖智能控卡吃瘦</small></span>
+                        </button>
+                        <button type="button" class="choice-card" data-value="hybrid" role="radio" aria-checked="false" onclick="pickDiningOption('hybrid')">
+                            <span class="choice-emoji">🍱</span>
+                            <span class="choice-body"><b>混合模式</b><small>中午外卖 + 早晚自制</small></span>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- 训练计划场景选择 -->
                 <div class="form-group">
-                    <label class="form-label" for="prof-scene">形体训练计划场景</label>
-                    <select id="prof-scene" class="input-control">
-                        <option value="home">🏠 居家自重经典循环 (深蹲+臀桥+俯卧撑+快走)</option>
-                        <option value="band">🎗️ 弹力带/轻器械塑形 (背部肩线与胸腹紧致)</option>
-                        <option value="cardio">🏃 户外快走慢跑刷脂 (高频燃脂心率模式)</option>
-                        <option value="gym">🏋️ 健身房器械力量进阶</option>
-                    </select>
+                    <div class="form-label">形体训练计划场景</div>
+                    <input type="hidden" id="prof-scene" value="home">
+                    <div class="choice-list" id="prof-scene-cards" role="radiogroup" aria-label="形体训练计划场景">
+                        <button type="button" class="choice-card active" data-value="home" role="radio" aria-checked="true" onclick="pickProfileScene('home')">
+                            <span class="choice-emoji">🏠</span>
+                            <span class="choice-body"><b>居家自重经典循环</b><small>深蹲 · 臀桥 · 俯卧撑 · 快走</small></span>
+                        </button>
+                        <button type="button" class="choice-card" data-value="band" role="radio" aria-checked="false" onclick="pickProfileScene('band')">
+                            <span class="choice-emoji">🎗️</span>
+                            <span class="choice-body"><b>弹力带 / 轻器械塑形</b><small>背部肩线与胸腹紧致</small></span>
+                        </button>
+                        <button type="button" class="choice-card" data-value="cardio" role="radio" aria-checked="false" onclick="pickProfileScene('cardio')">
+                            <span class="choice-emoji">🏃</span>
+                            <span class="choice-body"><b>户外快走慢跑刷脂</b><small>高频燃脂心率模式</small></span>
+                        </button>
+                        <button type="button" class="choice-card" data-value="gym" role="radio" aria-checked="false" onclick="pickProfileScene('gym')">
+                            <span class="choice-emoji">🏋️</span>
+                            <span class="choice-body"><b>健身房器械力量进阶</b><small>大重量复合动作</small></span>
+                        </button>
+                    </div>
                 </div>
 
                 <button class="btn-primary" style="margin-top: 14px;" onclick="saveCustomProfile()">
@@ -1311,16 +1334,16 @@
 
     <!-- ================= 核心弹窗 3: 多用户真实登录与注册弹窗 ================= -->
     <div class="modal-overlay" id="auth-modal">
-        <div class="modal-card" role="dialog" aria-modal="true" aria-label="用户登录与多账号管理" tabindex="-1">
+        <div class="modal-card auth-card" role="dialog" aria-modal="true" aria-label="用户登录与多账号管理" tabindex="-1">
             <div class="modal-header">
-                <h2 id="auth-modal-title">👤 用户登录与多账号管理</h2>
+                <h2 id="auth-modal-title">登录 / 注册</h2>
                 <button class="modal-close-btn" onclick="closeAuthModal()">✕</button>
             </div>
             <div class="modal-body">
                 <!-- 登录 / 注册 切换条 -->
-                <div class="dining-mode-bar" style="margin-bottom: 14px;">
-                    <button class="dining-mode-btn active" id="btn-auth-tab-login" onclick="switchAuthTab('login')">登录现有账号</button>
-                    <button class="dining-mode-btn" id="btn-auth-tab-register" onclick="switchAuthTab('register')">注册新用户</button>
+                <div class="auth-tabs" role="tablist" aria-label="登录或注册">
+                    <button class="auth-tab active" id="btn-auth-tab-login" role="tab" aria-selected="true" onclick="switchAuthTab('login')">登录现有账号</button>
+                    <button class="auth-tab" id="btn-auth-tab-register" role="tab" aria-selected="false" onclick="switchAuthTab('register')">注册新用户</button>
                 </div>
 
                 <!-- 登录表单 -->
@@ -1350,9 +1373,9 @@
                         </div>
                         <button class="btn-primary" style="margin-top: 6px;" onclick="submitEmailLogin()">用邮箱验证码登录</button>
                     </div>
-                    <div style="font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 10px;">
-                        新用户请切换至【注册新用户】录入个人真实身高体重
-                        · <button type="button" class="link-like" onclick="toggleEmailLogin()">用邮箱验证码登录</button>
+                    <div class="auth-foot">
+                        新用户请切换至【注册新用户】录入个人真实身高体重<br>
+                        <button type="button" class="link-like" onclick="toggleEmailLogin()">用邮箱验证码登录</button>
                         · <button type="button" class="link-like" onclick="openForgotPassword()">忘记密码</button>
                     </div>
                 </div>
@@ -1380,11 +1403,12 @@
                     </div>
                     <div class="form-row-2 form-group">
                         <div>
-                            <label class="form-label" for="reg-gender">性别</label>
-                            <select id="reg-gender" class="input-control">
-                                <option value="female">女 (女性代谢)</option>
-                                <option value="male">男 (男性代谢)</option>
-                            </select>
+                            <div class="form-label" id="reg-gender-label">性别</div>
+                            <input type="hidden" id="reg-gender" value="female">
+                            <div class="seg-toggle" id="reg-gender-seg" role="radiogroup" aria-labelledby="reg-gender-label">
+                                <button type="button" class="active" data-value="female" role="radio" aria-checked="true" onclick="pickRegisterGender('female')">女</button>
+                                <button type="button" data-value="male" role="radio" aria-checked="false" onclick="pickRegisterGender('male')">男</button>
+                            </div>
                         </div>
                         <div>
                             <label class="form-label" for="reg-age">年龄</label>
