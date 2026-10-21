@@ -45,11 +45,26 @@ def upload(path, blob, mime, token, target=None):
     return data
 
 
+def new_code(email, purpose='register'):
+    """自检自己往目标库签发验证码：夹具不需要真的收信，注册仍走真实校验。"""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import server as srv
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        return srv._issue_email_code(conn, email, purpose)
+    finally:
+        conn.close()
+
+
 try:
     users = []
     for name in names:
+        email = name + '@releasecheck.invalid'
         status, data = api('/api/register', dict(username=name, password='Release!' + secrets.token_hex(12), age=30,
-            height=170, weight_jin=160, target_weight_jin=140))
+            height=170, weight_jin=160, target_weight_jin=140,
+            email=email, email_code=new_code(email)))
         assert status == 200, (status, data)
         users.append(data)
     a, b = users
