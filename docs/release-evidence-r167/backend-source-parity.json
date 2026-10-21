@@ -1,8 +1,8 @@
 {
-  "matched_source_revision": "ffd6c0400ff1041919aade899f49f976fb7a15de",
+  "matched_source_revision": "2b230c3246bd0de379b7e7d60eeb8f79f4e2c7c7",
   "files": {
     "server.py": "34ef24fbb56755b8b5113096cd0c4699b87718df04de9ae8f2408ef662d3c4e0",
-    "app_modules/stickers.py": "262a216e14d26b599747edcd39ac62c597fba55a7379116f4746f7f4195097a2",
+    "app_modules/stickers.py": "30b4aafc78a935b6a91f51dc21ccff3b0e19db3d72a7132fd7a925f057c15c9f",
     "app_modules/audio.py": "5824c33896cfe5bae11b7f149a8ca38778bcb455d3d6b0e2c1e4ca54a27efc5d",
     "app_modules/openmoji-17.json": "ab33081bdffa9ce33662881d8dfcebfa8b9c1e0065aa948fb26e6eca43f573fd"
   }

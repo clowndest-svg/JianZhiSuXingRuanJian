@@ -1,17 +1,17 @@
 {
   "monitor": {
-    "checked_at": 1792574221,
+    "checked_at": 1792574821,
     "qingsu": "active",
     "qingsu-llama": "active",
     "qingsu-backup.timer": "active",
     "qingsu-cert-renew.timer": "active",
     "ready": 200,
-    "free_disk_mb": 30522,
-    "backup_age_hours": 0.1,
-    "certificate_hours_left": 129.9,
-    "requests": 154,
+    "free_disk_mb": 30516,
+    "backup_age_hours": 0.2,
+    "certificate_hours_left": 129.8,
+    "requests": 9,
     "errors_5xx": 0,
-    "p95_ms": 52.9,
+    "p95_ms": 3.5,
     "sqlite_lock_errors": 0,
     "cache_degraded": 0,
     "problems": []

@@ -1,7 +1,7 @@
 {
-  "release": "r39574222714",
-  "source_revision": "ffd6c0400ff1041919aade899f49f976fb7a15de",
-  "backup": "/opt/qingsu/backups/release-20261021-171351",
+  "release": "r39576152381",
+  "source_revision": "2b230c3246bd0de379b7e7d60eeb8f79f4e2c7c7",
+  "backup": "/opt/qingsu/backups/release-20261021-172743",
   "units": {
     "qingsu": "active",
     "qingsu-ops": "active",
@@ -23,5 +23,7 @@
   },
   "admin_revision": "e320b4987eb3faf17d885e4d943b4fa775c370f6",
   "admin_console_sha256": "6f1f15fd61d7d3a1056d21dcc51e0b8321b1d2729db482d61faf62e0d5cd2b3f",
-  "ci_incoming": "empty; deploy tar archived at /opt/qingsu/ci-archive/r167-20261021"
+  "ci_incoming": "empty; deploy tar archived at /opt/qingsu/ci-archive/r167-20261021",
+  "initial_release": "r39574222714 / ffd6c04 (2.2.6 build 51)",
+  "followup": "backend-only title truncation; APK unchanged"
 }

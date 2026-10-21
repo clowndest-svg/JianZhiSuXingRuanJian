@@ -1,0 +1,25 @@
+{
+  "dry_run": {
+    "fixtures": [
+      "releasecheck_web_b29b09dde5_a",
+      "releasecheck_web_b29b09dde5_b"
+    ],
+    "ids": [
+      428,
+      429
+    ],
+    "media": [
+      "bd1745f75d2d47ca9484bcff48d967b2.gif"
+    ],
+    "real_users_before": 2
+  },
+  "result": {
+    "fixture_users_removed": 2,
+    "fixture_files_removed": 1,
+    "real_users_unchanged": 2,
+    "foreign_key_errors": 0,
+    "integrity": "ok"
+  },
+  "stored_title": "握手你好很高兴认识你动态微信表情",
+  "stored_title_length": 16
+}

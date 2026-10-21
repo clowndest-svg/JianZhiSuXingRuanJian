@@ -97,12 +97,12 @@
     "text meme generator fallback",
     "search thumbnails and caches"
   ],
-  "postdeploy": "r39574222714 / ffd6c04 / 2.2.6 (51); public browser 6/6; monitor problems []",
+  "postdeploy": "r39576152381 / 2b230c3 / build 51; public browser 6/6; title length 16; monitor problems []",
   "live": {
-    "release": "r39574222714",
-    "source_revision": "ffd6c0400ff1041919aade899f49f976fb7a15de",
+    "release": "r39576152381",
+    "source_revision": "2b230c3246bd0de379b7e7d60eeb8f79f4e2c7c7",
     "build": 51,
     "apk_sha256": "270d0fa50f12d9ffb00402534542fe1b398e41bd809f7e6f3a78036916a52447",
-    "backup": "/opt/qingsu/backups/release-20261021-171351"
+    "backup": "/opt/qingsu/backups/release-20261021-172743"
   }
 }
