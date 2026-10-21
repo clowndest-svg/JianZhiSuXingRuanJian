@@ -1,0 +1,29 @@
+{
+  "release": "r39581453023",
+  "source_revision": "37dd0a3a778cb2c425449f3ec13355cc6d113975",
+  "status": "ok",
+  "build": 52,
+  "version_name": "2.2.7",
+  "apk_sha256": "5d2ad7e0c0acceed5bfcbd9a6b895e445fb71804667d912291c36e085a7f42e3",
+  "apk_size": 5443094,
+  "chat_turn": true,
+  "public_call": {
+    "build": 52,
+    "checks": [
+      "public incoming call overlay reached the other browser",
+      "public forced-TURN relay pair and remote audio",
+      "public mute disables local track",
+      "public hangup reaches the other end"
+    ],
+    "stats": {
+      "connection": "connected",
+      "pair": true,
+      "local": "relay",
+      "remote": "relay",
+      "audio": true,
+      "remoteTracks": true
+    },
+    "errors": []
+  },
+  "rate_store": "redis"
+}

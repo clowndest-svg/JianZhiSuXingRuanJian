@@ -47,7 +47,7 @@ node tests/frontend-integration.mjs
 ./gradlew.bat assembleRelease lintRelease
 ```
 
-语音测试与服务端需要 `ffmpeg` / `ffprobe`（包含 libopus），可用 `QINGSU_FFMPEG` / `QINGSU_FFPROBE` 指定路径。`node tests/chat-ui.mjs` 额外需要 Playwright 和 Chromium，使用18006端口及独立临时数据库，不访问生产数据；`QINGSU_LIVE_STICKERS=1` 才执行真实网络来源检查。
+语音测试与服务端需要 `ffmpeg` / `ffprobe`（包含 libopus），可用 `QINGSU_FFMPEG` / `QINGSU_FFPROBE` 指定路径。`node tests/chat-ui.mjs` 额外需要 Playwright 和 Chromium，使用18006端口及独立临时数据库，不访问生产数据；`QINGSU_LIVE_STICKERS=1` 才执行真实网络来源检查。`node tests/call-ui.mjs` 是双浏览器真实语音通话（强制 TURN relay），需要环境变量 `QINGSU_TURN_SECRET` 与服务器 `/opt/qingsu/keys/turn-secret` 同值；只在本机内存中使用，不打印、不进仓库，CI 不跑这条。
 
 `requirements.lock` 锁定本轮验证的完整 Python 依赖。CI 执行真实框架集成测试、语义契约、原回归台、前端逻辑和 Android 构建/lint。CI 只生成未签名 APK；生产签名在受保护的发布机完成。
 

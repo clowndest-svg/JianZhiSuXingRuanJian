@@ -1,0 +1,18 @@
+{
+  "build": 52,
+  "checks": [
+    "public incoming call overlay reached the other browser",
+    "public forced-TURN relay pair and remote audio",
+    "public mute disables local track",
+    "public hangup reaches the other end"
+  ],
+  "stats": {
+    "connection": "connected",
+    "pair": true,
+    "local": "relay",
+    "remote": "relay",
+    "audio": true,
+    "remoteTracks": true
+  },
+  "errors": []
+}

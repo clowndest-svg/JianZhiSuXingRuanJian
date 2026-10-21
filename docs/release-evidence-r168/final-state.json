@@ -1,0 +1,28 @@
+{
+  "checked_at": 1792577539,
+  "users": 2,
+  "fixtures": 0,
+  "fk": 0,
+  "integrity": "ok",
+  "qa": "inactive",
+  "coturn": "active",
+  "monitor": {
+    "checked_at": 1792577539,
+    "qingsu": "active",
+    "qingsu-llama": "active",
+    "qingsu-backup.timer": "active",
+    "qingsu-cert-renew.timer": "active",
+    "coturn": "active",
+    "ready": 200,
+    "turn": true,
+    "free_disk_mb": 30526,
+    "backup_age_hours": 0.0,
+    "certificate_hours_left": 129.0,
+    "requests": 157,
+    "errors_5xx": 0,
+    "p95_ms": 40.0,
+    "sqlite_lock_errors": 0,
+    "cache_degraded": 0,
+    "problems": []
+  }
+}

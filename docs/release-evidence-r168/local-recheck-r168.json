@@ -82,5 +82,12 @@
     "auth": "REST short-lived HMAC",
     "ttl": 3600
   },
-  "postdeploy": "pending"
+  "postdeploy": "r39581453023 / 37dd0a3 / 2.2.7 (52); public forced-relay call 4/4; monitor coturn active/turn true/problems []",
+  "live": {
+    "release": "r39581453023",
+    "source_revision": "37dd0a3a778cb2c425449f3ec13355cc6d113975",
+    "build": 52,
+    "apk_sha256": "5d2ad7e0c0acceed5bfcbd9a6b895e445fb71804667d912291c36e085a7f42e3",
+    "backup": "/opt/qingsu/backups/release-20261021-181022"
+  }
 }

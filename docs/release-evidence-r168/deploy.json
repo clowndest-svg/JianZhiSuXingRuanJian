@@ -1,0 +1,32 @@
+{
+  "release": "r39581453023",
+  "source_revision": "37dd0a3a778cb2c425449f3ec13355cc6d113975",
+  "backup": "/opt/qingsu/backups/release-20261021-181022",
+  "units": {
+    "qingsu": "active",
+    "qingsu-ops": "active",
+    "qingsu-llama": "active",
+    "qingsu-push.timer": "active",
+    "qingsu-backup.timer": "active",
+    "qingsu-monitor.timer": "active",
+    "qingsu-cert-renew.timer": "active",
+    "qingsu-qa": "inactive",
+    "coturn": "active"
+  },
+  "mail": {
+    "code": 0,
+    "mail": "up"
+  },
+  "counter_audit": {
+    "ok": true,
+    "drift": [],
+    "count": 0
+  },
+  "turn": {
+    "configured": true,
+    "secret_matches_coturn": true,
+    "ports": "udp 3478 + 49160-49180",
+    "ttl": 3600
+  },
+  "ci_incoming": "empty; deploy tar archived at /opt/qingsu/ci-archive/r168-20261021"
+}
