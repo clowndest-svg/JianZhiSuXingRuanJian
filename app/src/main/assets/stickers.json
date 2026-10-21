@@ -1,0 +1,204 @@
+{
+ "version": 1,
+ "items": [
+  {
+   "id": "smile",
+   "name": "微笑",
+   "group": "日常",
+   "pinyin": "weixiao",
+   "tags": [
+    "笑",
+    "开心",
+    "hi"
+   ],
+   "file": "stickers/smile.svg"
+  },
+  {
+   "id": "laugh",
+   "name": "大笑",
+   "group": "日常",
+   "pinyin": "daxiao",
+   "tags": [
+    "哈哈",
+    "好笑"
+   ],
+   "file": "stickers/laugh.svg"
+  },
+  {
+   "id": "cry",
+   "name": "委屈",
+   "group": "日常",
+   "pinyin": "weiqu",
+   "tags": [
+    "哭",
+    "想哭"
+   ],
+   "file": "stickers/cry.svg"
+  },
+  {
+   "id": "cheer",
+   "name": "加油",
+   "group": "减脂",
+   "pinyin": "jiayou",
+   "tags": [
+    "打气",
+    "坚持"
+   ],
+   "file": "stickers/cheer.svg"
+  },
+  {
+   "id": "water",
+   "name": "喝水",
+   "group": "减脂",
+   "pinyin": "heshui",
+   "tags": [
+    "水杯",
+    "排钠"
+   ],
+   "file": "stickers/water.svg"
+  },
+  {
+   "id": "veg",
+   "name": "吃菜",
+   "group": "减脂",
+   "pinyin": "chicai",
+   "tags": [
+    "蔬菜",
+    "沙拉"
+   ],
+   "file": "stickers/veg.svg"
+  },
+  {
+   "id": "run",
+   "name": "跑步",
+   "group": "减脂",
+   "pinyin": "paobu",
+   "tags": [
+    "运动",
+    "有氧"
+   ],
+   "file": "stickers/run.svg"
+  },
+  {
+   "id": "fit",
+   "name": "举铁",
+   "group": "减脂",
+   "pinyin": "jutie",
+   "tags": [
+    "力量",
+    "撸铁"
+   ],
+   "file": "stickers/fit.svg"
+  },
+  {
+   "id": "shy",
+   "name": "害羞",
+   "group": "日常",
+   "pinyin": "haixiu",
+   "tags": [
+    "脸红",
+    "羞"
+   ],
+   "file": "stickers/shy.svg"
+  },
+  {
+   "id": "sleep",
+   "name": "睡了",
+   "group": "日常",
+   "pinyin": "shuile",
+   "tags": [
+    "晚安",
+    "困"
+   ],
+   "file": "stickers/sleep.svg"
+  },
+  {
+   "id": "love",
+   "name": "喜欢",
+   "group": "日常",
+   "pinyin": "xihuan",
+   "tags": [
+    "爱心",
+    "爱了"
+   ],
+   "file": "stickers/love.svg"
+  },
+  {
+   "id": "cool",
+   "name": "酷",
+   "group": "日常",
+   "pinyin": "ku",
+   "tags": [
+    "墨镜",
+    "帅"
+   ],
+   "file": "stickers/cool.svg"
+  },
+  {
+   "id": "angry",
+   "name": "生气",
+   "group": "日常",
+   "pinyin": "shengqi",
+   "tags": [
+    "气",
+    "怒"
+   ],
+   "file": "stickers/angry.svg"
+  },
+  {
+   "id": "sweat",
+   "name": "无语",
+   "group": "日常",
+   "pinyin": "wuyu",
+   "tags": [
+    "汗",
+    "尴尬"
+   ],
+   "file": "stickers/sweat.svg"
+  },
+  {
+   "id": "drool",
+   "name": "馋了",
+   "group": "日常",
+   "pinyin": "chanle",
+   "tags": [
+    "想吃",
+    "馋"
+   ],
+   "file": "stickers/drool.svg"
+  },
+  {
+   "id": "party",
+   "name": "庆祝",
+   "group": "日常",
+   "pinyin": "qingzhu",
+   "tags": [
+    "恭喜",
+    "牛"
+   ],
+   "file": "stickers/party.svg"
+  },
+  {
+   "id": "win",
+   "name": "胜利",
+   "group": "日常",
+   "pinyin": "shengli",
+   "tags": [
+    "耶",
+    "V"
+   ],
+   "file": "stickers/win.svg"
+  },
+  {
+   "id": "beg",
+   "name": "拜托",
+   "group": "日常",
+   "pinyin": "baituo",
+   "tags": [
+    "求了",
+    "拜托"
+   ],
+   "file": "stickers/beg.svg"
+  }
+ ]
+}

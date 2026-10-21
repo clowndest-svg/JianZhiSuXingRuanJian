@@ -5,7 +5,7 @@ import math
 import uuid
 import logging
 from app_modules.features import share_settings, public_projection, DEFAULT_SCOPE
-from app_modules import mailer, geo, geoip, community, chat
+from app_modules import mailer, geo, geoip, community, chat, audio, stickers
 import io
 import mimetypes
 import os
@@ -509,6 +509,8 @@ def _community_schema(c):
         ("media_size", "INTEGER NOT NULL DEFAULT 0"),
         ("media_w", "INTEGER NOT NULL DEFAULT 0"),
         ("media_h", "INTEGER NOT NULL DEFAULT 0"),
+        ("media_dur", "INTEGER NOT NULL DEFAULT 0"),
+        ("media_meta", "TEXT NOT NULL DEFAULT '{}'"),
     ])
     c.execute("""
     CREATE TABLE IF NOT EXISTS user_blocks (
@@ -538,6 +540,12 @@ def _community_schema(c):
     c.execute("""
     CREATE TABLE IF NOT EXISTS media_uploads (
         name TEXT NOT NULL PRIMARY KEY, user_id INTEGER NOT NULL, created_at TEXT NOT NULL)""")
+    _ensure_columns(c, "media_uploads", [
+        ("kind", "TEXT NOT NULL DEFAULT ''"),
+        ("mime", "TEXT NOT NULL DEFAULT ''"),
+        ("duration", "INTEGER NOT NULL DEFAULT 0"),
+        ("metadata", "TEXT NOT NULL DEFAULT '{}'"),
+    ])
     c.execute("CREATE INDEX IF NOT EXISTS idx_media_owner ON media_uploads(user_id, name)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status, id DESC)")
     taken = {r[0] for r in c.execute("SELECT public_id FROM users WHERE public_id != ''")}
@@ -3326,6 +3334,29 @@ def get_exercise_poses(v: str = None):
     raise HTTPException(status_code=404, detail="动作姿态表未部署")
 
 
+# ── 官方表情包 ────────────────────────────────────────────
+# App 从 assets 直读，网页版必须也能取到：否则网页私聊里表情包位置是一片空白，
+# 而 App 里明明是好的，这种差别在现场最难解释。
+@app.get("/stickers.json")
+def get_stickers_manifest(v: str = None):
+    path = os.path.join(WEB_DIR, "stickers.json")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="application/json", headers=_asset_headers(path, v))
+    raise HTTPException(status_code=404, detail="官方表情包未部署")
+
+
+@app.get("/stickers/{name}")
+def get_sticker_file(name: str, v: str = None):
+    # 名字只认「点号空格短横下划线」，挡住 ../ 与绝对路径；前缀也拼不进去
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name or ""):
+        raise HTTPException(status_code=404, detail="表情文件名不对")
+    path = os.path.join(WEB_DIR, "stickers", name)
+    if not os.path.isfile(path) or not os.path.realpath(path).startswith(
+            os.path.realpath(os.path.join(WEB_DIR, "stickers")) + os.sep):
+        raise HTTPException(status_code=404, detail="表情不存在")
+    return FileResponse(path, media_type="image/svg+xml", headers=_asset_headers(path, v))
+
+
 @app.get("/qingsu.apk")
 def download_apk(v: str = None):
     apk_path = os.path.join(WEB_DIR, "qingsu.apk")
@@ -3446,11 +3477,11 @@ def private_photo(name: str, expires: int=0, signature: str="",audience:int=0):
     expected=hmac.new(media_key(),payload.encode(),hashlib.sha256).hexdigest()
     if expires<int(time.time()) or expires>time.time()+901 or not secrets.compare_digest(signature,expected):
         raise HTTPException(status_code=404,detail="照片不存在或授权已失效")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp|gif|mp4|webm)",name,re.I):
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp|gif|mp4|webm|m4a|ogg|aac)",name,re.I):
         raise HTTPException(status_code=404,detail="照片不存在")
     path=os.path.join(UPLOAD_DIR,name)
     if not os.path.isfile(path):raise HTTPException(status_code=404,detail="照片不存在")
-    mime=mimetypes.guess_type(name)[0] or "application/octet-stream"
+    mime = "audio/ogg" if name.endswith(".audio.ogg") else (mimetypes.guess_type(name)[0] or "application/octet-stream")
     return FileResponse(path,media_type=mime,
                         headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"})
 
@@ -3616,6 +3647,8 @@ DM_RATE_LIMIT = 30
 DM_MEDIA_RATE_LIMIT = 12
 DM_IMAGE_MAX = 8 * 1024 * 1024
 DM_VIDEO_MAX = 30 * 1024 * 1024
+DM_AUDIO_MAX = 5 * 1024 * 1024
+DM_AUDIO_SEC_MAX = 600
 FOLLOW_RATE_LIMIT = 20
 FEEDBACK_RATE_LIMIT = 5
 
@@ -3790,10 +3823,15 @@ class ProfileCommunityReq(ValidatedModel):
 class DmSendReq(ValidatedModel):
     to: int
     text: str = ""
-    # text / sticker / image / video；媒体消息的正文留空，文件名单独给
+    # text / sticker / image / video / audio；媒体消息的正文留空，文件名单独给
     kind: str = "text"
     media_name: str = ""
     request_id: Optional[str] = None
+    duration: Optional[int] = None
+
+
+class StickerImportReq(ValidatedModel):
+    id: str = Field(min_length=1, max_length=512)
 
 
 class DmReadReq(ValidatedModel):
@@ -4655,7 +4693,7 @@ def mutual_follow(conn, a, b) -> bool:
                                  (b, a)).fetchone())
 
 
-def _deliver(conn, sender, to_id, body, request_id, kind="text", media_name=""):
+def _deliver(conn, sender, to_id, body, request_id, kind="text", media_name="", dur=0):
     """落库 + 更新会话摘要，返回 (message dict, 是否重复)。WS 与 HTTP 兜底共用这一条路，
     两条路各写一份存法就会出现"走 WS 发的重进 App 找不到"。"""
     to = conn.execute("SELECT id FROM users WHERE id=?", (to_id,)).fetchone()
@@ -4665,23 +4703,28 @@ def _deliver(conn, sender, to_id, body, request_id, kind="text", media_name=""):
         raise HTTPException(status_code=400, detail="不能给自己发私信")
     if _blocked(conn, sender["id"], to_id):
         raise HTTPException(status_code=403, detail="对方不接受你的私信")
-    mime, size, width, height = "", 0, 0, 0
-    if kind in ("image", "video"):
-        if not mutual_follow(conn, sender["id"], int(to_id)):
+    mime, size, width, height, metadata = "", 0, 0, 0, "{}"
+    if kind in ("image", "video", "audio") or (kind == "sticker" and media_name):
+        if kind in ("image", "video") and not mutual_follow(conn, sender["id"], int(to_id)):
             raise HTTPException(status_code=403, detail="互相关注后才能发图片和视频")
-        if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp|mp4|webm)", media_name or "", re.I):
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp|gif|mp4|webm|m4a|ogg|aac)", media_name or "", re.I):
             raise HTTPException(status_code=400, detail="媒体文件名不对")
-        owned = conn.execute("SELECT 1 FROM media_uploads WHERE user_id=? AND name=?",
+        owned = conn.execute("SELECT * FROM media_uploads WHERE user_id=? AND name=?",
                              (sender["id"], media_name)).fetchone()
-        if not owned or not os.path.isfile(os.path.join(UPLOAD_DIR, media_name)):
-            raise HTTPException(status_code=400, detail="这个媒体不是你刚上传的，请重新选择")
-        mime = mimetypes.guess_type(media_name)[0] or (
-            "video/mp4" if media_name.lower().endswith(".mp4") else
-            "video/webm" if media_name.lower().endswith(".webm") else "image/jpeg")
-        try:
-            size = os.path.getsize(os.path.join(UPLOAD_DIR, media_name))
-        except OSError:
-            size = 0
+        path = os.path.join(UPLOAD_DIR, media_name)
+        if not owned or not os.path.isfile(path):
+            raise HTTPException(status_code=400, detail="这个媒体不是你上传的，请重新选择")
+        if kind in ("audio", "sticker") and owned["kind"] != kind:
+            raise HTTPException(status_code=400, detail="上传的媒体类型不匹配")
+        mime = owned["mime"] or mimetypes.guess_type(media_name)[0] or "image/jpeg"
+        if kind in ("image", "video") and not mime.startswith(kind + "/"):
+            raise HTTPException(status_code=400, detail="上传的媒体类型不匹配")
+        if kind == "audio":
+            dur = int(owned["duration"] or 0)
+            if dur <= 0 or dur > DM_AUDIO_SEC_MAX:
+                raise HTTPException(status_code=400, detail="语音时长不对")
+        metadata = owned["metadata"] or "{}"
+        size = os.path.getsize(path)
     key = (request_id or "")[:64] or None
     if key:
         hit = conn.execute("SELECT * FROM messages WHERE from_id=? AND request_id=?",
@@ -4693,8 +4736,8 @@ def _deliver(conn, sender, to_id, body, request_id, kind="text", media_name=""):
     try:
         cur = conn.execute(
             "INSERT INTO messages(conv_key,from_id,to_id,body,request_id,created_at,kind,media_name,"
-            "media_mime,media_size,media_w,media_h) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (ck, sender["id"], to_id, body, key, stamp, kind, media_name, mime, size, width, height))
+            "media_mime,media_size,media_w,media_h,media_dur,media_meta) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (ck, sender["id"], to_id, body, key, stamp, kind, media_name, mime, size, width, height, dur, metadata))
     except sqlite3.IntegrityError:
         # WS 和 HTTP 兜底可能同时投同一条：UNIQUE(from_id,request_id) 顶回后到的那个。
         # 回到"已存在"这条路，别让用户看到一条发送失败的红字。
@@ -4707,7 +4750,7 @@ def _deliver(conn, sender, to_id, body, request_id, kind="text", media_name=""):
     lo, hi = ck.split(chat.CONV_SEP)
     conn.execute("INSERT OR IGNORE INTO conversations(conv_key,a_id,b_id,created_at) VALUES (?,?,?,?)",
                  (ck, int(lo), int(hi), stamp))
-    preview = {"image": "［图片］", "video": "［视频］"}.get(kind, body[:60])
+    preview = {"image": "［图片］", "video": "［视频］", "audio": "［语音］", "sticker": "［表情］"}.get(kind, body[:60])
     conn.execute("UPDATE conversations SET last_body=?, last_at=?, last_from=? WHERE conv_key=?",
                  (preview, stamp, sender["id"], ck))
     conn.commit()
@@ -4720,8 +4763,14 @@ def _message_dict(row):
     recalled = (row["recalled_at"] or "") if "recalled_at" in names else ""
     kind = (row["kind"] or "text") if "kind" in names else "text"
     media = (row["media_name"] or "") if "media_name" in names else ""
+    dur = int(row["media_dur"] or 0) if "media_dur" in names else 0
+    try:
+        meta = json.loads(row["media_meta"] or "{}") if "media_meta" in names else {}
+    except (TypeError, ValueError):
+        meta = {}
     return {"id": int(row["id"]), "conv_key": row["conv_key"], "from_id": int(row["from_id"]),
-            "to_id": int(row["to_id"]),
+            "to_id": int(row["to_id"]), "duration": 0 if recalled else dur,
+            "sticker_meta": {} if recalled else meta,
             # 撤回之后正文与媒体都不再外发，只留一个时间戳让两端都能显示"撤回了一条消息"
             "body": "" if recalled else row["body"], "recalled_at": recalled,
             "kind": kind,
@@ -4736,9 +4785,22 @@ def _push(uid, payload):
     """尽力投递：连接断了不算失败，消息已经在库里，对方下次拉历史一定拿得到。"""
     for sock in list(_WS_HUB.get(int(uid), ())):
         try:
-            asyncio.ensure_future(sock.send_json(payload))
+            # HTTP handlers run in AnyIO worker threads. Queue on the socket's
+            # owning loop; ensure_future in a worker silently lost every push.
+            loop = _WS_LOOPS.get(sock)
+            if loop and not loop.is_closed():
+                loop.call_soon_threadsafe(_queue_push, sock, payload)
+        except RuntimeError:
+            pass
+
+
+def _queue_push(sock, payload):
+    async def deliver():
+        try:
+            await sock.send_json(payload)
         except Exception:
             pass
+    asyncio.create_task(deliver())
 
 
 @app.post("/api/chat/ticket")
@@ -4766,14 +4828,36 @@ def _valid_video(path: str) -> str:
     return ""
 
 
+def _valid_audio(path: str) -> str:
+    """只真的音频容器头：WebM、MP4/M4A、Ogg、ADTS(AAC)。
+    三个浏览器各发一种格式，头对不上一概不收，省得对方点开是个转圈。"""
+    with open(path, "rb") as handle:
+        head = handle.read(16)
+    if head.startswith(b"\x1aE\xdf\xa3"):
+        return "audio/webm"
+    if head.startswith(b"OggS"):
+        return "audio/ogg"
+    if len(head) >= 2 and head[0] == 0xff and head[1] & 0xf6 == 0xf0:
+        return "audio/aac"
+    if len(head) >= 12 and head[4:8] == b"ftyp" and head[8:12] != b"qt  ":
+        return "audio/mp4"
+    return ""
+
+
 @app.post("/api/chat/media")
 async def chat_media(to: int = Form(...), file: UploadFile = File(...),
                      user: dict = Depends(get_current_user)):
-    """私聊图片/视频。和文字不同，这里要求互相关注：陌生人不该直接往你窗口里塞文件。
-    图片沿用发帖配图那套重编码；视频只收 MP4/WebM，最大 30MB，边收边写盘。"""
+    """Private images/videos require mutual follow; voice follows text permissions."""
     ok, _where, _n = rate_hit("dmmedia:%d" % user["id"], DM_MEDIA_RATE_LIMIT, 60)
     if not ok:
-        raise HTTPException(status_code=429, detail="发图/视频太频繁了，歇一会儿")
+        raise HTTPException(status_code=429, detail="发送媒体太频繁了，歇一会儿")
+    duration = 0
+    content_type = (file.content_type or "").lower()
+    kind = "image" if content_type.startswith("image/") else (
+        "video" if content_type.startswith("video/") else
+        "audio" if content_type.startswith("audio/") else "")
+    if not kind:
+        raise HTTPException(status_code=400, detail="只支持图片、视频或语音")
     conn = get_db()
     try:
         target = conn.execute("SELECT id FROM users WHERE id=?", (int(to),)).fetchone()
@@ -4783,16 +4867,10 @@ async def chat_media(to: int = Form(...), file: UploadFile = File(...),
             raise HTTPException(status_code=400, detail="不能给自己发私信")
         if _blocked(conn, user["id"], int(to)):
             raise HTTPException(status_code=403, detail="对方不接受你的私信")
-        if not mutual_follow(conn, user["id"], int(to)):
+        if kind in ("image", "video") and not mutual_follow(conn, user["id"], int(to)):
             raise HTTPException(status_code=403, detail="互相关注后才能发图片和视频")
     finally:
         conn.close()
-
-    content_type = (file.content_type or "").lower()
-    kind = "image" if content_type.startswith("image/") else (
-        "video" if content_type.startswith("video/") else "")
-    if not kind:
-        raise HTTPException(status_code=400, detail="只支持图片或视频")
 
     if kind == "image":
         raw = await file.read()
@@ -4815,6 +4893,45 @@ async def chat_media(to: int = Form(...), file: UploadFile = File(...),
         with open(os.path.join(UPLOAD_DIR, name), "wb") as handle:
             handle.write(blob)
         mime, size = "image/jpeg", len(blob)
+    elif kind == "audio":
+        name = uuid.uuid4().hex + ".audio.part"
+        path = os.path.join(UPLOAD_DIR, name)
+        size = 0
+        try:
+            with open(path, "wb") as handle:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > DM_AUDIO_MAX:
+                        raise HTTPException(status_code=413, detail="语音太长或太大了（上限 5MB）")
+                    handle.write(chunk)
+            mime = _valid_audio(path)
+            if not mime:
+                raise HTTPException(status_code=400, detail="只支持 WebM / MP4 / Ogg / AAC 语音")
+            if size <= 0:
+                raise HTTPException(status_code=400, detail="语音是空的")
+        except Exception:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            raise
+        name = uuid.uuid4().hex + ".audio.ogg"
+        try:
+            duration, mime = await asyncio.to_thread(audio.normalize, path, os.path.join(UPLOAD_DIR, name), mime, DM_AUDIO_SEC_MAX)
+        except audio.AudioUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error))
+        except audio.InvalidAudio as error:
+            raise HTTPException(status_code=400, detail=str(error))
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        size = os.path.getsize(os.path.join(UPLOAD_DIR, name))
+        width = height = 0
     else:
         name = uuid.uuid4().hex + ".video.part"
         path = os.path.join(UPLOAD_DIR, name)
@@ -4846,13 +4963,102 @@ async def chat_media(to: int = Form(...), file: UploadFile = File(...),
 
     conn = get_db()
     try:
-        conn.execute("INSERT OR REPLACE INTO media_uploads(name, user_id, created_at) VALUES (?,?,?)",
-                     (name, user["id"], _now()))
+        conn.execute("INSERT OR REPLACE INTO media_uploads(name, user_id, created_at, kind, mime, duration) VALUES (?,?,?,?,?,?)",
+                     (name, user["id"], _now(), kind, mime, duration))
         conn.commit()
     finally:
         conn.close()
     return {"code": 0, "name": name, "kind": kind, "mime": mime, "size": size,
-            "width": width, "height": height, "url": signed_photo("/uploads/" + name)}
+            "width": width, "height": height, "duration": duration, "url": signed_photo("/uploads/" + name)}
+
+
+def _official_sticker_ids():
+    try:
+        with open(os.path.join(WEB_DIR, "stickers.json"), encoding="utf-8") as handle:
+            return {item["id"] for item in json.load(handle).get("items", [])
+                    if isinstance(item, dict) and re.fullmatch(r"[a-z0-9_-]{1,32}", item.get("id", ""))}
+    except (OSError, ValueError, TypeError):
+        return set()
+
+
+def _store_sticker(raw, user, metadata=None):
+    if not raw or len(raw) > GIF_MAX:
+        raise HTTPException(status_code=413, detail="表情图片不能超过 8MB")
+    from PIL import Image, ImageOps
+    try:
+        if raw[:6] in (b"GIF87a", b"GIF89a"):
+            _gif_checks(raw)
+            with Image.open(io.BytesIO(raw)) as image:
+                for index in range(getattr(image, "n_frames", 1)):
+                    image.seek(index)
+                    image.load()
+            name, blob, mime = uuid.uuid4().hex + ".gif", raw, "image/gif"
+        else:
+            with Image.open(io.BytesIO(raw)) as image:
+                if image.format not in ("JPEG", "PNG", "WEBP") or image.width * image.height > 20000000:
+                    raise ValueError("格式或尺寸不支持")
+                image = ImageOps.exif_transpose(image).convert("RGBA")
+                image.thumbnail((720, 720))
+                output = io.BytesIO()
+                image.save(output, format="PNG")
+                blob = output.getvalue()
+            name, mime = uuid.uuid4().hex + ".png", "image/png"
+    except (ValueError, OSError, Image.DecompressionBombError) as error:
+        raise HTTPException(status_code=400, detail="请选择有效的 JPEG、PNG、WebP 或 GIF 表情图片") from error
+    path = os.path.join(UPLOAD_DIR, name)
+    with open(path, "wb") as handle:
+        handle.write(blob)
+    conn = get_db()
+    try:
+        conn.execute("INSERT INTO media_uploads(name,user_id,created_at,kind,mime,metadata) VALUES (?,?,?,?,?,?)",
+                     (name, user["id"], _now(), "sticker", mime, json.dumps(metadata or {}, ensure_ascii=False)))
+        conn.commit()
+    except Exception:
+        os.unlink(path)
+        raise
+    finally:
+        conn.close()
+    return {"code": 0, "name": name, "url": signed_photo("/uploads/" + name), "kind": "sticker"}
+
+
+@app.get("/api/chat/stickers/search")
+def search_chat_stickers(q: str = "", provider: str = 'openmoji', user: dict = Depends(get_current_user)):
+    ok, *_ = rate_hit("sticker-search:%d" % user["id"], 20, 60)
+    if not ok:
+        raise HTTPException(status_code=429, detail="搜索太频繁了，歇一会儿")
+    if not q.strip() or len(q) > 60:
+        raise HTTPException(status_code=400, detail="请输入 1 到 60 字的表情关键词")
+    try:
+        result = stickers.search(q, user["id"], media_key(), provider=provider)
+        return {"code": 0, "items": result["items"], "provider": result.get('provider', provider), "available": True}
+    except stickers.ProviderUnavailable:
+        return {"code": 0, "items": [], "provider": provider, "available": False,
+                "detail": "网络表情来源暂不可用，请稍后重试或上传自己的表情"}
+    except stickers.InvalidSticker as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+@app.post("/api/chat/stickers/import")
+def import_chat_sticker(req: StickerImportReq, user: dict = Depends(get_current_user)):
+    ok, *_ = rate_hit("dmmedia:%d" % user["id"], DM_MEDIA_RATE_LIMIT, 60)
+    if not ok:
+        raise HTTPException(status_code=429, detail="发送媒体太频繁了，歇一会儿")
+    try:
+        raw, metadata = stickers.import_media(req.id, user["id"], media_key())
+    except stickers.InvalidSticker as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except stickers.ProviderUnavailable:
+        raise HTTPException(status_code=503, detail="网络表情暂时下载不了，请重新搜索或上传自己的表情")
+    return _store_sticker(raw, user, metadata)
+
+
+@app.post("/api/chat/stickers/upload")
+async def upload_chat_sticker(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    ok, *_ = rate_hit("dmmedia:%d" % user["id"], DM_MEDIA_RATE_LIMIT, 60)
+    if not ok:
+        raise HTTPException(status_code=429, detail="发送媒体太频繁了，歇一会儿")
+    raw = await file.read(GIF_MAX + 1)
+    return await asyncio.to_thread(_store_sticker, raw, user)
 
 
 @app.post("/api/chat/send")
@@ -4861,21 +5067,26 @@ def chat_send(req: DmSendReq, user: dict = Depends(get_current_user)):
     if not ok:
         raise HTTPException(status_code=429, detail="发送太快了，歇一会儿")
     kind = (req.kind or "text").strip().lower()
-    if kind not in ("text", "sticker", "image", "video"):
+    if kind not in ("text", "sticker", "image", "video", "audio"):
         raise HTTPException(status_code=400, detail="不认识的消息类型")
-    if kind in ("text", "sticker"):
+    dur = 0  # _deliver reads verified duration from the owned upload.
+    if kind == "sticker" and req.media_name:
+        body = ""
+    elif kind in ("text", "sticker"):
         try:
             body = community.clean_body(req.text, 1000 if kind == "text" else 16, "私信")
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error))
         if not body.strip():
             raise HTTPException(status_code=400, detail="消息不能为空")
+        if kind == "sticker" and body.startswith("qs:") and body[3:] not in _official_sticker_ids():
+            raise HTTPException(status_code=400, detail="官方表情不存在")
     else:
         body = ""
     conn = get_db()
     try:
         msg, dup = _deliver(conn, user, int(req.to), body, req.request_id,
-                            kind=kind, media_name=req.media_name)
+                            kind=kind, media_name=req.media_name, dur=dur)
     finally:
         conn.close()
     if not dup:
@@ -5003,6 +5214,7 @@ def chat_recall(req: RecallReq, user: dict = Depends(get_current_user)):
 
 
 _WS_HUB = {}
+_WS_LOOPS = {}
 _ws_stats = {"peaks": 0, "rejected": 0, "handed_off": 0}
 
 
@@ -5029,6 +5241,7 @@ async def chat_socket(ws: WebSocket, ticket: str = ""):
         return
     await ws.accept()
     _WS_HUB.setdefault(uid, []).append(ws)
+    _WS_LOOPS[ws] = asyncio.get_running_loop()
     _ws_stats["peaks"] = max(_ws_stats["peaks"], sum(len(v) for v in _WS_HUB.values()))
     _presence_touch(uid)
     await ws.send_json({"t": "ready", "server_time": int(time.time()), "online": _ws_stats["peaks"]})
@@ -5085,6 +5298,7 @@ async def chat_socket(ws: WebSocket, ticket: str = ""):
     except Exception:
         pass
     finally:
+        _WS_LOOPS.pop(ws, None)
         socks = _WS_HUB.get(uid, [])
         if ws in socks:
             socks.remove(ws)

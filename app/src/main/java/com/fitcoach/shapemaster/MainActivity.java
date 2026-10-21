@@ -13,6 +13,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.webkit.ValueCallback;
 import android.webkit.GeolocationPermissions;
+import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -127,6 +128,17 @@ public class MainActivity extends Activity {
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
+            // WebChromeClient 的授权回调在 UI 线程，和系统权限结果、生命周期串行处理。
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                handleMediaPermissionRequest(request);
+            }
+
+            @Override
+            public void onPermissionRequestCanceled(PermissionRequest request) {
+                if (pendingMediaRequest == request) pendingMediaRequest = null;
+            }
+
             @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
                 // 网页问"能不能拿位置"时，先看 Android 运行时权限在不在：
@@ -257,6 +269,78 @@ public class MainActivity extends Activity {
     private GeolocationPermissions.Callback pendingGeoCallback;
     private String pendingGeoOrigin;
 
+    // ================= 麦克风授权：私聊语音 =================
+    private static final int MIC_PERM_REQUEST = 2028;
+    private PermissionRequest pendingMediaRequest;
+    // 网页取消或退后台后，旧系统弹窗仍可能返回；结果回来前不接下一次授权。
+    private boolean micPermissionInFlight;
+    private boolean mediaPermissionStopped;
+    private boolean mediaPermissionDestroyed;
+
+    private boolean canGrantMediaPermission() {
+        return !mediaPermissionStopped && !mediaPermissionDestroyed && !isFinishing() && !isDestroyed();
+    }
+
+    private boolean hasMicrophonePermission() {
+        return checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private static boolean isTrustedAudioRequest(PermissionRequest request) {
+        Uri origin = request.getOrigin();
+        if (origin == null || !"https".equals(origin.getScheme())
+                || !"appassets.androidplatform.net".equals(origin.getHost())
+                || origin.getUserInfo() != null || (origin.getPort() != -1 && origin.getPort() != 443)) {
+            return false;
+        }
+        String[] resources = request.getResources();
+        // 混合摄像头/DRM 等资源的请求也整条拒绝，不转交系统授权。
+        return resources != null && resources.length == 1
+                && PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resources[0]);
+    }
+
+    private void settleMediaRequest(PermissionRequest request, boolean granted) {
+        if (request == null) return;
+        try {
+            if (granted && canGrantMediaPermission() && isTrustedAudioRequest(request)
+                    && hasMicrophonePermission()) {
+                request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+            } else {
+                request.deny();
+            }
+        } catch (Exception ignored) {
+            // WebView 已取消的请求不能再回调。
+        }
+    }
+
+    private void denyPendingMediaRequest() {
+        PermissionRequest request = pendingMediaRequest;
+        pendingMediaRequest = null;
+        settleMediaRequest(request, false);
+    }
+
+    private void handleMediaPermissionRequest(PermissionRequest request) {
+        if (request == null) return;
+        denyPendingMediaRequest();
+        if (!canGrantMediaPermission() || !isTrustedAudioRequest(request) || micPermissionInFlight) {
+            settleMediaRequest(request, false);
+            return;
+        }
+        if (hasMicrophonePermission()) {
+            settleMediaRequest(request, true);
+            return;
+        }
+        pendingMediaRequest = request;
+        micPermissionInFlight = true;
+        try {
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, MIC_PERM_REQUEST);
+        } catch (Exception e) {
+            micPermissionInFlight = false;
+            denyPendingMediaRequest();
+            Toast.makeText(this, "系统没让调起录音授权，语音发不了", Toast.LENGTH_LONG).show();
+        }
+    }
+
     private boolean hasLocationPermission() {
         return checkSelfPermission("android.permission.ACCESS_COARSE_LOCATION")
                 == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -305,6 +389,24 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == MIC_PERM_REQUEST) {
+            if (!micPermissionInFlight) return;
+            micPermissionInFlight = false;
+            PermissionRequest request = pendingMediaRequest;
+            pendingMediaRequest = null;
+            if (request == null) return;
+            boolean granted = permissions != null && grantResults != null
+                    && permissions.length == 1 && grantResults.length == 1
+                    && android.Manifest.permission.RECORD_AUDIO.equals(permissions[0])
+                    && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    && hasMicrophonePermission();
+            settleMediaRequest(request, granted);
+            if (!granted && canGrantMediaPermission()) {
+                Toast.makeText(this, "没给麦克风权限，语音发不了；可以在系统设置里打开",
+                        Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (requestCode == GEO_PERM_REQUEST) {
             boolean ok = false;
             for (int i = 0; i < grantResults.length; i++) {
@@ -332,6 +434,19 @@ public class MainActivity extends Activity {
                 }
             });
         }
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        mediaPermissionStopped = false;
+    }
+
+    @Override
+    protected void onStop() {
+        mediaPermissionStopped = true;
+        denyPendingMediaRequest();
+        super.onStop();
     }
 
     @Override
@@ -414,6 +529,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        mediaPermissionDestroyed = true;
+        denyPendingMediaRequest();
         if(filePathCallback!=null){filePathCallback.onReceiveValue(null);filePathCallback=null;}
         if (webView != null) {
             webView.destroy();

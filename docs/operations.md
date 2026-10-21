@@ -30,6 +30,12 @@
 
 ## 正式服务
 
+### r164 私聊媒体验收
+
+服务器需安装 `ffmpeg` / `ffprobe` 并包含 libopus。发布入口 `verify_live.py` 在11项常规冒烟之后调用 `verify-chat-media-live.py`：验证18枚官方素材、真实语音转码/时长/发送/重试/归属、图片表情与撤回；仅按随机夹具账号ID回收数据库行和对应媒体。隔离QA自动根据 `QINGSU_VERIFY_DB` 选择其 qa-uploads，生产使用 `/opt/qingsu/uploads`。
+
+显式 `QINGSU_VERIFY_NETWORK=1 python3 .../verify-chat-media-live.py` 可检查真实 OpenMoji 搜索、下载与带署名发送。外部来源网络故障不应被当作本地流程通过；CI中的网络界面检查使用固定夹具，正式网络实测另记。OpenMoji17.0.0索引和许可说明位于app_modules，原图按需下载；Commons从当前主机握手超时，界面明确提示。两来源都不是全网梗图搜索。
+
 - `systemctl status qingsu`：专用账号运行，只读代码，数据与媒体目录可写。
 - 发布脚本显式将代码/网页目录设为root所有、目录755、文件644，避免Windows归档的可写权限进入服务器。服务账号不可写`server.py`；数据和媒体继续由服务账号管理。
 - `systemctl list-timers qingsu-*`：备份每日03:10（随机最多5分钟）；短期证书每日00/12点检查（随机最多10分钟）；监控每5分钟。

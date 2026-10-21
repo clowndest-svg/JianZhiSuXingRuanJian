@@ -76,11 +76,12 @@ def main():
         env['PYTHONDONTWRITEBYTECODE'] = '1'
         db_path = os.path.join(temp, 'DB', 'qingsu.db')
         log_path = os.path.join(temp, 'server.log')
+        server_log = open(log_path, 'w')
         proc = subprocess.Popen(
             [sys.executable, '-m', 'uvicorn', 'server:app', '--host', '127.0.0.1',
              '--port', '18002', '--no-access-log'],
             cwd=str(ROOT), env=env,
-            stdout=open(log_path, 'w'), stderr=subprocess.STDOUT)
+            stdout=server_log, stderr=subprocess.STDOUT)
         try:
             for _ in range(100):
                 try:
@@ -250,7 +251,10 @@ def main():
             check('全程没有 5xx', five == 0, {'5xx': five, 'total': len(STATUSES)})
         finally:
             proc.terminate()
-            proc.wait(timeout=15)
+            try:
+                proc.wait(timeout=15)
+            finally:
+                server_log.close()
         text = Path(log_path).read_text(errors='replace').lower()
         locked = text.count('database is locked')
         check('全程没有 database is locked', locked == 0, {'locked': locked})

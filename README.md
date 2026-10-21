@@ -1,6 +1,8 @@
 # 轻塑：Android 与网页记录工具
 
-当前版本：r161 / Android **2.2.0（45）**。
+当前版本：r164 / Android **2.2.3（48）**。
+
+r164 补齐私聊语音（录制、试听、确认发送、Opus 播放）、18枚轻小团表情、光标插入普通表情和附件预览。收到消息和发送回执不再重建输入栏或播放器。网络表情可选 OpenMoji / Wikimedia Commons，保留作者、来源和许可；OpenMoji 使用17.0.0固定索引，实际图片按需从上游下载。Commons 在当前服务器网络下握手超时，会如实提示不可用；这不是全网梗图搜索，可上传自己的 GIF/图片表情。
 
 - 网页：https://124.220.54.64/
 - 介绍与教程：https://124.220.54.64/about
@@ -12,7 +14,7 @@
 
 r161 增加最近7天/30天回顾与图片导出、最多8人的共同目标、网页安装与更新引导、可选的浏览器后台消息提醒。共同目标只公开组内昵称与达成天数；推送订阅与登录会话绑定，退出或撤销会话后停止。通知不含正文或身体数据，送达取决于浏览器推送服务、网络与系统设置；安卓原生后台私信推送尚未接入厂商通道。
 
-后台 `/ops/` 新增域名/证书/发布状态、邮件配置及TLS连接/认证检查。邮件账号尚未提供，默认不配置、不启用；连接检查不发送邮件、不代表邮件投递成功。
+后台 `/ops/` 提供域名/证书/发布状态、邮件配置及TLS连接/认证检查。QQ 邮箱通道已接入，配置与投递记录见运维手册；界面的连接检查本身不发送邮件。
 
 支持本人饮食、体重、训练、饮水和周期记录；训练动作配火柴人关键帧演示（按姿态表逐帧插值画出关节轨迹，矢状面区分远近侧、发力肌群高亮；不宣称是真人示范，也不再依赖 WebGL）；支持浏览器与 App 内定位（经纬度就近认城市，离锚点太远就照实说没认出来、改手填；城市与忌口决定外卖点单顺序与食谱冲突标注，无商家数据）与个人中心（头像、改密码、邮箱绑定与验证码找回密码，发信通道未配置时如实拒绝）；提供历史修正/删除/补录、份量确认、分享权限与撤销、完整日确认、离线草稿、Android 每日提醒及 CSV 保存。所有热量、预算、宏量和消耗均为估算；系统不分析照片，也不提供个人诊疗或营养处方。
 
@@ -27,11 +29,17 @@ python -m venv .venv
 .venv/Scripts/python tests/test_ai_contract.py
 .venv/Scripts/python tests/test_update_copy.py
 .venv/Scripts/python tests/test_companion.py
+.venv/Scripts/python tests/test_chat_media.py
+.venv/Scripts/python tests/test_native_media_contract.py
+.venv/Scripts/python tests/test_consistency.py
+.venv/Scripts/python tests/test_multiprocess.py
 .venv/Scripts/python tests/legacy-backend.py
 node tests/legacy-frontend.mjs
 node tests/frontend-integration.mjs
 ./gradlew.bat assembleRelease lintRelease
 ```
+
+语音测试与服务端需要 `ffmpeg` / `ffprobe`（包含 libopus），可用 `QINGSU_FFMPEG` / `QINGSU_FFPROBE` 指定路径。`node tests/chat-ui.mjs` 额外需要 Playwright 和 Chromium，使用18006端口及独立临时数据库，不访问生产数据；`QINGSU_LIVE_STICKERS=1` 才执行真实网络来源检查。
 
 `requirements.lock` 锁定本轮验证的完整 Python 依赖。CI 执行真实框架集成测试、语义契约、原回归台、前端逻辑和 Android 构建/lint。CI 只生成未签名 APK；生产签名在受保护的发布机完成。
 

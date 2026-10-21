@@ -628,6 +628,7 @@ async function submitForgotReset(){
    ============================================================ */
 const CM_LIMITS = { title: 20, post: 1000, postImages: 9, comment: 500, dm: 1000, bio: 60, feedback: 800, cmtImages: 3 };
 const CM_TOOLS = ["recipes", "workout", "body", "takeout", "charts", "gemini"];
+let cmGeneration = 0;
 const cm = {
     feed: "latest", items: [], cursor: 0, more: false, loading: false, loaded: false,
     msgTab: "chats", convs: [], notices: [], loadingMsg: false, msgAgain: false,
@@ -642,7 +643,9 @@ const cm = {
 /* 换账号必须把社区与私信的内存状态一起清掉：
    上一版的教训是 sessionGeneration 只管住了请求，界面还留着上一个人的列表。 */
 function resetCommunity() {
+    cmGeneration++; dmCleanup();
     if (cm.ws) { try { cm.ws.onclose = null; cm.ws.close(); } catch (e) {} cm.ws = null; }
+    clearTimeout(cm.wsTimer);
     cm.wsRetry = 0;
     cm.wsState = "idle";
     cm.feed = "latest"; cm.items = []; cm.cursor = 0; cm.more = false;
@@ -695,6 +698,7 @@ function openPage(name, arg) {
     if (top && top.name === name && String(top.arg == null ? "" : top.arg) === String(arg == null ? "" : arg)) {
         return false;
     }
+    if (top && top.name === "dm") { dmCleanup(); cm.thread = null; }
     QS_PAGES.push({ name: name, arg: arg, title: def.title, render: def.render });
     // 给每一页补一条历史记录：安卓的返回键/侧滑手势走的是 WebView.canGoBack，
     // 没有这条记录时它只能退出 App（机主截图里的"再按一次退出"）。
@@ -711,6 +715,7 @@ function closePage(fromHistory) {
         // 否则历史里会留下一条"已经关掉的页"，再按返回要空按一次。
         if (history.state && history.state.qsPage) { history.back(); return true; }
     }
+    if (QS_PAGES[QS_PAGES.length - 1].name === "dm") { dmCleanup(); cm.thread = null; }
     QS_PAGES.pop();
     if (QS_PAGES.length) { qsRenderTop(); return true; }
     const layer = cmEl("page-layer");
@@ -722,6 +727,7 @@ function closePage(fromHistory) {
 /** 真在页面里（不是被压在栈底下）才算"当前页"，切 tab 时要先把栈清空。 */
 function qsPageOpen() { return QS_PAGES.length > 0; }
 function qsCloseAllPages() {
+    dmCleanup(); cm.thread = null;
     const depth = QS_PAGES.length;
     while (QS_PAGES.length) { QS_PAGES.pop(); }
     // 切 tab 时把页面层整个收掉：历史也要一起退回去，不然返回键会按到"幽灵页"
@@ -1899,9 +1905,10 @@ function closeThread() {
 
 async function refreshThread() {
     if (!cm.thread) return;
-    const uid = cm.thread.partner.id;
+    const uid = cm.thread.partner.id, scope = dmScope();
     try {
         const r = await getJson("/api/chat/messages?with_user=" + uid + "&limit=30");
+        if (!dmScopeAlive(scope) || !dmIsVisible()) return;
         // A pre-community local session may not have an id cached. The server
         // knows the token owner, so hydrate it before assigning message sides.
         const meId = Number(r.me_id);
@@ -1927,7 +1934,7 @@ async function refreshThread() {
 }
 
 function paintThread() {
-    if (!cm.thread) return;
+    if (!cm.thread || !dmIsVisible()) return;
     const me = state.user && state.user.id;
     const p = cm.thread.partner;
     const title = cmEl("pl-title");
@@ -1946,17 +1953,12 @@ function paintThread() {
     }
     const host = cmEl("thread-bubbles");
     if (!host) return;
-    const rows = [];
-    if (cm.thread.more) rows.push('<button type="button" class="td-btn td-btn-quiet" style="align-self:center" onclick="loadOlderMessages()">看更早的消息</button>');
-    rows.push(...cm.bubbles.map(m => cmBubbleHTML(m, me)));
-    Object.keys(cm.pending).forEach(rid => rows.push(cmBubbleHTML(cm.pending[rid].msg, me, true)));
-    host.innerHTML = rows.join("");
-    host.scrollTop = host.scrollHeight;
-    qsSetFoot(dmFootHTML());
+    dmMountComposer();
+    dmRenderBubbles();
 }
 
-/* 私聊输入区照小红书：表情面板 + 更多面板（相册/拍照/视频/常用语）。
-   图片和视频只对互关开放；文字与表情不受限制。 */
+/* r164：输入栏只挂载一次；消息按 id 更新，草稿与媒体节点不随回执重建。
+   图片和视频保留互关限制；表情与语音不需要互关。 */
 const DM_EMOJIS = [
     ["开心", ["😀", "😄", "😁", "😆", "🤣", "😂", "🙂", "😉", "😊", "😍", "🥰", "😘", "😎", "🤔", "😴", "🥳"]],
     ["手势", ["👍", "👏", "🙌", "🙏", "💪", "🤝", "✌️", "👌", "🤙", "👋", "🫶", "❤️", "💚", "💛", "💙", "💜"]],
@@ -1965,143 +1967,474 @@ const DM_EMOJIS = [
 ];
 const DM_PHRASES = ["在呢", "哈哈哈哈", "晚点聊", "收到～", "好滴", "加油！"];
 
+const dmUi = { threadId: 0, generation: 0, panel: "", tab: "official", query: "",
+    searchSeq: 0, results: [], busy: false, composing: false, record: null, draft: null, caret: [0, 0] };
+const dmOfficial = { items: [], byId: new Map(), loaded: false, task: null };
+const DM_AUDIO_MAX = 5 * 1024 * 1024;
+function dmScope() {
+    return { generation: cmGeneration, session: sessionGeneration, token: state.token,
+        threadId: Number(cm.thread && cm.thread.partner.id), ui: dmUi.generation };
+}
+function dmAccountAlive(s) {
+    return !!s && s.generation === cmGeneration && s.session === sessionGeneration && s.token === state.token;
+}
+function dmScopeAlive(s) {
+    return dmAccountAlive(s) && s.ui === dmUi.generation && cm.thread && qsSameId(s.threadId, cm.thread.partner.id);
+}
+function dmIsVisible() {
+    const top = QS_PAGES[QS_PAGES.length - 1];
+    return !!(top && top.name === "dm" && cm.thread && qsSameId(top.arg, cm.thread.partner.id));
+}
+function dmRequestId() { return "dm-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10); }
+function dmPending(rid, s, data) {
+    cm.pending[rid] = { rid, scope: s, msg: Object.assign({ from_id: state.user && state.user.id,
+        to_id: s.threadId, body: "", created_at: "" }, data) };
+}
+function dmClosePanels() {
+    dmUi.panel = "";
+    ["emoji", "plus"].forEach(k => {
+        const p = cmEl("dm-" + k + "-panel"), b = cmEl("dm-" + k + "-btn");
+        if (p) p.hidden = true;
+        if (b) b.setAttribute("aria-expanded", "false");
+    });
+}
+function dmBlurKeyboard() {
+    const el = document.activeElement;
+    if (el && /^(INPUT|TEXTAREA)$/.test(el.tagName) && el.blur) el.blur();
+}
+function dmReleasePlayback(root) {
+    if (!root) return;
+    root.querySelectorAll("audio,video").forEach(el => {
+        try { el.pause(); el.removeAttribute("src"); el.load(); } catch (e) {}
+    });
+}
+function dmCleanup() {
+    dmUi.generation++;
+    dmUi.searchSeq++;
+    dmCancelRecording(); dmClearDraft();
+    dmReleasePlayback(cmEl("thread-bubbles"));
+    dmBlurKeyboard();
+    dmClosePanels();
+    dmUi.threadId = 0; dmUi.query = ""; dmUi.results = []; dmUi.tab = "official";
+    dmUi.busy = false; dmUi.composing = false; dmUi.textRetry = null;
+    qsBubbleCancel(); qsHideMenu();
+}
+function dmInputFocus() { dmClosePanels(); dmCancelRecording(); }
+function dmRememberCaret() { const i = cmEl("dm-input"); if (i) dmUi.caret = [i.selectionStart ?? i.value.length, i.selectionEnd ?? i.value.length]; }
+function dmInputKey(ev) {
+    if (ev.key === "Enter" && !ev.isComposing && !dmUi.composing && ev.keyCode !== 229) {
+        ev.preventDefault(); sendDM();
+    } else if (ev.key === "Escape") { dmClosePanels(); dmBlurKeyboard(); }
+}
+
 function dmFootHTML() {
-    const canMedia = !!(cm.thread && cm.thread.partner && cm.thread.partner.mutual_follow);
-    const emojiGroups = DM_EMOJIS.map(function (group) {
-        return '<section class="dm-emoji-group"><h4>' + escapeHtml(group[0]) + "</h4>"
-            + '<div class="dm-emoji-grid">' + group[1].map(function (e) {
-                return '<button type="button" class="dm-emoji" aria-label="发送表情 ' + escapeHtml(e) +
-                    '" onclick="sendSticker(\'' + e + '\')">' + e + "</button>";
-            }).join("") + "</div></section>";
-    }).join("");
-    const lockHint = canMedia ? "" : '<p class="dm-lock-hint">互相关注后才能发图片和视频</p>';
-    const tile = function (icon, label, action, disabled) {
-        return '<button type="button" class="dm-plus-tile"' + (disabled ? " disabled" : "") +
-            ' onclick="' + action + '"><span class="ico">' + icon + "</span><span>" + label + "</span></button>";
-    };
+    const tile = (label, action, media) => '<button type="button" class="dm-plus-tile"'
+        + (media ? ' data-dm-mutual="1"' : '') + ' onclick="' + action + '">' + label + '</button>';
     return '<div class="dm-tools">'
-        + '<button type="button" class="dm-tool" id="dm-emoji-btn" aria-label="表情面板" aria-expanded="false" onclick="toggleDmPanel(\'emoji\')">☺</button>'
-        + '<button type="button" class="dm-tool" id="dm-plus-btn" aria-label="更多功能" aria-expanded="false" onclick="toggleDmPanel(\'plus\')">＋</button>'
-        + '<input id="dm-input" type="text" maxlength="' + CM_LIMITS.dm +
-        '" placeholder="说点什么…" aria-label="私信内容" onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendDM();}">'
-        + '<button type="button" class="td-btn dm-send" onclick="sendDM()">发送</button>'
-        + "</div>"
-        + '<div class="dm-panel" id="dm-emoji-panel" hidden>' + emojiGroups + "</div>"
-        + '<div class="dm-panel" id="dm-plus-panel" hidden>'
-        + '<div class="dm-plus-grid">'
-        + tile("🖼", "相册", "document.getElementById('dm-image-file').click()", !canMedia)
-        + tile("📷", "拍照", "document.getElementById('dm-camera-file').click()", !canMedia)
-        + tile("🎬", "视频", "document.getElementById('dm-video-file').click()", !canMedia)
-        + tile("💬", "常用语", "dmShowPhrases()", false)
-        + "</div>" + lockHint
-        + '<div class="dm-phrases" id="dm-phrases" hidden>' + DM_PHRASES.map(function (p) {
-            return '<button type="button" onclick="dmUsePhrase(\'' + escapeHtml(p) + '\')">' + escapeHtml(p) + "</button>";
-        }).join("") + "</div></div>"
+        + '<button type="button" class="dm-tool" id="dm-voice-btn" aria-label="录制语音" aria-controls="dm-voice-panel" aria-expanded="false" onclick="dmStartRecording()">'
+        + '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"/></svg></button>'
+        + '<input id="dm-input" type="text" maxlength="' + CM_LIMITS.dm + '" placeholder="说点什么…" aria-label="私信内容"'
+        + ' onfocus="dmInputFocus()" onselect="dmRememberCaret()" onkeyup="dmRememberCaret()" onclick="dmRememberCaret()" oninput="dmRememberCaret()" oncompositionstart="dmUi.composing=true" oncompositionend="dmUi.composing=false" onkeydown="dmInputKey(event)">'
+        + '<button type="button" class="dm-tool" id="dm-emoji-btn" aria-label="表情面板" aria-controls="dm-emoji-panel" aria-expanded="false" onclick="toggleDmPanel(\'emoji\')">'
+        + '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 14q4 5 8 0M8 8h.01M16 8h.01"/></svg></button>'
+        + '<button type="button" class="dm-tool" id="dm-plus-btn" aria-label="更多功能" aria-controls="dm-plus-panel" aria-expanded="false" onclick="toggleDmPanel(\'plus\')">'
+        + '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16"/></svg></button>'
+        + '<button type="button" class="td-btn dm-send" onclick="sendDM()">发送</button></div>'
+        + '<section class="dm-panel" id="dm-emoji-panel" aria-label="表情" hidden>'
+        + '<div class="dm-sticker-tabs" role="tablist" aria-label="表情来源">'
+        + [['official','轻小团'],['emoji','普通表情'],['network','网络表情'],['local','本地表情']].map(t => '<button type="button" role="tab" id="dm-tab-' + t[0]
+            + '" aria-controls="dm-sticker-content" aria-selected="' + (t[0] === 'official') + '" onclick="dmSelectStickerTab(\'' + t[0] + '\')">' + t[1] + '</button>').join('')
+        + '</div><form class="dm-sticker-search" id="dm-sticker-search" onsubmit="event.preventDefault();dmSearchStickers()">'
+        + '<select id="dm-provider" aria-label="网络表情来源" hidden onchange="dmUi.searchSeq++;dmUi.results=[]"><option value="openmoji">OpenMoji</option><option value="commons">Commons</option></select>'
+        + '<input id="dm-sticker-query" type="search" maxlength="60" aria-label="搜索表情" placeholder="搜名称、拼音或关键词" oninput="dmFilterOfficial()">'
+        + '<button type="submit">搜索</button></form><div id="dm-sticker-content" role="tabpanel" aria-labelledby="dm-tab-official">'
+        + '<p class="dm-panel-note" role="status">正在读取轻小团…</p></div></section>'
+        + '<section class="dm-panel" id="dm-plus-panel" aria-label="更多功能" hidden><div class="dm-plus-grid">'
+        + tile('相册', "document.getElementById('dm-image-file').click()", true)
+        + tile('拍照', "document.getElementById('dm-camera-file').click()", true)
+        + tile('视频', "document.getElementById('dm-video-file').click()", true)
+        + tile('常用语', 'dmShowPhrases()', false) + '</div>'
+        + '<p class="dm-lock-hint" id="dm-lock-hint">互相关注后才能发图片和视频；表情、语音不受此限制。</p>'
+        + '<div class="dm-phrases" id="dm-phrases" hidden>' + DM_PHRASES.map(p => '<button type="button" onclick="dmUsePhrase(\'' + escapeHtml(p) + '\')">' + escapeHtml(p) + '</button>').join('') + '</div></section>'
+        + '<section id="dm-draft" class="dm-draft" aria-label="待发送附件" hidden></section>'
+        + '<section class="dm-panel dm-voice-panel" id="dm-voice-panel" aria-label="语音录制与预览" hidden></section>'
+        + '<input type="file" id="dm-sticker-file" accept="image/gif,image/png,image/webp,image/jpeg" class="file-hidden" onchange="dmPickSticker(this)">'
         + '<input type="file" id="dm-image-file" accept="image/*" class="file-hidden" onchange="dmPickMedia(this,\'image\')">'
         + '<input type="file" id="dm-camera-file" accept="image/*" capture="environment" class="file-hidden" onchange="dmPickMedia(this,\'image\')">'
         + '<input type="file" id="dm-video-file" accept="video/mp4,video/webm" class="file-hidden" onchange="dmPickMedia(this,\'video\')">';
 }
-
-function toggleDmPanel(which) {
-    const target = cmEl("dm-" + which + "-panel");
-    const wasOpen = !!(target && !target.hidden);
-    ["emoji", "plus"].forEach(function (k) {
-        const panel = cmEl("dm-" + k + "-panel");
-        if (panel) panel.hidden = true;
-        const btn = cmEl("dm-" + k + "-btn");
-        if (btn) btn.setAttribute("aria-expanded", "false");
-    });
-    if (target && !wasOpen) {
-        target.hidden = false;
-        const btn = cmEl("dm-" + which + "-btn");
-        if (btn) btn.setAttribute("aria-expanded", "true");
-        const host = cmEl("thread-bubbles");
-        if (host) host.scrollTop = host.scrollHeight;
+function dmMountComposer() {
+    const uid = Number(cm.thread.partner.id);
+    if (dmUi.threadId !== uid || !cmEl("dm-input")) {
+        dmCleanup(); dmUi.threadId = uid;
+        qsSetFoot(dmFootHTML());
+        const s = dmScope();
+        dmLoadOfficial().then(() => { if (dmScopeAlive(s)) { dmPaintOfficial(); dmRenderBubbles(); } });
+    }
+    const mutual = !!cm.thread.partner.mutual_follow;
+    const foot = cmEl("pl-foot");
+    if (foot) foot.querySelectorAll("[data-dm-mutual]").forEach(el => { el.disabled = !mutual; });
+    const hint = cmEl("dm-lock-hint"); if (hint) hint.hidden = mutual;
+}
+async function dmLoadOfficial() {
+    if (dmOfficial.loaded) return;
+    if (dmOfficial.task) return dmOfficial.task;
+    dmOfficial.task = (async () => {
+        try {
+            // APK assets and the website share the same relative asset root. Never use API_BASE here.
+            const r = await fetch(new URL("stickers.json", document.baseURI).href, { credentials: "omit" });
+            if (!r.ok) throw new Error("清单未读到");
+            const manifest = await r.json();
+            if (!manifest || !Array.isArray(manifest.items)) throw new Error("清单格式不正确");
+            const seen = new Set();
+            dmOfficial.items = manifest.items.filter(x => x && /^[a-z0-9_-]{1,64}$/i.test(x.id)
+                && /^stickers\/[a-z0-9_-]+\.svg$/i.test(x.file) && typeof x.name === "string" && !seen.has(x.id) && seen.add(x.id))
+                .map(x => Object.assign({}, x, { url: new URL(x.file, document.baseURI).href }));
+            dmOfficial.byId = new Map(dmOfficial.items.map(x => [x.id, x]));
+            dmOfficial.loaded = true;
+        } catch (e) { /* Inline fallback stays usable; reopening retries the manifest. */ }
+        finally { dmOfficial.task = null; }
+    })();
+    return dmOfficial.task;
+}
+function dmPaintOfficial() {
+    if (dmUi.tab !== "official") return;
+    const host = cmEl("dm-sticker-content"); if (!host) return;
+    const q = dmUi.query.toLowerCase().trim();
+    const items = dmOfficial.items.filter(x => [x.name, x.group, x.pinyin, ...(Array.isArray(x.tags) ? x.tags : [])].join(' ').toLowerCase().includes(q));
+    host.innerHTML = '<p class="dm-panel-note">轻小团 · 选择后预览，确认再发送</p>'
+        + (items.length ? '<div class="dm-sticker-grid">' + items.map(x => '<button type="button" class="dm-sticker-tile" aria-label="选择' + escapeHtml(x.name)
+            + '表情" onclick="sendSticker(\'qs:' + x.id + '\')"><img src="' + escapeHtml(x.url) + '" alt="" loading="lazy"><span>' + escapeHtml(x.name) + '</span></button>').join('') + '</div>'
+        : '<p class="dm-panel-note" role="status">' + (dmOfficial.loaded ? '没有匹配的轻小团，试试“加油”或 jiayou。' : '官方表情暂未读到，重新打开可重试；也可上传本地表情。') + '</p>');
+}
+function dmFilterOfficial() {
+    dmUi.query = (cmEl("dm-sticker-query")?.value || "").slice(0, 60);
+    if (dmUi.tab === "official") dmPaintOfficial();
+    else { dmUi.searchSeq++; dmUi.results = []; }
+}
+function dmSelectStickerTab(tab) {
+    if (!["official", "emoji", "network", "local"].includes(tab)) return;
+    dmUi.tab = tab; dmUi.searchSeq++; dmUi.results = []; dmUi.query = "";
+    const input = cmEl("dm-sticker-query"); if (input) { input.value = ""; input.placeholder = tab === "network" ? "输入关键词，手动搜索 Commons" : "搜名称、拼音或关键词"; }
+    const form = cmEl("dm-sticker-search"); if (form) form.hidden = tab === "local" || tab === "emoji";
+    const providerPicker = cmEl('dm-provider'); if (providerPicker) providerPicker.hidden = tab !== 'network';
+    ["official", "emoji", "network", "local"].forEach(k => cmEl("dm-tab-" + k)?.setAttribute("aria-selected", String(k === tab)));
+    const host = cmEl("dm-sticker-content"); if (!host) return;
+    host.setAttribute("aria-labelledby", "dm-tab-" + tab);
+    if (tab === "official") { dmPaintOfficial(); return; }
+    if (tab === "emoji") {
+        host.innerHTML = DM_EMOJIS.map(g => '<section class="dm-emoji-group"><h4>' + escapeHtml(g[0]) + '</h4><div class="dm-emoji-grid">'
+            + g[1].map(e => '<button type="button" class="dm-emoji" aria-label="插入' + e + '" onclick="sendSticker(\'' + e + '\')">' + e + '</button>').join('') + '</div></section>').join('');
+        return;
+    }
+    host.innerHTML = tab === "network"
+        ? '<p class="dm-panel-note">搜索 OpenMoji 或 Commons 公开表情素材，选择后预览，确认发送时才转存。不是全网梗图搜索。</p><p class="dm-panel-note" role="status">输入关键词后点搜索。</p>'
+        : '<div class="dm-local-sticker"><button type="button" onclick="document.getElementById(\'dm-sticker-file\').click()">选择本地表情</button><p class="dm-panel-note">GIF、PNG、WEBP 或 JPEG；只上传你有权使用的图片。不需要互关。</p></div>';
+}
+function dmExternalURL(value) {
+    try { const u = new URL(String(value)); return u.protocol === "https:" && !u.username && !u.password ? u.href : ""; }
+    catch (e) { return ""; }
+}
+async function dmSearchStickers() {
+    if (dmUi.tab === "official") { dmFilterOfficial(); return; }
+    if (dmUi.tab !== "network" || dmUi.busy || !cm.thread) return;
+    const q = (cmEl("dm-sticker-query")?.value || "").trim().slice(0, 60);
+    if (!q) { callNativeToast("先输入要搜索的关键词"); return; }
+    const provider = cmEl('dm-provider')?.value || dmUi.provider || 'openmoji';
+    dmUi.provider = provider;
+    dmUi.query = q; dmUi.results = [];
+    const s = dmScope(), seq = ++dmUi.searchSeq, host = cmEl("dm-sticker-content");
+    host.innerHTML = '<p class="dm-panel-note" role="status">正在搜索网络表情…</p>';
+    try {
+        const r = await getJson("/api/chat/stickers/search?q=" + encodeURIComponent(q) + '&provider=' + encodeURIComponent(provider));
+        if (!dmScopeAlive(s) || seq !== dmUi.searchSeq || dmUi.tab !== "network") return;
+        if (r.available === false || r.code !== 0) {
+            host.innerHTML = '<p class="dm-panel-note" role="status">这个表情来源暂不可用：' + escapeHtml(r.detail || '请稍后再试，或选择本地表情。') + '</p>'; return;
+        }
+        dmUi.results = (Array.isArray(r.items) ? r.items : []).filter(x => x && typeof x.id === 'string').slice(0, 40);
+        host.innerHTML = '<p class="dm-panel-note">来源：' + escapeHtml(r.provider || provider) + ' · 请按各素材许可使用</p>' + (dmUi.results.length
+            ? '<div class="dm-network-grid">' + dmUi.results.map((x, i) => {
+                const preview = dmExternalURL(x.preview_url), source = dmExternalURL(x.source_url);
+                return '<article class="dm-network-item">' + (preview ? '<img src="' + escapeHtml(preview) + '" alt="' + escapeHtml(x.title || '素材预览')
+                    + '" crossorigin="anonymous" referrerpolicy="no-referrer" loading="lazy">' : '<span class="dm-panel-note">无可用预览</span>')
+                    + '<b>' + escapeHtml(x.title || '未命名素材') + '</b><span class="dm-license">' + escapeHtml(x.license || '许可未提供') + '<br>作者：' + escapeHtml(x.author || '未提供') + '</span>'
+                    + (source ? '<a href="' + escapeHtml(source) + '" target="_blank" rel="noopener noreferrer">查看来源与许可</a>' : '')
+                    + '<button type="button" data-dm-import="1" onclick="dmImportSticker(' + i + ')">选择表情</button></article>';
+            }).join('') + '</div>' : '<p class="dm-panel-note" role="status">没有搜到素材，换一个关键词试试。</p>');
+    } catch (e) {
+        if (dmScopeAlive(s) && seq === dmUi.searchSeq) host.innerHTML = '<p class="dm-panel-note" role="status">搜索没成功：' + escapeHtml(e.message || '网络不通') + '</p>';
     }
 }
-
-function dmShowPhrases() {
-    const box = cmEl("dm-phrases");
-    if (box) box.hidden = !box.hidden;
+function dmStickerBusy(on) {
+    dmUi.busy = on;
+    cmEl("dm-sticker-content")?.querySelectorAll("[data-dm-import],.dm-local-sticker button").forEach(b => { b.disabled = on; });
+}
+function dmImportSticker(index) {
+    const item = dmUi.results[index];
+    if (!item || dmUi.busy || !cm.thread) return;
+    dmSetDraft({ kind: 'sticker', providerId: item.id, url: dmExternalURL(item.preview_url), label: item.title || '网络表情', meta: item });
+}
+function dmPickSticker(input) {
+    const file = input?.files?.[0]; if (input) input.value = '';
+    if (!file || !cm.thread || dmUi.busy) return;
+    if (!/^image\/(gif|png|webp|jpeg)$/i.test(file.type || '') && !/\.(gif|png|webp|jpe?g)$/i.test(file.name || '')) { callNativeToast('请选择 GIF、PNG、WEBP 或 JPEG 表情'); return; }
+    if (file.size > 8 * 1024 * 1024) { callNativeToast('表情图片不能超过 8MB'); return; }
+    dmSetDraft({ kind: 'sticker', file, url: URL.createObjectURL(file), objectURL: true, label: '本地表情' });
+}
+function dmClearDraft() {
+    const d = dmUi.draft; dmUi.draft = null;
+    if (d?.objectURL) URL.revokeObjectURL(d.url);
+    const host = cmEl('dm-draft'); if (host) { dmReleasePlayback(host); host.innerHTML = ''; host.hidden = true; }
+}
+function dmSetDraft(d) {
+    if (dmUi.busy) { if (d.objectURL) URL.revokeObjectURL(d.url); return; }
+    dmCancelRecording(); dmClearDraft(); dmClosePanels(); dmBlurKeyboard();
+    d.scope = dmScope(); d.rid = dmRequestId(); dmUi.draft = d;
+    const host = cmEl('dm-draft'); if (!host) return;
+    host.hidden = false;
+    host.innerHTML = (d.kind === 'video' ? '<video controls playsinline src="' + escapeHtml(d.url) + '"></video>' : '<img src="' + escapeHtml(d.url) + '" alt="待发送预览" referrerpolicy="no-referrer">')
+        + '<div><b>' + escapeHtml(d.label || '待发送附件') + '</b>' + (d.meta ? '<p>' + escapeHtml(d.meta.license || '') + ' · ' + escapeHtml(d.meta.author || '') + '</p>' : '')
+        + '<p id="dm-draft-status" role="status">确认后点发送</p></div><button type="button" id="dm-draft-cancel" onclick="dmClearDraft()">取消</button>';
+}
+async function dmSendDraft() {
+    const d = dmUi.draft;
+    if (!d || dmUi.busy || !dmScopeAlive(d.scope)) return;
+    const s = d.scope, rid = d.rid;
+    dmStickerBusy(true);
+    const cancel = cmEl('dm-draft-cancel'); if (cancel) cancel.disabled = true;
+    cmText('dm-draft-status', '发送中…');
+    try {
+        if (!d.text && !d.mediaName) {
+            let up;
+            if (d.providerId) up = await rawPostApi('/api/chat/stickers/import', { id: d.providerId });
+            else {
+                const fd = new FormData(); fd.append('file', d.file);
+                if (d.kind !== 'sticker') fd.append('to', String(s.threadId));
+                up = await rawPostApi(d.kind === 'sticker' ? '/api/chat/stickers/upload' : '/api/chat/media', fd);
+            }
+            if (!dmScopeAlive(s) || dmUi.draft !== d) return;
+            if (!up?.name || up.kind !== d.kind) throw new Error('附件上传结果不完整');
+            d.mediaName = up.name;
+        }
+        if (!dmScopeAlive(s) || dmUi.draft !== d) return;
+        dmPending(rid, s, { kind: d.kind, body: d.text || '', media_url: d.url }); paintThread();
+        const r = await rawPostApi('/api/chat/send', { to: s.threadId, kind: d.kind, text: d.text || '', media_name: d.mediaName || '', request_id: rid });
+        dmAck(rid, r.message, s);
+        if (dmScopeAlive(s) && dmUi.draft === d) dmClearDraft();
+    } catch (e) {
+        if (dmAccountAlive(s)) delete cm.pending[rid];
+        if (dmScopeAlive(s) && dmUi.draft === d) { cmText('dm-draft-status', '发送未确认，可重试：' + (e.message || '网络不通')); paintThread(); }
+    } finally { if (dmScopeAlive(s)) { dmStickerBusy(false); if (cancel) cancel.disabled = false; } }
+}
+function toggleDmPanel(which) {
+    if (!["emoji", "plus"].includes(which)) return;
+    const target = cmEl("dm-" + which + "-panel"), open = target && !target.hidden;
+    dmRememberCaret(); dmCancelRecording(); dmBlurKeyboard(); dmClosePanels();
+    if (target && !open) {
+        target.hidden = false; dmUi.panel = which;
+        cmEl("dm-" + which + "-btn")?.setAttribute("aria-expanded", "true");
+        if (which === "emoji" && dmUi.tab === "official") {
+            const s = dmScope(); dmLoadOfficial().then(() => { if (dmScopeAlive(s)) { dmPaintOfficial(); dmRenderBubbles(); } });
+        }
+    }
+}
+function dmShowPhrases() { const box = cmEl("dm-phrases"); if (box) box.hidden = !box.hidden; }
+function dmUsePhrase(text) { const input = cmEl("dm-input"); if (input) { input.value = text; input.focus(); } }
+function sendSticker(text) {
+    if (!cm.thread || dmUi.busy) return;
+    if (text.startsWith('qs:')) {
+        const item = dmOfficial.byId.get(text.slice(3));
+        if (!item) { callNativeToast('这枚表情尚未读取，请重试'); return; }
+        dmSetDraft({ kind: 'sticker', text, url: item.url, label: item.name });
+    } else {
+        const i = cmEl('dm-input'); if (!i) return;
+        const [start, end] = dmUi.caret;
+        const value = i.value.slice(0, start) + text + i.value.slice(end);
+        if (value.length > CM_LIMITS.dm) return;
+        i.value = value; dmUi.caret = [start + text.length, start + text.length];
+        i.setSelectionRange?.(...dmUi.caret);
+    }
+}
+function dmPickMedia(input, kind) {
+    const file = input?.files?.[0]; if (input) input.value = '';
+    if (!file || !cm.thread || !['image', 'video'].includes(kind) || dmUi.busy) return;
+    if (!cm.thread.partner.mutual_follow) { callNativeToast('互相关注后才能发图片和视频'); return; }
+    if (file.size > (kind === 'image' ? 8 : 30) * 1024 * 1024) { callNativeToast('附件过大，请缩小后重试'); return; }
+    dmSetDraft({ kind, file, url: URL.createObjectURL(file), objectURL: true, label: kind === 'image' ? '图片' : '视频' });
 }
 
-function dmUsePhrase(text) {
-    const input = cmEl("dm-input");
-    if (input) { input.value = text; input.focus(); }
+function dmNow() { return typeof performance !== 'undefined' ? performance.now() : Date.now(); }
+function dmStopTracks(stream) { if (stream) stream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} }); }
+function dmCancelRecording() {
+    const rec = dmUi.record; dmUi.record = null;
+    if (rec) {
+        rec.cancelled = true; clearInterval(rec.tick); clearTimeout(rec.limit);
+        dmStopTracks(rec.stream);
+        try { if (rec.recorder && rec.recorder.state !== 'inactive') rec.recorder.stop(); } catch (e) {}
+        if (rec.url) { dmReleasePlayback(cmEl('dm-voice-panel')); URL.revokeObjectURL(rec.url); rec.url = ''; }
+        rec.chunks = []; rec.blob = null;
+    }
+    const panel = cmEl('dm-voice-panel'); if (panel) { panel.hidden = true; panel.innerHTML = ''; }
+    cmEl('dm-voice-btn')?.setAttribute('aria-expanded', 'false');
 }
-
-async function sendSticker(emoji) {
+function dmPaintVoice(rec) {
+    const panel = cmEl('dm-voice-panel'); if (!panel || dmUi.record !== rec) return;
+    panel.hidden = false; cmEl('dm-voice-btn')?.setAttribute('aria-expanded', 'true');
+    if (rec.status === 'preview') {
+        panel.innerHTML = '<div class="dm-voice-head"><b>语音预览</b><span>' + rec.duration + ' 秒' + (rec.autoStopped ? ' · 已达 10 分钟上限' : '') + '</span></div>'
+            + '<audio id="dm-voice-preview" src="' + escapeHtml(rec.url) + '" controls preload="metadata" aria-label="试听录制的语音"></audio>'
+            + '<p class="dm-panel-note" id="dm-voice-status" role="status">仅保存在本机，确认发送后才上传。</p>'
+            + '<div class="dm-voice-actions"><button type="button" onclick="dmCancelRecording()">取消</button><button type="button" class="dm-confirm" id="dm-voice-send" onclick="dmSendAudio()">发送语音</button></div>';
+    } else {
+        panel.innerHTML = '<div class="dm-voice-head"><b>' + (rec.status === 'starting' ? '正在请求麦克风…' : '正在录音') + '</b><span id="dm-voice-time" role="timer">0:00 / 10:00</span></div>'
+            + '<p class="dm-panel-note">停止后可试听；退出聊天或切到后台会取消录音。</p><div class="dm-voice-actions">'
+            + '<button type="button" onclick="dmCancelRecording()">取消</button><button type="button" class="dm-confirm" id="dm-voice-stop"'
+            + (rec.status === 'starting' ? ' disabled' : '') + ' onclick="dmStopRecording()">停止并试听</button></div>';
+    }
+}
+async function dmStartRecording() {
     if (!cm.thread) return;
     if (!state.token) { openAuthModal(); return; }
-    const uid = cm.thread.partner.id;
-    const rid = "dm-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
-    cm.pending[rid] = { rid: rid, msg: { from_id: state.user && state.user.id, to_id: uid,
-        body: emoji, kind: "sticker", media_url: "", created_at: "" } };
-    toggleDmPanel("emoji");
-    paintThread();
+    if (dmUi.busy || dmUi.draft) { callNativeToast('请先发送或取消待发送附件'); return; }
+    if (dmUi.record) { callNativeToast('请先发送或取消当前语音'); return; }
+    const Recorder = typeof MediaRecorder !== 'undefined' ? MediaRecorder : null;
+    const mime = Recorder && typeof Recorder.isTypeSupported === 'function'
+        && ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg'].find(t => Recorder.isTypeSupported(t));
+    if (!mime || !navigator.mediaDevices?.getUserMedia) { callNativeToast('当前浏览器或客户端不支持语音录制，可发送文字'); return; }
+    dmClosePanels(); dmBlurKeyboard();
+    const rec = { scope: dmScope(), status: 'starting', chunks: [], bytes: 0, mime, cancelled: false };
+    dmUi.record = rec; dmPaintVoice(rec);
     try {
-        const r = await postApi("/api/chat/send", { to: uid, kind: "sticker", text: emoji, request_id: rid });
-        dmAck(rid, r.message);
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (!dmScopeAlive(rec.scope) || dmUi.record !== rec || rec.cancelled || document.hidden) { dmStopTracks(stream); return; }
+        rec.stream = stream;
+        rec.recorder = new Recorder(stream, { mimeType: mime, audioBitsPerSecond: 20000 });
+        rec.recorder.ondataavailable = ev => {
+            if (rec.cancelled || !ev.data?.size) return;
+            rec.chunks.push(ev.data); rec.bytes += ev.data.size;
+            if (rec.bytes > DM_AUDIO_MAX && dmUi.record === rec) { dmCancelRecording(); callNativeToast('语音超过 5MB，已取消；请缩短录音'); }
+        };
+        rec.recorder.onerror = () => { if (dmUi.record === rec) { dmCancelRecording(); callNativeToast('录音中断，未上传；请重试'); } };
+        rec.recorder.onstop = () => {
+            dmStopTracks(rec.stream); clearInterval(rec.tick); clearTimeout(rec.limit);
+            if (rec.cancelled || dmUi.record !== rec || !dmScopeAlive(rec.scope)) return;
+            rec.blob = new Blob(rec.chunks, { type: rec.recorder.mimeType || rec.mime }); rec.chunks = [];
+            if (!rec.blob.size || rec.blob.size > DM_AUDIO_MAX) { dmCancelRecording(); callNativeToast('没有录到可发送的语音，请重试'); return; }
+            rec.url = URL.createObjectURL(rec.blob); rec.status = 'preview'; dmPaintVoice(rec);
+        };
+        rec.started = dmNow(); rec.status = 'recording'; rec.recorder.start(1000); dmPaintVoice(rec);
+        rec.tick = setInterval(() => {
+            if (dmUi.record !== rec || !dmScopeAlive(rec.scope)) return;
+            const n = Math.min(600, Math.floor((dmNow() - rec.started) / 1000));
+            cmText('dm-voice-time', Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0') + ' / 10:00');
+        }, 1000);
+        rec.limit = setTimeout(() => { if (dmUi.record === rec) dmStopRecording(true); }, 599000);
     } catch (e) {
-        delete cm.pending[rid];
-        paintThread();
-        callNativeToast("这条没发出去：" + (e.message || "网络不通"));
+        dmStopTracks(rec.stream);
+        if (dmUi.record !== rec || !dmScopeAlive(rec.scope)) return;
+        dmCancelRecording();
+        callNativeToast(/NotAllowed|Permission|Security/.test(e.name || '') ? '麦克风权限未获准，可在系统设置中允许后重试' : '麦克风不可用，未录音；请检查设备后重试');
+    }
+}
+function dmStopRecording(auto) {
+    const rec = dmUi.record; if (!rec || rec.status !== 'recording') return;
+    rec.duration = Math.min(600, Math.max(1, Math.ceil((dmNow() - rec.started) / 1000))); rec.autoStopped = !!auto;
+    rec.status = 'stopping'; clearInterval(rec.tick); clearTimeout(rec.limit); dmStopTracks(rec.stream);
+    const btn = cmEl('dm-voice-stop'); if (btn) { btn.disabled = true; btn.textContent = '正在准备试听…'; }
+    try { rec.recorder.stop(); } catch (e) { dmCancelRecording(); callNativeToast('录音未能保存，请重试'); }
+}
+async function dmSendAudio() {
+    const rec = dmUi.record;
+    if (!rec || rec.status !== 'preview' || rec.uploading || !dmScopeAlive(rec.scope)) return;
+    rec.uploading = true; rec.rid = rec.rid || dmRequestId();
+    const s = rec.scope, rid = rec.rid, btn = cmEl('dm-voice-send');
+    if (btn) { btn.disabled = true; btn.textContent = '发送中…'; }
+    cmText('dm-voice-status', '正在上传语音…');
+    dmPending(rid, s, { kind: 'audio', duration: rec.duration }); paintThread();
+    try {
+        if (!rec.mediaName) {
+            const fd = new FormData(), ext = rec.mime.includes('mp4') ? 'm4a' : (rec.mime.includes('ogg') ? 'ogg' : 'webm');
+            fd.append('to', String(s.threadId)); fd.append('file', rec.blob, 'voice.' + ext);
+            const up = await rawPostApi('/api/chat/media', fd);
+            if (!dmScopeAlive(s) || dmUi.record !== rec) { if (dmAccountAlive(s)) delete cm.pending[rid]; return; }
+            if (!up?.name || up.kind !== 'audio') throw new Error('语音上传结果不完整');
+            rec.mediaName = up.name;
+        }
+        if (!dmScopeAlive(s) || dmUi.record !== rec) return;
+        cmText('dm-voice-status', '正在确认发送…');
+        const r = await rawPostApi('/api/chat/send', { to: s.threadId, kind: 'audio', media_name: rec.mediaName, duration: rec.duration, request_id: rid });
+        dmAck(rid, r.message, s);
+        if (dmScopeAlive(s) && dmUi.record === rec) dmCancelRecording();
+    } catch (e) {
+        if (!dmAccountAlive(s)) return;
+        delete cm.pending[rid]; paintThread();
+        if (!dmScopeAlive(s) || dmUi.record !== rec) return;
+        rec.uploading = false;
+        if (btn) { btn.disabled = false; btn.textContent = '重试发送'; }
+        cmText('dm-voice-status', '未确认发送成功：' + (e.message || '网络不通') + '。可用同一条语音重试。');
     }
 }
 
-async function dmPickMedia(input, kind) {
-    const file = input && input.files && input.files[0];
-    if (input) input.value = "";
-    if (!file || !cm.thread) return;
-    if (!state.token) { openAuthModal(); return; }
-    if (!cm.thread.partner.mutual_follow) {
-        callNativeToast("互相关注后才能发图片和视频");
-        return;
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        dmCancelRecording();
+        cmEl('thread-bubbles')?.querySelectorAll('audio,video').forEach(el => el.pause());
     }
-    const max = kind === "image" ? 8 * 1024 * 1024 : 30 * 1024 * 1024;
-    if (file.size > max) {
-        callNativeToast(kind === "image" ? "图片不能超过 8MB" : "视频不能超过 30MB");
-        return;
-    }
-    const uid = cm.thread.partner.id;
-    const rid = "dm-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
-    cm.pending[rid] = { rid: rid, msg: { from_id: state.user && state.user.id, to_id: uid,
-        body: "", kind: kind, media_url: "", created_at: "" } };
-    toggleDmPanel("plus");
-    paintThread();
-    try {
-        const fd = new FormData();
-        fd.append("to", String(uid));
-        fd.append("file", file);
-        const up = await postApi("/api/chat/media", fd);
-        cm.pending[rid].msg.media_url = up.url;
-        cm.pending[rid].msg.media_mime = up.mime;
-        paintThread();
-        const r = await postApi("/api/chat/send", { to: uid, kind: kind, media_name: up.name, request_id: rid });
-        dmAck(rid, r.message);
-    } catch (e) {
-        delete cm.pending[rid];
-        paintThread();
-        callNativeToast("没发出去：" + (e.message || "网络不通"));
-    }
-}
+});
+window.addEventListener('pagehide', dmCleanup);
 
+function dmMediaURL(value) {
+    if (!value) return '';
+    if (/^blob:/.test(value)) return value;
+    return /^\/uploads\/[A-Za-z0-9_.-]+\?/.test(String(value)) ? API_BASE + value : '';
+}
 function dmBubbleInner(m, kind, pending) {
-    if (kind === "sticker") return '<span class="dm-sticker">' + escapeHtml(m.body || "") + "</span>";
-    if (kind === "image" || kind === "video") {
-        if (!m.media_url) {
-            return '<span class="dm-media-wait">' + (pending ? "上传中…" : "这张图已失效") + "</span>";
-        }
-        const src = escapeHtml(API_BASE + m.media_url);
-        const raw = String(API_BASE + m.media_url).replace(/'/g, "%27");
-        if (kind === "image") {
-            return '<img class="dm-media-img" src="' + src + '" alt="图片消息" loading="lazy"'
-                + ' onclick="viewPostImage(\'' + escapeHtml(raw) + '\')">';
-        }
-        return '<video class="dm-media-video" src="' + src + '" controls playsinline preload="metadata"'
-            + ' oncontextmenu="event.stopPropagation(); return true"></video>';
+    if (kind === 'sticker' && !m.media_url) {
+        const item = dmOfficial.byId.get(String(m.body || '').replace(/^qs:/, ''));
+        return item ? '<img class="dm-sticker-img" src="' + escapeHtml(item.url) + '" alt="' + escapeHtml(item.name) + '">'
+            : '<span class="dm-sticker">' + escapeHtml(String(m.body || '').startsWith('qs:') ? '［官方表情］' : m.body || '') + '</span>';
     }
-    return escapeHtml(m.body);
+    if (['image', 'video', 'audio', 'sticker'].includes(kind)) {
+        const url = dmMediaURL(m.media_url), src = escapeHtml(url);
+        if (!url) return '<span class="dm-media-wait">' + (pending ? '发送中…' : '附件暂不可用') + '</span>';
+        if (kind === 'audio') return '<div class="dm-audio"><span>语音 · ' + Number(m.duration || 0) + ' 秒</span><audio controls preload="metadata" src="' + src + '" aria-label="语音消息" onplay="dmExclusivePlayback(this)"></audio></div>';
+        if (kind === 'video') return '<video class="dm-media-video" src="' + src + '" controls playsinline preload="metadata" onplay="dmExclusivePlayback(this)"></video>';
+        const meta = m.sticker_meta || {}, source = dmExternalURL(meta.source_url);
+        return '<img class="' + (kind === 'sticker' ? 'dm-sticker-img' : 'dm-media-img') + '" src="' + src + '" alt="' + (kind === 'sticker' ? '图片表情' : '图片消息') + '" loading="lazy">'
+            + (source ? '<small class="dm-attribution"><a href="' + escapeHtml(source) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(meta.title || '来源') + '</a><br>' + escapeHtml(meta.author || '') + ' · ' + escapeHtml(meta.license || '') + '</small>' : '');
+    }
+    return escapeHtml(m.body || '');
+}
+function dmExclusivePlayback(active) {
+    document.querySelectorAll('#thread-bubbles audio,#thread-bubbles video').forEach(el => { if (el !== active) el.pause(); });
+}
+function dmRenderBubbles() {
+    const host = cmEl('thread-bubbles'); if (!host || !cm.thread) return;
+    const me = state.user && state.user.id, uid = cm.thread.partner.id;
+    const nearBottom = host.scrollHeight - host.scrollTop - host.clientHeight < 100;
+    const previousHeight = host.scrollHeight;
+    const rows = cm.bubbles.map(m => ['m' + m.id, m, false]);
+    Object.values(cm.pending).filter(p => qsSameId(p.msg.to_id, uid)).forEach(p => rows.push(['p' + p.rid, p.msg, true]));
+    const nodes = new Map(Array.from(host.children).map(n => [n.dataset.dmKey, n]));
+    const wanted = new Set();
+    if (cm.thread.more) rows.unshift(['older', null, false]);
+    let cursor = host.firstElementChild;
+    for (const [key, m, pending] of rows) {
+        wanted.add(key);
+        const signature = m ? JSON.stringify([m.id, m.body, m.kind, m.recalled_at, m.duration, String(m.media_url || '').split('?')[0], cm.myTheme]) : 'older';
+        let node = nodes.get(key);
+        if (!node || node.dataset.signature !== signature) {
+            const next = document.createElement('div'); next.dataset.dmKey = key; next.dataset.signature = signature; next.className = 'dm-message';
+            next.innerHTML = m ? cmBubbleHTML(m, me, pending) : '<button type="button" class="td-btn td-btn-quiet" onclick="loadOlderMessages()">看更早的消息</button>';
+            if (node) { dmReleasePlayback(node); if (cursor === node) cursor = next; node.replaceWith(next); }
+            node = next;
+        }
+        if (node !== cursor) host.insertBefore(node, cursor);
+        cursor = node.nextElementSibling;
+    }
+    for (const child of Array.from(host.children)) if (!wanted.has(child.dataset.dmKey)) { dmReleasePlayback(child); child.remove(); }
+    if (nearBottom) host.scrollTop = host.scrollHeight;
+    else if (host.firstElementChild?.dataset.dmKey === 'older') host.scrollTop += host.scrollHeight - previousHeight;
 }
 
 function cmBubbleHTML(m, me, pending) {
@@ -2115,7 +2448,7 @@ function cmBubbleHTML(m, me, pending) {
     const who = mine ? (state.user || {}) : ((cm.thread && cm.thread.partner) || {});
     const avatar = '<span class="cm-avatar dm-avatar">' + cmAvatarInner(who) + "</span>";
     const kind = m.kind || "text";
-    const isMedia = kind === "image" || kind === "video";
+    const isMedia = ["image", "video", "audio"].includes(kind);
     const bubble = '<div class="cm-bubble ' + (mine ? "me" : "them")
         + (kind === "sticker" ? " sticker" : "") + (isMedia ? " media" : "")
         + (pending ? " pending" : "") + '"'
@@ -2209,9 +2542,10 @@ async function pickBubbleTheme(t) {
 
 async function loadOlderMessages() {
     if (!cm.thread || !cm.thread.cursor) return;
-    const uid = cm.thread.partner.id;
+    const uid = cm.thread.partner.id, scope = dmScope();
     try {
         const r = await getJson("/api/chat/messages?with_user=" + uid + "&limit=30&cursor=" + cm.thread.cursor);
+        if (!dmScopeAlive(scope)) return;
         cm.bubbles = (r.items || []).concat(cm.bubbles);
         cm.thread.more = !!r.more;
         cm.thread.cursor = r.next_cursor || 0;
@@ -2220,30 +2554,23 @@ async function loadOlderMessages() {
 }
 
 async function sendDM() {
-    const input = cmEl("dm-input");
-    const text = (input && input.value || "").trim();
-    if (!text || !cm.thread) return;
+    if (dmUi.draft) { await dmSendDraft(); return; }
+    if (dmUi.record) { await dmSendAudio(); return; }
+    const input = cmEl('dm-input'), text = (input?.value || '').trim();
+    if (!text || !cm.thread || dmUi.composing) return;
     if (!state.token) { openAuthModal(); return; }
-    const uid = cm.thread.partner.id;
-    const rid = "dm-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
-    cm.pending[rid] = { rid, msg: { from_id: state.user && state.user.id, to_id: uid, body: text, created_at: "" } };
-    input.value = "";
-    paintThread();
-    // 会话列表先就地顶上这一条：不然发完回到列表还是上一句，得像机主说的那样"刷新才更新"
-    bumpConversation(uid, text, "me");
-    wsSend({ t: "send", to: uid, text, request_id: rid });
-    // 6 秒没等到回执就退回 HTTP 重发：request_id 一样，服务端只会把原来那条还回来，
-    // 不会出现"看着丢了、其实发了两条"。
-    setTimeout(() => {
-        if (!cm.pending[rid]) return;
+    const s = dmScope(), rid = dmUi.textRetry?.text === text ? dmUi.textRetry.rid : dmRequestId();
+    dmUi.textRetry = { text, rid };
+    dmPending(rid, s, { body: text, kind: 'text' }); input.value = ''; dmUi.caret = [0, 0]; paintThread();
+    try {
+        const r = await rawPostApi('/api/chat/send', { to: s.threadId, text, request_id: rid });
+        dmAck(rid, r.message, s);
+        if (dmScopeAlive(s) && dmUi.textRetry?.rid === rid) dmUi.textRetry = null;
+    } catch (e) {
+        if (!dmAccountAlive(s)) return;
         delete cm.pending[rid];
-        postApi("/api/chat/send", { to: uid, text, request_id: rid })
-            .then(r => dmAck(rid, r.message))
-            .catch(e => {
-                callNativeToast("这条没发出去：" + (e.message || "网络不通"));
-                paintThread();
-            });
-    }, 6000);
+        if (dmScopeAlive(s)) { if (!input.value) input.value = text; paintThread(); callNativeToast('发送未确认，可重试：' + (e.message || '网络不通')); }
+    }
 }
 
 /** 本地顶一条会话摘要。列表和聊天窗共用这一份 cm.convs，
@@ -2260,18 +2587,19 @@ function bumpConversation(uid, body, side) {
     if (cm.msgTab === "chats" && !cm.thread) renderMessages();
 }
 
-function dmAck(rid, message) {
+function dmAck(rid, message, scope) {
+    const pending = cm.pending[rid];
+    if (scope && !dmAccountAlive(scope)) return;
+    if (pending?.scope && !dmAccountAlive(pending.scope)) return;
     delete cm.pending[rid];
     if (message) {
-        if (cm.thread && (message.from_id === cm.thread.partner.id || message.to_id === cm.thread.partner.id)) {
-            if (!cm.bubbles.some(b => b.id === message.id)) cm.bubbles.push(message);
+        if (cm.thread && (qsSameId(message.from_id, cm.thread.partner.id) || qsSameId(message.to_id, cm.thread.partner.id))) {
+            if (!cm.bubbles.some(b => qsSameId(b.id, message.id))) cm.bubbles.push(message);
         }
-        const preview = message.kind === "image" ? "［图片］"
-            : (message.kind === "video" ? "［视频］" : message.body);
-        bumpConversation(message.from_id === (state.user && state.user.id) ? message.to_id : message.from_id,
-            preview, message.from_id === (state.user && state.user.id) ? "me" : "them");
+        const preview = ({ image: '［图片］', video: '［视频］', audio: '［语音］', sticker: '［表情］' })[message.kind] || message.body;
+        bumpConversation(qsSameId(message.from_id, state.user?.id) ? message.to_id : message.from_id, preview, qsSameId(message.from_id, state.user?.id) ? 'me' : 'them');
     }
-    paintThread();
+    if (dmIsVisible()) paintThread();
 }
 
 /* ── WebSocket ──────────────────────────────────────────────── */
@@ -2291,15 +2619,18 @@ async function connectChat() {
     if (wsOpen() || cm.wsState === "connecting") return;
     if (cm.wsRetry > 5) { setWsState("unavailable"); return; }
     cm.wsState = "connecting";
+    const scope = dmScope();
     try {
         const t = await postApi("/api/chat/ticket", {});
+        if (!dmAccountAlive(scope)) return;
         const base = String(API_BASE || "").replace(/^http/, "ws");
         const sock = new WebSocket(base + t.ws_path + "?ticket=" + encodeURIComponent(t.ticket));
         cm.ws = sock;
         sock.onopen = () => { cm.wsRetry = 0; setWsState("connected"); };
-        sock.onmessage = ev => handleWsEvent(ev);
+        sock.onmessage = ev => { if (dmAccountAlive(scope) && cm.ws === sock) handleWsEvent(ev); };
         sock.onerror = () => setWsState("error");
         sock.onclose = () => {
+            if (!dmAccountAlive(scope) || cm.ws !== sock) return;
             cm.ws = null;
             cm.wsRetry++;
             setWsState("closed");
@@ -2325,7 +2656,7 @@ function handleWsEvent(ev) {
     if (data.t === "msg" && data.message) {
         const m = data.message;
         if (cm.thread && (m.from_id === cm.thread.partner.id || m.to_id === cm.thread.partner.id)) {
-            cm.bubbles.push(m);
+            if (!cm.bubbles.some(b => qsSameId(b.id, m.id))) cm.bubbles.push(m);
             paintThread();
             if (m.from_id === cm.thread.partner.id) wsSend({ t: "read", with: cm.thread.partner.id });
         } else if (m.from_id !== me) {

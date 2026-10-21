@@ -6,8 +6,11 @@ p=argparse.ArgumentParser();p.add_argument('--output',required=True);args=p.pars
 with tarfile.open(args.output,'w') as archive:
     for name in ('server.py','app_modules','tests','requirements.txt','requirements.lock','requirements-dev.txt','scripts'):
         archive.add(root/name,arcname=name,filter=lambda m:None if '__pycache__' in m.name else m)
-    for file in (root/'app/src/main/assets').iterdir():
-        if file.is_file():archive.add(file,arcname='web/'+file.name)
+    for file in (root/'app/src/main/assets').rglob('*'):
+        # 递归带上子目录（stickers/ 这类素材以前被 iterdir 整个漏掉，
+        # 网页版的表情包位置空着，而 App 里是好的）
+        if file.is_file():
+            archive.add(file, arcname='web/'+file.relative_to(root/'app/src/main/assets').as_posix())
     archive.add(root/'app/src/main/assets/guidance.json',arcname='app/src/main/assets/guidance.json')
     archive.add(root/'app/src/main/web_version.json',arcname='web/version.json')
     archive.add(root/'qingsu.apk',arcname='web/qingsu.apk')

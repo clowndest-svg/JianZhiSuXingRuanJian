@@ -79,3 +79,9 @@ finally:
                 pass
         db.execute('DELETE FROM users WHERE id=?',(uid,))
     db.commit();print('remaining_users='+str(db.execute('SELECT COUNT(*) FROM users').fetchone()[0]));db.close()
+
+# Candidate and production both enter through this script, including gateways
+# installed before r164. Keep the real media smoke behind the same rollback gate.
+from pathlib import Path
+import subprocess,sys
+subprocess.run([sys.executable, str(Path(__file__).with_name('verify-chat-media-live.py'))], check=True)

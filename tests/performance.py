@@ -46,5 +46,12 @@ def main():
                 report={'users':100,'days_per_user':365,'seeded_rows':109500,'concurrency':20,'requests':len(results),'elapsed_s':round(time.perf_counter()-started,2),'p50_ms':round(latency[len(latency)//2],1),'p95_ms':round(latency[int(len(latency)*.95)-1],1),'5xx':errors}
             finally:proc.terminate();proc.wait(timeout=15)
         text=Path(temp+'/server.log').read_text(errors='replace');report['sqlite_lock_errors']=text.lower().count('database is locked')
+        # Module initialization holds a timed rotating file handler here on Windows.
+        # Close only handlers backed by this disposable test directory.
+        import logging
+        for handler in list(logging.getLogger().handlers):
+            filename=getattr(handler,'baseFilename','')
+            if filename and Path(filename).resolve().is_relative_to(Path(temp).resolve()):
+                logging.getLogger().removeHandler(handler);handler.close()
         print(json.dumps(report));return int(errors>0 or report['sqlite_lock_errors']>0 or report['p95_ms']>=500)
 if __name__=='__main__':sys.exit(main())

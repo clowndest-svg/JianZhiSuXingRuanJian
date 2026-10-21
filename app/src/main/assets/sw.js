@@ -1,5 +1,6 @@
-const CACHE='qingsu-shell-r161';
-const SHELL=['/','/app.js','/style.css','/features.js','/features.css','/companion.js','/exercise_poses.json','/manifest.webmanifest','/app-icon.png','/guidance.json'];
+const CACHE='qingsu-shell-r164';
+const SHELL=['/','/app.js','/style.css','/features.js','/features.css','/companion.js','/exercise_poses.json','/manifest.webmanifest','/app-icon.png','/guidance.json','/stickers.json',
+ ...['smile','laugh','cry','cheer','water','veg','run','fit','shy','sleep','love','cool','angry','sweat','drool','party','win','beg'].map(id=>'/stickers/'+id+'.svg')];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL))));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('qingsu-shell-')&&k!==CACHE).map(k=>caches.delete(k))))));
 self.addEventListener('fetch',event=>{

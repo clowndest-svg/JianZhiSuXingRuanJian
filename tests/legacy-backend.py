@@ -1738,7 +1738,7 @@ def main():
         check("新页面不许留没接数据的数字占位",
               'id="cm-post-count">0' not in html_txt and 'id="fb-count">0' not in html_txt, "")
         check("帖子卡片与私信气泡都走转义，不拼裸 HTML",
-              "escapeHtml(p.body)" in feat_js and "escapeHtml(m.body)" in feat_js
+              "escapeHtml(p.body)" in feat_js and "escapeHtml(m.body || '')" in feat_js
               and "escapeHtml(cmName(" in feat_js, "")
         # uvicorn 光装自己不会说 WebSocket：没有实现库时它把升级请求当普通 HTTP 转给应用，
         # 现场表现是"路由 404"，而路由明明注册着——这条判据钉的是那个隐形依赖。
@@ -1762,7 +1762,7 @@ def main():
         check("运维手册写了 uvicorn 要显式选 ws 后端与 nginx 的 Upgrade 透传",
               "websockets-sansio" in _ops and "proxy_http_version" in _ops, _ops[:40])
         check("私信在没有 WebSocket 时退回 HTTP 发送",
-              'postApi("/api/chat/send"' in feat_js and "function wsOpen" in feat_js, "")
+              "rawPostApi('/api/chat/send'" in feat_js and "function wsOpen" in feat_js, "")
         check("复制轻塑号不许不管结果就说已复制",
               "复制没成功" in feat_js and "document.execCommand" in feat_js, "")
         check("开关是真 checkbox 且选中态有独立样式",
@@ -2447,21 +2447,21 @@ def main():
           and "mutual_follow(conn, user[\"id\"], int(to))" in srv_txt, "")
     check("发送媒体时服务端再查一次互关与文件归属",
           'if not owned or not os.path.isfile' in srv_txt
-          and '这个媒体不是你刚上传的' in srv_txt, "")
+          and '这个媒体不是你上传的' in srv_txt, "")
     check("图片重编码、视频只收 MP4/WebM 且限 30MB",
           'DM_IMAGE_MAX = 8 * 1024 * 1024' in srv_txt and 'DM_VIDEO_MAX = 30 * 1024 * 1024' in srv_txt
           and 'head[4:8] == b"ftyp"' in srv_txt and 'head.startswith(b"\\x1aE\\xdf\\xa3")' in srv_txt, "")
     check("媒体消息读取时重新签短时 URL",
           '"media_url": signed_photo(' in srv_txt and '"media_mime":' in srv_txt, "")
     check("上传路由能放行视频并带正确 MIME",
-          'jpg|jpeg|png|webp|mp4|webm' in srv_txt and 'mimetypes.guess_type(name)' in srv_txt, "")
+          'jpg|jpeg|png|webp|gif|mp4|webm' in srv_txt and 'mimetypes.guess_type(name)' in srv_txt, "")
     check("私信回执带 mutual_follow，前端才知道该不该亮图片按钮",
           'partner["mutual_follow"] = mutual_follow(' in srv_txt, "")
     check("前端有表情面板与更多面板（相册/拍照/视频/常用语）",
           "dm-emoji-panel" in _fjs and "dm-plus-panel" in _fjs and "DM_PHRASES" in _fjs
           and "dm-image-file" in _fjs and "dm-camera-file" in _fjs and "dm-video-file" in _fjs, "")
     check("未互关时图片/视频按钮禁用并给文案",
-          '互相关注后才能发图片和视频' in _fjs and '!canMedia' in _fjs, "")
+          '互相关注后才能发图片和视频' in _fjs and 'el.disabled = !mutual' in _fjs, "")
     check("图片/视频/表情各有自己的气泡样式",
           "dm-media-img" in _fjs and "dm-media-video" in _fjs and "dm-sticker" in _fjs
           and ".cm-bubble.media" in _fcss and ".cm-bubble .dm-sticker" in _fcss, "")
