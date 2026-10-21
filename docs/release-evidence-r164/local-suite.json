@@ -1,0 +1,43 @@
+[
+  {
+    "test": "tests/test_integration.py",
+    "exit": 0
+  },
+  {
+    "test": "tests/test_ai_contract.py",
+    "exit": 0
+  },
+  {
+    "test": "tests/test_update_copy.py",
+    "exit": 0
+  },
+  {
+    "test": "tests/test_companion.py",
+    "exit": 0
+  },
+  {
+    "test": "tests/test_consistency.py",
+    "exit": 0
+  },
+  {
+    "test": "tests/test_multiprocess.py",
+    "exit": 0
+  },
+  {
+    "test": "tests/legacy-backend.py",
+    "exit": 0,
+    "note": "rerun after regenerating current CHANGELOG manifest"
+  },
+  {
+    "test": "tests/legacy-frontend.mjs",
+    "exit": 0
+  },
+  {
+    "test": "tests/frontend-integration.mjs",
+    "exit": 0
+  },
+  {
+    "test": "tests/test_native_media_contract.py",
+    "exit": 0
+  }
+]

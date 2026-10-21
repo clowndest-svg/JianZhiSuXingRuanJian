@@ -1,0 +1,12 @@
+{
+  "method": "recoverable archive; permanent deletion blocked by automatic approval",
+  "archived_entries": 173,
+  "archived_bytes": 393262118.0,
+  "archive": "D:\\RuanJian\\ShuJuChunChu\\qingsu-cleanup-archive\\r164-20261021-scratch",
+  "preserved": [
+    "app/build",
+    ".gradle",
+    ".private-backups",
+    "external signing keys"
+  ]
+}

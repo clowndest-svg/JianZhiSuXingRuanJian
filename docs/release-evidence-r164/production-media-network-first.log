@@ -1,0 +1,6 @@
+{"fixture_users_removed": 2, "fixture_files_removed": 2}
+Traceback (most recent call last):
+  File "/opt/qingsu/releases/r39546583818/scripts/verify-chat-media-live.py", line 91, in <module>
+    assert status == 200
+           ^^^^^^^^^^^^^
+AssertionError

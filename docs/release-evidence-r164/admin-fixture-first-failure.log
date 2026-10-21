@@ -1,0 +1,541 @@
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_admin_writes_reject_cross_site_origin (__main__.OpsApi.test_admin_writes_reject_cross_site_origin) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_backup_failure_is_a_failure_not_a_200 (__main__.OpsApi.test_backup_failure_is_a_failure_not_a_200) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_backup_must_pass_integrity_check (__main__.OpsApi.test_backup_must_pass_integrity_check) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_backup_success_reports_the_snapshot_it_made (__main__.OpsApi.test_backup_success_reports_the_snapshot_it_made) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_ban_needs_reason_and_exact_username (__main__.OpsApi.test_ban_needs_reason_and_exact_username) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_ban_then_the_app_itself_refuses (__main__.OpsApi.test_ban_then_the_app_itself_refuses) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_banned_user_cannot_get_a_chat_ticket (__main__.OpsApi.test_banned_user_cannot_get_a_chat_ticket) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_basic_layer_is_a_separate_gate_from_the_token (__main__.OpsApi.test_basic_layer_is_a_separate_gate_from_the_token) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_bearer_and_cookie_both_work_but_logout_clears_cookie (__main__.OpsApi.test_bearer_and_cookie_both_work_but_logout_clears_cookie) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_brake_requires_the_exact_phrase (__main__.OpsApi.test_brake_requires_the_exact_phrase) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_delete_account_requires_exact_row_count (__main__.OpsApi.test_delete_account_requires_exact_row_count) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_delete_account_survives_other_peoples_interactions_on_its_posts (__main__.OpsApi.test_delete_account_survives_other_peoples_interactions_on_its_posts)
+别人点赞/评论/收藏了要删的账号的帖子时，只按 user_id 删会撞外键整笔回滚。 ... application_failure id=1b31b6fce17e46a9b4d798b1997a8503 error=ValueError
+application_failure id=6d14cd2dc96b42ebb10871f64d23c315 error=ValueError
+ERROR
+test_delete_plan_and_audit_never_carry_credentials (__main__.OpsApi.test_delete_plan_and_audit_never_carry_credentials) ... application_failure id=bae416f1bd9140fdacdab86cf89c339a error=ValueError
+application_failure id=9c245ddb52f14453b5a184ffabf80812 error=ValueError
+ERROR
+test_dm_export_covers_only_that_pair_and_blanks_recalled_bodies (__main__.OpsApi.test_dm_export_covers_only_that_pair_and_blanks_recalled_bodies) ... application_failure id=fc5cbc90cfed423ca483efc298b3d7b9 error=ValueError
+application_failure id=fe6c6b4519c649f68d8b911425b176d9 error=ValueError
+ERROR
+test_downstream_errors_are_not_masked_as_401 (__main__.OpsApi.test_downstream_errors_are_not_masked_as_401)
+中间件曾把下游的任何异常都吞掉并返回 401——排查时看起来像"口令错"，实际是接口炸了。 ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_every_data_endpoint_requires_auth (__main__.OpsApi.test_every_data_endpoint_requires_auth) ... application_failure id=5111249921f24bb0b5a58bc898739dfc error=ValueError
+application_failure id=be6e94a61d7e42a1b3fe934566d76214 error=ValueError
+ERROR
+test_export_is_only_this_user_and_free_of_credentials (__main__.OpsApi.test_export_is_only_this_user_and_free_of_credentials) ... application_failure id=b81238b9cbce410f8b1c9c4a66ced3e0 error=ValueError
+application_failure id=fa5a24c0d62d47f6b5269c553d489afb error=ValueError
+ERROR
+test_feedback_and_reports_lists_are_ready_to_work_from (__main__.OpsApi.test_feedback_and_reports_lists_are_ready_to_work_from)
+运维页要能一眼看到"有什么要处理"，而不是只有计数。 ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_feedback_reply_and_report_moderation_round_trip (__main__.OpsApi.test_feedback_reply_and_report_moderation_round_trip)
+工单回复回到 App；举报处理软下架内容并在同一事务留下审计。 ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_gate_only_rises_and_reports_what_the_app_says (__main__.OpsApi.test_gate_only_rises_and_reports_what_the_app_says) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_mail_check_is_truthful_and_sanitizes_provider_errors (__main__.OpsApi.test_mail_check_is_truthful_and_sanitizes_provider_errors) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_mail_config_does_not_return_or_audit_password (__main__.OpsApi.test_mail_config_does_not_return_or_audit_password) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_mail_configuration_requires_both_authentication_layers (__main__.OpsApi.test_mail_configuration_requires_both_authentication_layers) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_missing_basic_password_refuses_service_instead_of_opening_it (__main__.OpsApi.test_missing_basic_password_refuses_service_instead_of_opening_it) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_orphan_media_counts_are_real_and_no_filenames_leak (__main__.OpsApi.test_orphan_media_counts_are_real_and_no_filenames_leak) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_overview_counts_come_from_detail_tables_including_ones_directus_cannot_read (__main__.OpsApi.test_overview_counts_come_from_detail_tables_including_ones_directus_cannot_read) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_overview_reports_missing_table_as_none_not_zero (__main__.OpsApi.test_overview_reports_missing_table_as_none_not_zero) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_rename_user_needs_the_exact_username_and_leaves_an_audit_row (__main__.OpsApi.test_rename_user_needs_the_exact_username_and_leaves_an_audit_row) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_reset_password_revokes_old_sessions_and_the_new_pw_works (__main__.OpsApi.test_reset_password_revokes_old_sessions_and_the_new_pw_works) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_revoke_sessions_kills_tokens_and_leaves_others_alone (__main__.OpsApi.test_revoke_sessions_kills_tokens_and_leaves_others_alone) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_sensitive_push_and_invite_fields_are_redacted_in_audit (__main__.OpsApi.test_sensitive_push_and_invite_fields_are_redacted_in_audit) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_site_status_distinguishes_active_ip_and_pending_domain (__main__.OpsApi.test_site_status_distinguishes_active_ip_and_pending_domain) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_tampered_cookie_is_refused (__main__.OpsApi.test_tampered_cookie_is_refused) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_user_detail_counts_match_the_detail_tables (__main__.OpsApi.test_user_detail_counts_match_the_detail_tables) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_user_listing_finds_people_without_leaking_columns (__main__.OpsApi.test_user_listing_finds_people_without_leaking_columns) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_wrong_token_is_audited_and_eventually_locked (__main__.OpsApi.test_wrong_token_is_audited_and_eventually_locked) ... D:\RuanJian\JianZhiSuXingRuanJianHouTai\ops\admin_api.py:321: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\applications.py:4745: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+ok
+test_every_write_listed_field_is_inside_the_read_whitelist (__main__.SeedContract.test_every_write_listed_field_is_inside_the_read_whitelist) ... ok
+test_fields_must_be_comma_separated_strings (__main__.SeedContract.test_fields_must_be_comma_separated_strings) ... ok
+test_seed_registers_collection_meta (__main__.SeedContract.test_seed_registers_collection_meta)
+元数据不注册，控制台"内容"就是空的（实测：表在、接口能读、Studio 显示没有任何模型）。 ... ok
+
+======================================================================
+ERROR: test_delete_account_survives_other_peoples_interactions_on_its_posts (__main__.OpsApi.test_delete_account_survives_other_peoples_interactions_on_its_posts)
+别人点赞/评论/收藏了要删的账号的帖子时，只按 user_id 删会撞外键整笔回滚。
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\RuanJian\JianZhiSuXingRuanJianHouTai\tests\test_ops_api.py", line 70, in setUp
+    self.other = {"token": other["token"], "id": other["id"],
+                           ~~~~~^^^^^^^^^
+KeyError: 'token'
+
+======================================================================
+ERROR: test_delete_plan_and_audit_never_carry_credentials (__main__.OpsApi.test_delete_plan_and_audit_never_carry_credentials)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\RuanJian\JianZhiSuXingRuanJianHouTai\tests\test_ops_api.py", line 70, in setUp
+    self.other = {"token": other["token"], "id": other["id"],
+                           ~~~~~^^^^^^^^^
+KeyError: 'token'
+
+======================================================================
+ERROR: test_dm_export_covers_only_that_pair_and_blanks_recalled_bodies (__main__.OpsApi.test_dm_export_covers_only_that_pair_and_blanks_recalled_bodies)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\RuanJian\JianZhiSuXingRuanJianHouTai\tests\test_ops_api.py", line 70, in setUp
+    self.other = {"token": other["token"], "id": other["id"],
+                           ~~~~~^^^^^^^^^
+KeyError: 'token'
+
+======================================================================
+ERROR: test_every_data_endpoint_requires_auth (__main__.OpsApi.test_every_data_endpoint_requires_auth)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\RuanJian\JianZhiSuXingRuanJianHouTai\tests\test_ops_api.py", line 70, in setUp
+    self.other = {"token": other["token"], "id": other["id"],
+                           ~~~~~^^^^^^^^^
+KeyError: 'token'
+
+======================================================================
+ERROR: test_export_is_only_this_user_and_free_of_credentials (__main__.OpsApi.test_export_is_only_this_user_and_free_of_credentials)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\RuanJian\JianZhiSuXingRuanJianHouTai\tests\test_ops_api.py", line 70, in setUp
+    self.other = {"token": other["token"], "id": other["id"],
+                           ~~~~~^^^^^^^^^
+KeyError: 'token'
+
+----------------------------------------------------------------------
+Ran 39 tests in 95.294s
+
+FAILED (errors=5)

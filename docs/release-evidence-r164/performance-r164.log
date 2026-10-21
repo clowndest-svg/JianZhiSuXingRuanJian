@@ -1,0 +1,1 @@
+{"users": 100, "days_per_user": 365, "seeded_rows": 109500, "concurrency": 20, "requests": 400, "elapsed_s": 4.21, "p50_ms": 174.2, "p95_ms": 417.4, "5xx": 0, "sqlite_lock_errors": 0}

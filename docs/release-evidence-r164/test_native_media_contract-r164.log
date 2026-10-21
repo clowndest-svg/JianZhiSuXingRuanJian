@@ -1,0 +1,25 @@
+test_android_permission_recheck (__main__.NativeMediaContractTest.test_android_permission_recheck) ... ok
+test_canceled_pending (__main__.NativeMediaContractTest.test_canceled_pending) ... ok
+test_closed_webview (__main__.NativeMediaContractTest.test_closed_webview) ... ok
+test_destroyed_pending (__main__.NativeMediaContractTest.test_destroyed_pending) ... ok
+test_duplicate_pending (__main__.NativeMediaContractTest.test_duplicate_pending) ... ok
+test_malformed_results (__main__.NativeMediaContractTest.test_malformed_results) ... ok
+test_manifest_microphone_is_optional (__main__.NativeMediaContractTest.test_manifest_microphone_is_optional) ... ok
+test_only_literal_audio_allowlist_is_granted (__main__.NativeMediaContractTest.test_only_literal_audio_allowlist_is_granted) ... ok
+test_prompt_failure (__main__.NativeMediaContractTest.test_prompt_failure) ... ok
+test_rejected_origins (__main__.NativeMediaContractTest.test_rejected_origins) ... ok
+test_rejected_resources (__main__.NativeMediaContractTest.test_rejected_resources) ... ok
+test_request_recheck (__main__.NativeMediaContractTest.test_request_recheck) ... ok
+test_stop_only_clears_media_authorization (__main__.NativeMediaContractTest.test_stop_only_clears_media_authorization) ... ok
+test_stopped_pending (__main__.NativeMediaContractTest.test_stopped_pending) ... ok
+test_system_deny (__main__.NativeMediaContractTest.test_system_deny) ... ok
+test_system_grant (__main__.NativeMediaContractTest.test_system_grant) ... ok
+test_trusted_origins (__main__.NativeMediaContractTest.test_trusted_origins) ... ok
+test_unavailable_activity (__main__.NativeMediaContractTest.test_unavailable_activity) ... ok
+test_unrelated_cancel (__main__.NativeMediaContractTest.test_unrelated_cancel) ... ok
+test_unrelated_result (__main__.NativeMediaContractTest.test_unrelated_result) ... ok
+
+----------------------------------------------------------------------
+Ran 20 tests in 4.405s
+
+OK
