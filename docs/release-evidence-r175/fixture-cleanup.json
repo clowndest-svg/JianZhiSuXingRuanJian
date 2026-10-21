@@ -1,0 +1,15 @@
+{
+  "fixtures": [
+    "releasecheck_web_61c040006d_a",
+    "releasecheck_web_61c040006d_b"
+  ],
+  "result": {
+    "fixture_users_removed": 2,
+    "fixture_files_removed": 0,
+    "selftest_users_cleaned": 2,
+    "selftest_files_cleaned": 2,
+    "real_users_unchanged": 2,
+    "foreign_key_errors": 0,
+    "integrity": "ok"
+  }
+}

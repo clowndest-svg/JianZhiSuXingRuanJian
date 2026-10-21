@@ -1,0 +1,8 @@
+{
+  "build": 59,
+  "checks": [
+    "profile save updates header weight/height and the custom plan-scene picker persists",
+    "account center exposes switch-account; switching clears the session and opens the login dialog",
+    "call page mute/minimize/restore and hangup on production"
+  ]
+}

@@ -1,1 +1,6 @@
 release artifacts agree: version_code=59 size=5455382 sha256=b7af43265b04
+apksigner: v2=true v3=true signer=CN=QingSu Release, O=QingSu, C=CN
+asset raw equality: 33/33 (committed LF source vs CI-built apk)
+contains: choice-card / QINGSU_AVATAR_SRC / switchAccount
+
+live CI-signed apk: 2aa1475c2bfaac281af00399ee22338668d0716344e28ef49550098239aa5237

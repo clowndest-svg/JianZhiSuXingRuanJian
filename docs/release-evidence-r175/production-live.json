@@ -1,0 +1,21 @@
+{
+  "release": "r39651641358",
+  "source_revision": "8987f770fd977dd5491e5a886b60af9a9524e7c7",
+  "status": "ok",
+  "build": 59,
+  "version_name": "2.2.14",
+  "apk_sha256": "2aa1475c2bfaac281af00399ee22338668d0716344e28ef49550098239aa5237",
+  "apk_size": 5455382,
+  "apk_certificate_sha256": "c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f",
+  "chat_turn": true,
+  "public": {
+    "build": 59,
+    "checks": [
+      "profile save updates header weight/height and the custom plan-scene picker persists",
+      "account center exposes switch-account; switching clears the session and opens the login dialog",
+      "call page mute/minimize/restore and hangup on production"
+    ]
+  },
+  "rate_store": "redis",
+  "min_build_override": 0
+}

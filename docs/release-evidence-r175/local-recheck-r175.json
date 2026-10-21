@@ -1,0 +1,4 @@
+{"passed": ["18 official assets served", "real voice normalize/send/read/retry; authoritative duration; stolen media rejected", "local/official stickers send without mutual follow; recall"], "build": "59"}
+{"fixture_users_removed": 2, "fixture_files_removed": 2}
+{"passed": ["two simultaneous sessions", "fresh account and share URL", "share access boundary", "latest daily weight", "idempotent workout", "checklist persistence", "private 30-day summary", "shared goal creation, real progress and removal", "push capability and public guide", "session revocation", "update gate min_build=0 override=True blocked=0", "new-client registration requires an email code"]}
+remaining_users=2

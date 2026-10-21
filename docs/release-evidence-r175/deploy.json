@@ -1,0 +1,19 @@
+{
+  "release": "r39651641358",
+  "source_revision": "8987f770fd977dd5491e5a886b60af9a9524e7c7",
+  "backup": "D:/RuanJian/ShuJuChunChu/qoder-cn/bin/git/opt/qingsu/backups/release-20261022-022325",
+  "units": {
+    "qingsu": "active",
+    "qingsu-llama": "active",
+    "coturn": "active",
+    "qingsu-asr": "active",
+    "qingsu-qa": "inactive"
+  },
+  "counter_audit": {
+    "ok": true,
+    "drift": [],
+    "count": 0
+  },
+  "ci_incoming": "empty; tar archived at /opt/qingsu/ci-archive/r175-20261022",
+  "note": "r174 的切换账号会整页刷新，已在 r175 修复并加判据；本版只改前端与版本号。"
+}
