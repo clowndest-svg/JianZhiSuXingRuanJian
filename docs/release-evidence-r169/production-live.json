@@ -1,0 +1,20 @@
+{
+  "release": "r39585325751",
+  "source_revision": "588c71cedbae3a4bb4697d394fc847387d7a1e91",
+  "status": "ok",
+  "build": 53,
+  "version_name": "2.2.8",
+  "apk_sha256": "04f409f23540a3f0b54a5ec234a590c305aea4829558abe0c5938d28b5790520",
+  "apk_size": 5443094,
+  "chat_turn": true,
+  "public_clean": {
+    "build": 53,
+    "checks": [
+      "network results show image/title/select only",
+      "sent meme bubble is image only",
+      "hold-to-talk releases into an audio message"
+    ],
+    "errors": []
+  },
+  "rate_store": "redis"
+}

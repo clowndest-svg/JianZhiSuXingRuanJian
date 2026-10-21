@@ -6,7 +6,9 @@
     "local_apk_sha256": "0e282c2fe70aace95be13c10bc95704ed54466ce9114eb059971c93b46638036",
     "size": 5443094,
     "signature": "v2+v3",
-    "asset_raw_match": 33
+    "asset_raw_match": 33,
+    "local_build_sha256": "0e282c2fe70aace95be13c10bc95704ed54466ce9114eb059971c93b46638036",
+    "deployed_apk_sha256": "04f409f23540a3f0b54a5ec234a590c305aea4829558abe0c5938d28b5790520"
   },
   "suites": [
     {
@@ -57,5 +59,11 @@
     "remove source links/license/author from network result cards",
     "hold mic to record, release to send, slide up to cancel; tap keeps preview flow"
   ],
-  "postdeploy": "pending"
+  "postdeploy": "r39585325751 / 588c71c / 2.2.8 (53); public clean 3/3 (no links/license in list; image-only bubble; hold-to-talk sends)",
+  "live": {
+    "release": "r39585325751",
+    "source_revision": "588c71cedbae3a4bb4697d394fc847387d7a1e91",
+    "build": 53,
+    "backup": "/opt/qingsu/backups/release-20261021-184046"
+  }
 }

@@ -2,3 +2,5 @@ release artifacts agree: version_code=53 size=5443094 sha256=0e282c2fe70aace95be
 apksigner: v2=true v3=true signer=CN=QingSu Release, O=QingSu, C=CN
 asset raw equality: 33/33
 contains: dmHoldDown / dmAttributionHidden / no source links in network cards
+
+live CI-signed apk: 04f409f23540a3f0b54a5ec234a590c305aea4829558abe0c5938d28b5790520

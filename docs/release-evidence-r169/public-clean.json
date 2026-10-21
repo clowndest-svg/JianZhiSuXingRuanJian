@@ -1,0 +1,9 @@
+{
+  "build": 53,
+  "checks": [
+    "network results show image/title/select only",
+    "sent meme bubble is image only",
+    "hold-to-talk releases into an audio message"
+  ],
+  "errors": []
+}
