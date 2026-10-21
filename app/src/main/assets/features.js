@@ -2024,7 +2024,7 @@ function dmReleasePlayback(root) {
 function dmCleanup() {
     dmUi.generation++;
     dmUi.searchSeq++;
-    dmCancelRecording(); dmClearDraft();
+    dmCancelRecording(); dmMicRelease(); dmClearDraft();
     dmReleasePlayback(cmEl("thread-bubbles"));
     dmBlurKeyboard();
     dmClosePanels();
@@ -2410,16 +2410,49 @@ function dmPickMedia(input, kind) {
 
 function dmNow() { return typeof performance !== 'undefined' ? performance.now() : Date.now(); }
 function dmStopTracks(stream) { if (stream) stream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} }); }
+// 麦克风热流：WebView 里 getUserMedia 冷启动要 1~3 秒，按住才去要就会一直卡在“准备麦克风”。
+// 进语音模式或按下时先要，录音器直接复用它；录完保留 20 秒，下一条消息按下即录。
+const dmMic = { stream: null, pending: null, timer: 0 };
+function dmMicLive() {
+    const s = dmMic.stream;
+    return !!(s && s.getAudioTracks().some(t => t.readyState === 'live'));
+}
+function dmMicRelease() {
+    clearTimeout(dmMic.timer); dmMic.timer = 0;
+    const s = dmMic.stream; dmMic.stream = null;
+    dmStopTracks(s);
+}
+function dmMicKeep(ms) {
+    clearTimeout(dmMic.timer);
+    dmMic.timer = setTimeout(dmMicRelease, ms || 20000);
+}
+function dmWarmMic() {
+    if (dmMicLive()) { dmMicKeep(); return Promise.resolve(dmMic.stream); }
+    if (dmMic.pending) return dmMic.pending;
+    const p = (async () => {
+        if (dmCall.state !== 'idle') throw new Error('通话中不能录音');
+        const allowed = await dmEnsureMicrophone();
+        if (!allowed) { const err = new Error('麦克风权限未获准'); err.name = 'NotAllowedError'; throw err; }
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (dmCall.state !== 'idle') { dmStopTracks(stream); throw new Error('通话中不能录音'); }
+        dmMic.stream = stream; dmMicKeep();
+        return stream;
+    })();
+    dmMic.pending = p;
+    const clear = () => { if (dmMic.pending === p) dmMic.pending = null; };
+    p.then(clear, clear);
+    return p;
+}
 function dmCancelRecording() {
     clearTimeout(dmHold.timer); dmHold.pending = false; dmHold.held = false;
     const rec = dmUi.record; dmUi.record = null;
     if (rec) {
         rec.cancelled = true; clearInterval(rec.tick); clearTimeout(rec.limit);
-        dmStopTracks(rec.stream);
         try { if (rec.recorder && rec.recorder.state !== 'inactive') rec.recorder.stop(); } catch (e) {}
         if (rec.url) { dmReleasePlayback(cmEl('dm-voice-panel')); URL.revokeObjectURL(rec.url); rec.url = ''; }
         rec.chunks = []; rec.blob = null;
     }
+    if (dmMicLive()) dmMicKeep();
     const panel = cmEl('dm-voice-panel'); if (panel) { panel.hidden = true; panel.innerHTML = ''; }
     cmEl('dm-hold-bar')?.setAttribute('aria-expanded', 'false');
     dmHoldPaint();
@@ -2525,20 +2558,14 @@ function dmHoldCancelTap() {
 function dmHoldDown(event) {
     if (event && event.button !== undefined && event.button !== 0) return;
     clearTimeout(dmHold.timer);
-    dmHold.pending = true; dmHold.held = false; dmHold.released = false;
+    dmHold.pending = false; dmHold.held = true; dmHold.released = false;
     dmHold.cancelled = false; dmHold.startY = event.clientY;
     try { event.currentTarget.setPointerCapture(event.pointerId); } catch (e) {}
     dmHoldRender();
     callNativeVibrate(12);
-    dmHold.timer = setTimeout(() => {
-        if (!dmHold.pending) return;
-        if (dmHold.cancelled) { dmHold.pending = false; dmHoldRender(); return; }
-        dmHold.pending = false; dmHold.held = true;
-        dmHoldPaint();
-        dmHoldRender();
-        dmStartRecording(true);
-    }, 220);
     dmHoldPaint();
+    // 按下就开录（麦克风已热则 10~20ms 就绪）；太短/轻点由松开时统一判掉。
+    dmStartRecording(true);
     if (event.cancelable) event.preventDefault();
 }
 function dmHoldMove(event) {
@@ -2600,8 +2627,8 @@ function dmToggleInputMode() {
     dmUi.voiceMode = !dmUi.voiceMode;
     try { localStorage.setItem('QINGSU_DM_INPUT_MODE', dmUi.voiceMode ? 'voice' : 'text'); } catch (e) {}
     dmCancelRecording(); dmClosePanels(); dmPaintInputMode();
-    if (dmUi.voiceMode) dmBlurKeyboard();
-    else { dmInputFocus(); const input = cmEl('dm-input'); if (input) { input.focus(); dmScrollLatest(true); } }
+    if (dmUi.voiceMode) { dmBlurKeyboard(); dmWarmMic().catch(() => {}); }
+    else { dmMicRelease(); dmInputFocus(); const input = cmEl('dm-input'); if (input) { input.focus(); dmScrollLatest(true); } }
 }
 async function dmStartRecording(hold) {
     if (!cm.thread) return;
@@ -2617,15 +2644,10 @@ async function dmStartRecording(hold) {
     const rec = { scope: dmScope(), status: 'starting', chunks: [], bytes: 0, mime, cancelled: false,
         hold: holdMode, autoSend: holdMode };
     dmUi.record = rec; dmPaintVoice(rec);
-    const allowed = await dmEnsureMicrophone();
-    if (!allowed) {
-        if (dmUi.record === rec && dmScopeAlive(rec.scope)) { dmCancelRecording(); dmMicHelp(); }
-        return;
-    }
     if (!dmScopeAlive(rec.scope) || dmUi.record !== rec || rec.cancelled || document.hidden) return;
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        if (!dmScopeAlive(rec.scope) || dmUi.record !== rec || rec.cancelled || document.hidden) { dmStopTracks(stream); return; }
+        const stream = await dmWarmMic();
+        if (!dmScopeAlive(rec.scope) || dmUi.record !== rec || rec.cancelled || document.hidden) return;
         rec.stream = stream;
         rec.recorder = new Recorder(stream, { mimeType: mime, audioBitsPerSecond: 20000 });
         rec.recorder.ondataavailable = ev => {
@@ -2635,7 +2657,7 @@ async function dmStartRecording(hold) {
         };
         rec.recorder.onerror = () => { if (dmUi.record === rec) { dmCancelRecording(); callNativeToast('录音中断，未上传；请重试'); } };
         rec.recorder.onstop = () => {
-            dmStopTracks(rec.stream); clearInterval(rec.tick); clearTimeout(rec.limit);
+            clearInterval(rec.tick); clearTimeout(rec.limit); if (dmMicLive()) dmMicKeep();
             if (rec.cancelled || dmUi.record !== rec || !dmScopeAlive(rec.scope)) return;
             rec.blob = new Blob(rec.chunks, { type: rec.recorder.mimeType || rec.mime }); rec.chunks = [];
             if (!rec.blob.size || rec.blob.size > DM_AUDIO_MAX) { dmCancelRecording(); callNativeToast('没有录到可发送的语音，请重试'); return; }
@@ -2663,11 +2685,12 @@ async function dmStartRecording(hold) {
         }, 1000);
         rec.limit = setTimeout(() => { if (dmUi.record === rec) dmStopRecording(true); }, 599000);
     } catch (e) {
-        dmStopTracks(rec.stream);
+        dmMicRelease();
         if (dmUi.record !== rec || !dmScopeAlive(rec.scope)) return;
         dmCancelRecording();
         const name = String(e.name || '');
-        if (/NotAllowed|Permission|Security/.test(name)) dmMicHelp('麦克风权限未获准，语音发不了。去系统设置允许后回来重试。');
+        if (/通话/.test(String(e.message || ''))) callNativeToast('通话中不能录音');
+        else if (/NotAllowed|Permission|Security/.test(name)) dmMicHelp('麦克风权限未获准，语音发不了。去系统设置允许后回来重试。');
         else if (/NotReadable|TrackStart/.test(name)) callNativeToast('麦克风正被其他应用占用，关掉占用后重试');
         else if (/NotFound|DevicesNotFound/.test(name)) callNativeToast('这台设备没有可用麦克风，发文字吧');
         else if (/Abort/.test(name)) callNativeToast('录音被系统中断了，请重试');
@@ -2677,7 +2700,8 @@ async function dmStartRecording(hold) {
 function dmStopRecording(auto) {
     const rec = dmUi.record; if (!rec || rec.status !== 'recording') return;
     rec.duration = Math.min(600, Math.max(1, Math.round((dmNow() - rec.started) / 1000))); rec.autoStopped = !!auto;
-    rec.status = 'stopping'; clearInterval(rec.tick); clearTimeout(rec.limit); dmStopTracks(rec.stream);
+    rec.status = 'stopping'; clearInterval(rec.tick); clearTimeout(rec.limit);
+    if (dmMicLive()) dmMicKeep();
     // 松开就先把气泡放上屏（上传还没开始），别让用户盯着空白等服务器。
     if (rec.autoSend && !rec.rid) {
         rec.rid = dmRequestId();
@@ -2731,6 +2755,7 @@ async function dmSendAudio() {
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         dmCancelRecording();
+        dmMicRelease();
         cmEl('thread-bubbles')?.querySelectorAll('audio,video').forEach(el => el.pause());
     }
 });
@@ -2802,7 +2827,7 @@ function dmRenderBubbles() {
     let cursor = host.firstElementChild;
     for (const [key, m, pending] of rows) {
         wanted.add(key);
-        const signature = m ? JSON.stringify([m.id, m.body, m.kind, m.recalled_at, m.duration, String(m.media_url || '').split('?')[0], cm.myTheme]) : 'older';
+        const signature = m ? JSON.stringify([m.id, m.body, m.kind, m.recalled_at, m.duration, String(m.media_url || '').split('?')[0], cm.myTheme, m.asr_text, !!m.asr_pending, !!m.asr_failed, !!m.asr_empty]) : 'older';
         let node = nodes.get(key);
         if (!node || node.dataset.signature !== signature) {
             const next = document.createElement('div'); next.dataset.dmKey = key; next.dataset.signature = signature; next.className = 'dm-message';
@@ -2839,6 +2864,9 @@ function cmBubbleHTML(m, me, pending) {
         + ' oncontextmenu="return qsBubbleMenu(event,' + mid + ')"'
         + ' ontouchstart="qsBubbleHold(event,' + mid + ')" ontouchend="qsBubbleCancel()" ontouchmove="qsBubbleCancel()">'
         + dmBubbleInner(m, kind, pending)
+        + ((kind === "audio" && !pending && !m.recalled_at) ? dmAsrHTML(m) : "")
+        + ((kind === "audio" && !pending && !m.recalled_at && !m.asr_text && !m.asr_pending && !m.asr_failed && !m.asr_empty)
+            ? '<button type="button" class="dm-asr-btn" onclick="dmTranscribe(' + mid + ')">转文字</button>' : "")
         + "<time>" + escapeHtml(pending ? (isMedia && !m.media_url ? "上传中…" : "发送中") : cmAgo(m.created_at)) + "</time></div>";
     // 自己发的靠右、对方靠左，各带一个头像——小红书的私信就是这条规矩；
     // 只靠 align-self 时气泡和背景同色，看起来像"没有气泡"（截图里的样子）。
@@ -2871,7 +2899,9 @@ function qsShowMenu(anchor, mid, x, y) {
     menu.id = "bubble-menu";
     menu.className = "bubble-menu";
     const canRecall = mine && !m.recalled_at && qsWithin(m.created_at, 300);
-    menu.innerHTML = '<button type="button" onclick="qsCopyBubble(' + Number(mid) + ')">复制</button>'
+    const isAudio = (m.kind || 'text') === 'audio' && !m.recalled_at;
+    menu.innerHTML = (isAudio ? '<button type="button" onclick="dmTranscribe(' + Number(mid) + ')">转文字</button>' : '')
+        + '<button type="button" onclick="qsCopyBubble(' + Number(mid) + ')">复制</button>'
         + (canRecall ? '<button type="button" onclick="recallDM(' + Number(mid) + ')">撤回</button>' : "");
     document.body.appendChild(menu);
     const r = anchor.getBoundingClientRect();
@@ -2890,6 +2920,35 @@ function qsCopyBubble(mid) {
 function qsWithin(stamp, seconds) {
     const t = Date.parse(String(stamp || "").replace(" ", "T"));
     return isFinite(t) && (Date.now() - t) <= seconds * 1000;
+}
+async function dmTranscribe(mid) {
+    qsHideMenu();
+    const m = qsFindBubble(Number(mid));
+    if (!m || (m.kind || "text") !== "audio" || m.recalled_at) return;
+    if (m.asr_text) { callNativeToast("这条语音已经转成文字了"); return; }
+    if (m.asr_pending) return;
+    m.asr_pending = true; m.asr_failed = false; m.asr_empty = false;
+    if (dmIsVisible()) paintThread();
+    try {
+        const r = await postApi("/api/chat/asr", { message_id: Number(mid) });
+        m.asr_text = String(r.text || "");
+        m.asr_empty = !m.asr_text;
+        if (!m.asr_text) callNativeToast("没听清，再说一遍试试");
+    } catch (e) {
+        m.asr_failed = true;
+        const message = String((e && e.message) || "");
+        callNativeToast(/503|暂不可用/.test(message) ? "语音转文字暂不可用" : "转文字失败，长按重试");
+    } finally {
+        m.asr_pending = false;
+        if (dmIsVisible()) paintThread();
+    }
+}
+function dmAsrHTML(m) {
+    if (m.asr_pending) return '<p class="dm-asr pending" role="status">正在转文字…</p>';
+    if (m.asr_text) return '<p class="dm-asr">' + escapeHtml(m.asr_text) + '</p>';
+    if (m.asr_failed) return '<p class="dm-asr failed">转文字失败，长按重试</p>';
+    if (m.asr_empty) return '<p class="dm-asr">（没有听清内容）</p>';
+    return "";
 }
 async function recallDM(mid) {
     qsHideMenu();
@@ -3314,7 +3373,7 @@ async function dmStartCall() {
     if (!wsOpen()) { callNativeToast("实时连接还没连上，正在重连"); connectChat(); return; }
     const allowed = await dmEnsureMicrophone();
     if (!allowed) { dmMicHelp(); return; }
-    dmCancelRecording(); dmClosePanels(); dmBlurKeyboard();
+    dmCancelRecording(); dmMicRelease(); dmClosePanels(); dmBlurKeyboard();
     dmCall.state = "outgoing"; dmCall.peer = { id: peer.id, name: cmName(peer) };
     dmCall.role = "caller"; dmCall.id = ""; dmCall.offer = null; dmCall.pendingIce = []; dmCall.localIce = [];
     dmCall.muted = false; dmCall.speaker = false; dmCall.reason = "";
@@ -3342,6 +3401,7 @@ async function dmStartCall() {
 async function dmAcceptCall() {
     if (dmCall.state !== "incoming" || !dmCall.offer) return;
     dmCallRingStop();
+    dmCancelRecording(); dmMicRelease();
     const allowed = await dmEnsureMicrophone();
     if (!allowed) {
         if (dmCall.id) wsSend({ t: "call_reject", call_id: dmCall.id });

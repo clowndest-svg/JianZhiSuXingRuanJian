@@ -118,6 +118,21 @@ try {
   await page.waitForFunction(()=>{const a=document.querySelector('#thread-bubbles .dm-audio-wx.playing audio');return !!(a&&a.currentTime>0);},null,{timeout:15000});
   await shot(page,'dm-audio-playing.png');
   checks.push('wechat-style audio bubble marks itself playing and decodes authoritative audio');
+  // 转文字：气泡下方有入口，长按菜单也能转；结果落在气泡里（真实模型走服务端契约测试，这里钉界面接线）
+  assert.equal(await page.locator('#thread-bubbles .dm-asr-btn').count(),1);
+  await page.route('**/api/chat/asr',route=>route.fulfill({json:{code:0,text:'今天下午三点开会，别忘了带电脑。'}}));
+  await page.locator('#thread-bubbles .cm-bubble.media').last().click({button:'right'});
+  await page.waitForSelector('#bubble-menu button');
+  assert.match(await page.locator('#bubble-menu').textContent(),/转文字/);
+  await page.locator('#bubble-menu button').first().click();
+  await page.waitForFunction(()=>/下午三点/.test(document.querySelector('#thread-bubbles .dm-asr')?.textContent||''));
+  assert.equal(await page.locator('#thread-bubbles .dm-asr-btn').count(),0);
+  await page.unroute('**/api/chat/asr');
+  await shot(page,'dm-asr.png');
+  checks.push('voice bubble converts to text and shows the transcript');
+  // 转文字会重绘气泡（节点本来就会换）；重新记下当前 audio 节点，
+  // 后面的检查仍然是“收到新消息的重绘不许把正在播的节点换掉”。
+  await audio.evaluate(e=>{window.savedAudio=e;});
   // 失败要看得见：上传被掐断时气泡撤回、语音面板回来可重试，而不是静默消失
   const failedBefore=(await api('/api/chat/messages?with_user='+bid,null,a.token)).items.length;
   await page.route('**/api/chat/media',route=>route.abort());

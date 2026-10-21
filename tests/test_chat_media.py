@@ -95,6 +95,39 @@ class ChatMedia(unittest.TestCase):
                 self.assertEqual(up.status_code, 200, up.text)
                 self.assertEqual(up.json()['duration'], 1)
 
+    def test_asr_contract_denies_strangers_and_stays_honest(self):
+        up = self.upload('ogg').json()
+        sent = self.send('audio', media_name=up['name'], request_id='asr-p').json()['message']
+        text_msg = self.c.post('/api/chat/send', headers=self.auth(),
+            json={'to': self.ids[1], 'text': '文字消息', 'request_id': 'asr-t'}).json()['message']
+        stranger = self.c.post('/api/chat/asr', headers=self.auth(2), json={'message_id': sent['id']})
+        self.assertEqual(stranger.status_code, 404)
+        wrong_kind = self.c.post('/api/chat/asr', headers=self.auth(), json={'message_id': text_msg['id']})
+        self.assertEqual(wrong_kind.status_code, 400)
+        # 本机没有配置 ASR 时必须明说不可用（不能假装转了）
+        r = self.c.post('/api/chat/asr', headers=self.auth(), json={'message_id': sent['id']})
+        self.assertIn(r.status_code, (200, 503))
+        if r.status_code == 503:
+            self.assertIn('暂不可用', r.json()['detail'])
+        else:
+            self.assertIsInstance(r.json().get('text'), str)
+
+    def test_asr_result_is_cached_on_the_message(self):
+        up = self.upload('ogg').json()
+        sent = self.send('audio', media_name=up['name'], request_id='asr-c').json()['message']
+        with patch.object(self.m.asr, 'transcribe', return_value='你好，这是转出来的文字。'):
+            r = self.c.post('/api/chat/asr', headers=self.auth(), json={'message_id': sent['id']})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()['text'], '你好，这是转出来的文字。')
+        with patch.object(self.m.asr, 'transcribe', side_effect=AssertionError('should use cache')):
+            again = self.c.post('/api/chat/asr', headers=self.auth(1), json={'message_id': sent['id']})
+        self.assertEqual(again.json()['text'], '你好，这是转出来的文字。')
+        self.assertTrue(again.json().get('cached'))
+        listed = self.c.get('/api/chat/messages?with_user=' + str(self.ids[0]),
+                            headers=self.auth(1)).json()['items']
+        row = [item for item in listed if item['id'] == sent['id']][0]
+        self.assertEqual(row['asr_text'], '你好，这是转出来的文字。')
+
     def test_missing_and_stolen_voice_rejected(self):
         self.assertEqual(self.send('audio', media_name='missing.audio.ogg').status_code, 400)
         up = self.upload(who=2).json()

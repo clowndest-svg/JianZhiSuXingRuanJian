@@ -1,0 +1,113 @@
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_account_center_recovery_and_location (__main__.Integration.test_account_center_recovery_and_location)
+账号中心：改密掉线、头像签名、邮箱验证码、城市就近——全部真跑那条链路。 ... WARNING:root:key_regenerated name=media-signing.key 此前签发的签名链接与 WS 票据已全部失效
+WARNING:uvicorn.error:update_gate_blocked path=/api/dashboard build=0 min=29 ip=testclient
+ok
+test_backdated_weight_does_not_replace_latest (__main__.Integration.test_backdated_weight_does_not_replace_latest) ... ok
+test_ban_blocks_api_and_login_and_reverts (__main__.Integration.test_ban_blocks_api_and_login_and_reverts)
+封号不是给后台自己看的标记：请求必须真被拦住，且能解封恢复。 ... ok
+test_ban_never_leaks_before_the_password_is_proved (__main__.Integration.test_ban_never_leaks_before_the_password_is_proved)
+被封的号密码错时仍要说"用户名或密码错误"：不然"这个号被封过"就成了免口令可探的信号。 ... ok
+test_banned_user_cannot_open_ws_even_with_a_ticket_in_hand (__main__.Integration.test_banned_user_cannot_open_ws_even_with_a_ticket_in_hand)
+票据 30 秒内有效：先拿票再被封，这条连接必须连不上。 ... WARNING:root:key_regenerated name=ws-secret.key 此前签发的签名链接与 WS 票据已全部失效
+ok
+test_bubble_theme_round_trip_and_rejects_junk (__main__.Integration.test_bubble_theme_round_trip_and_rejects_junk) ... ok
+test_chat_media_needs_mutual_follow_and_survives_reload (__main__.Integration.test_chat_media_needs_mutual_follow_and_survives_reload)
+图片/视频只对互关开放；上传的文件必须有归属，消息重进还在。 ... WARNING:root:key_regenerated name=media-signing.key 此前签发的签名链接与 WS 票据已全部失效
+ok
+test_chat_sticker_and_invalid_kinds (__main__.Integration.test_chat_sticker_and_invalid_kinds) ... ok
+test_city_feed_needs_region_and_only_shows_same_province (__main__.Integration.test_city_feed_needs_region_and_only_shows_same_province) ... ok
+test_comment_deletable_flag_and_removal (__main__.Integration.test_comment_deletable_flag_and_removal)
+评论的「删除」按钮由服务端给的 deletable 决定。 ... ok
+test_comment_detail_includes_reply_target_identity (__main__.Integration.test_comment_detail_includes_reply_target_identity) ... ok
+test_comment_gif_upload_keeps_its_frames (__main__.Integration.test_comment_gif_upload_keeps_its_frames)
+动图必须原样存：重编码只留首帧，用户会以为"传上去就不会动了"。 ... WARNING:root:key_regenerated name=media-signing.key 此前签发的签名链接与 WS 票据已全部失效
+ok
+test_comment_images_are_owned_and_capped (__main__.Integration.test_comment_images_are_owned_and_capped) ... WARNING:root:key_regenerated name=media-signing.key 此前签发的签名链接与 WS 票据已全部失效
+ok
+test_comment_likes_agree_with_their_own_rows_and_sort_hot_first (__main__.Integration.test_comment_likes_agree_with_their_own_rows_and_sort_hot_first)
+评论点赞：明细是唯一真相，计数只是冗余列；热评要排在时间前面。 ... ok
+test_comment_mentions_only_notify_people_actually_named (__main__.Integration.test_comment_mentions_only_notify_people_actually_named)
+@ 提醒：客户端挑的人，必须正文里真写了 @他的名字 才算，否则就是骚扰通道。 ... ok
+test_community_requires_login (__main__.Integration.test_community_requires_login)
+社区是会员区：所有读写都要登录，不做匿名浏览，省掉一整类爬取与枚举。 ... ok
+test_completion_and_backfill (__main__.Integration.test_completion_and_backfill) ... ok
+test_concurrent_registration_and_cycle_numbers (__main__.Integration.test_concurrent_registration_and_cycle_numbers) ... ok
+test_connections_and_posts_of_agree_with_their_own_rows (__main__.Integration.test_connections_and_posts_of_agree_with_their_own_rows)
+统计格点进去的列表，必须和数字自己数出来的一致（父=Σ子那条老规矩）。 ... ok
+test_corrupt_profile_is_validation_error (__main__.Integration.test_corrupt_profile_is_validation_error) ... ok
+test_csv_schema_unknown_macros_and_formula_escape (__main__.Integration.test_csv_schema_unknown_macros_and_formula_escape) ... ok
+test_daily_zero_is_not_missing (__main__.Integration.test_daily_zero_is_not_missing) ... ok
+test_direct_messages_persist_and_unread (__main__.Integration.test_direct_messages_persist_and_unread)
+私信必须落在服务端：退出重进、换设备都还在，未读以 read_at 现算。 ... ok
+test_edit_post_is_author_only_and_marks_edited (__main__.Integration.test_edit_post_is_author_only_and_marks_edited)
+编辑入口是这一轮补的：只有作者能改，改完要有 edited_at，别人一个字都改不动。 ... ok
+test_favorite_toggle_list_and_isolation (__main__.Integration.test_favorite_toggle_list_and_isolation)
+收藏是小红书的第三动作：自己收藏自己看得到，别人看不到，取消就消失。 ... ok
+test_feedback_round_trip_and_region_honesty (__main__.Integration.test_feedback_round_trip_and_region_honesty) ... ok
+test_follow_search_and_discoverability (__main__.Integration.test_follow_search_and_discoverability) ... ok
+test_forced_update_gate (__main__.Integration.test_forced_update_gate)
+强更门：旧包不会发 X-App-Build，所以"缺头"是唯一打得着它们的判据。 ... WARNING:uvicorn.error:update_gate_blocked path=/api/dashboard build=0 min=22 ip=testclient
+WARNING:uvicorn.error:update_gate_blocked path=/api/dashboard build=21 min=22 ip=testclient
+WARNING:uvicorn.error:update_gate_blocked path=/api/dashboard build=0 min=22 ip=testclient
+WARNING:uvicorn.error:update_gate_blocked path=/api/dashboard build=0 min=22 ip=testclient
+WARNING:uvicorn.error:update_gate_blocked path=/api/dashboard build=0 min=22 ip=testclient
+WARNING:uvicorn.error:update_gate_blocked path=/api/dashboard build=0 min=22 ip=testclient
+ok
+test_historical_metrics_and_day_mode (__main__.Integration.test_historical_metrics_and_day_mode) ... ok
+test_history_pagination_owner (__main__.Integration.test_history_pagination_owner) ... ok
+test_idempotency (__main__.Integration.test_idempotency) ... ok
+test_images (__main__.Integration.test_images) ... WARNING:root:key_regenerated name=media-signing.key 此前签发的签名链接与 WS 票据已全部失效
+ok
+test_initial_state_and_share (__main__.Integration.test_initial_state_and_share) ... ok
+test_keys_can_live_outside_the_database_dir_and_say_when_rebuilt (__main__.Integration.test_keys_can_live_outside_the_database_dir_and_say_when_rebuilt)
+后台要读同一个库文件，密钥就不能留在那个目录里；被新建过也必须说得出。 ... WARNING:root:key_regenerated name=media-signing.key 此前签发的签名链接与 WS 票据已全部失效
+WARNING:root:key_regenerated name=ws-secret.key 此前签发的签名链接与 WS 票据已全部失效
+ok
+test_latest_weight_and_checklist (__main__.Integration.test_latest_weight_and_checklist) ... ok
+test_login_and_register_record_region_once (__main__.Integration.test_login_and_register_record_region_once)
+属地以前要等到发帖才认，新登录的人主页一直挂着"属地未知"。 ... ok
+test_login_counter (__main__.Integration.test_login_counter) ... ok
+test_media_rejects_foreign_files_and_bad_images (__main__.Integration.test_media_rejects_foreign_files_and_bad_images) ... WARNING:root:key_regenerated name=media-signing.key 此前签发的签名链接与 WS 票据已全部失效
+ok
+test_midnight_rollover_keeps_yesterday_verdict (__main__.Integration.test_midnight_rollover_keeps_yesterday_verdict)
+注册→第一笔→同日修正→跨午夜→第二天 全链路对账（方案 10.1）。 ... ok
+test_new_community_endpoints_all_require_login (__main__.Integration.test_new_community_endpoints_all_require_login) ... ok
+test_nickname_is_self_service_and_login_name_never_moves (__main__.Integration.test_nickname_is_self_service_and_login_name_never_moves)
+昵称可以自己改，登录名不能。注册没填昵称时服务端把登录名当昵称存了， ... ok
+test_notifications_read_clears_the_unread_count (__main__.Integration.test_notifications_read_clears_the_unread_count)
+机主清单 P0 第 1 条：那个按钮绑了一个不存在的函数，未读永远清不掉。 ... ok
+test_post_like_comment_counts_match_their_own_rows (__main__.Integration.test_post_like_comment_counts_match_their_own_rows)
+计数与明细必须自洽：like_count == COUNT(post_likes)，comment_count 同理。 ... ok
+test_post_limits_and_ownership (__main__.Integration.test_post_limits_and_ownership) ... ok
+test_post_title_is_one_line_optional_and_shows_everywhere (__main__.Integration.test_post_title_is_one_line_optional_and_shows_everywhere)
+标题是可选的一行短标题：卡片、详情、编辑都要带上它，且不能被塞成两行。 ... ok
+test_private_knowledge (__main__.Integration.test_private_knowledge) ... ok
+test_public_id_assigned_and_unique (__main__.Integration.test_public_id_assigned_and_unique)
+轻塑号：主页要展示、搜索要精确命中，所以注册就得有，且不能是内部自增 id。 ... ok
+test_public_photo_revocation_and_delete (__main__.Integration.test_public_photo_revocation_and_delete) ... WARNING:root:key_regenerated name=media-signing.key 此前签发的签名链接与 WS 票据已全部失效
+ok
+test_public_static_assets_really_serve (__main__.Integration.test_public_static_assets_really_serve)
+公网静态件必须真取到 200 与正确类型。 ... ok
+test_recall_only_own_within_window_and_clears_body (__main__.Integration.test_recall_only_own_within_window_and_clears_body) ... ok
+test_record_correction_and_isolation (__main__.Integration.test_record_correction_and_isolation) ... ok
+test_report_is_validated_and_stored (__main__.Integration.test_report_is_validated_and_stored) ... ok
+test_search_returns_posts_as_well_as_people (__main__.Integration.test_search_returns_posts_as_well_as_people) ... ok
+test_sessions_and_logout (__main__.Integration.test_sessions_and_logout) ... ok
+test_share_allowlist_excludes_indirect_private_fields (__main__.Integration.test_share_allowlist_excludes_indirect_private_fields) ... ok
+test_share_scope_expiry_and_rotation (__main__.Integration.test_share_scope_expiry_and_rotation) ... ok
+test_sources_macros_and_portions (__main__.Integration.test_sources_macros_and_portions) ... ok
+test_special_population_budget_boundary (__main__.Integration.test_special_population_budget_boundary) ... ok
+test_upload_limits_reject_oversize_and_overscan (__main__.Integration.test_upload_limits_reject_oversize_and_overscan)
+字节超限和像素超限都要拒，且不能留下半条周期记录。 ... ok
+test_validation (__main__.Integration.test_validation) ... ok
+test_weigh_only_and_water_only_are_theirs_own_kind (__main__.Integration.test_weigh_only_and_water_only_are_theirs_own_kind)
+只称重、只喝水、什么都没记，三者必须各有语义，不能一律当零摄入。 ... ok
+test_ws_ticket_is_one_time_and_chat_round_trips (__main__.Integration.test_ws_ticket_is_one_time_and_chat_round_trips) ... WARNING:root:key_regenerated name=ws-secret.key 此前签发的签名链接与 WS 票据已全部失效
+ok
+
+----------------------------------------------------------------------
+Ran 62 tests in 79.094s
+
+OK

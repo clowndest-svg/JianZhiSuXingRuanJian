@@ -4,7 +4,7 @@ from pathlib import Path
 root=Path('/opt/qingsu');problems=[];report={'checked_at':int(time.time())}
 public_base=(root/'site-base').read_text().strip() if (root/'site-base').is_file() else 'https://124.220.54.64'
 if public_base not in ('https://124.220.54.64','https://scientificexploration.art'):raise SystemExit('Invalid active public site')
-for unit in ('qingsu','qingsu-llama','qingsu-backup.timer','qingsu-cert-renew.timer','coturn'):
+for unit in ('qingsu','qingsu-llama','qingsu-backup.timer','qingsu-cert-renew.timer','coturn','qingsu-asr'):
     state=subprocess.run(['systemctl','is-active',unit],capture_output=True,text=True).stdout.strip();report[unit]=state
     if state!='active':problems.append(unit)
 try:
@@ -18,6 +18,12 @@ try:
 except Exception:
     report['turn']=False
 if not report['turn']:problems.append('turn')
+try:
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://127.0.0.1:8071/health',timeout=5) as r:
+        report['asr_http']=r.status
+except Exception:
+    report['asr_http']=0
+if report['asr_http']!=200:problems.append('asr_http')
 
 THRESHOLDS={'cpu_percent':85.0,'memory_percent':85.0,'swap_percent':25.0,'load_per_core':1.5,'disk_percent':85.0}
 for _threshold in tuple(THRESHOLDS):

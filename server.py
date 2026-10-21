@@ -6,7 +6,7 @@ import math
 import uuid
 import logging
 from app_modules.features import share_settings, public_projection, DEFAULT_SCOPE
-from app_modules import mailer, geo, geoip, community, chat, audio, stickers
+from app_modules import mailer, geo, geoip, community, chat, audio, stickers, asr
 import io
 import mimetypes
 import os
@@ -528,6 +528,8 @@ def _community_schema(c):
         ("media_h", "INTEGER NOT NULL DEFAULT 0"),
         ("media_dur", "INTEGER NOT NULL DEFAULT 0"),
         ("media_meta", "TEXT NOT NULL DEFAULT '{}'"),
+        # 语音转文字的结果跟着消息存：同一段语音只转一次，两端都能看到。
+        ("asr_text", "TEXT NOT NULL DEFAULT ''"),
     ])
     c.execute("""
     CREATE TABLE IF NOT EXISTS user_blocks (
@@ -3561,7 +3563,8 @@ def health():
                                 for n in ("media-signing.key", "ws-secret.key")}}
     info["chat"] = {"online": len(_WS_HUB), "sockets": int(sum(len(v) for v in _WS_HUB.values())),
                     "rejected": int(_ws_stats["rejected"]), "redis": bool(redis_up()),
-                    "turn": bool(turn_secret()), "calls": len(_CALLS)}
+                    "turn": bool(turn_secret()), "calls": len(_CALLS),
+                    "asr": asr.enabled()}
     # 限流计数存在哪，必须一眼看得见：Redis 在就是全局一份（多进程也准），
     # 退回进程内内存时每个进程各算一份——将来加 --workers 时这条会悄悄放宽 N 倍。
     info["rate"] = {"store": "redis" if redis_up() else "memory",
@@ -3872,6 +3875,10 @@ class StickerImportReq(ValidatedModel):
 
 class DmReadReq(ValidatedModel):
     with_user: int
+
+
+class DmAsrReq(ValidatedModel):
+    message_id: int
 
 
 class RecallReq(ValidatedModel):
@@ -4813,6 +4820,7 @@ def _message_dict(row):
             "media_url": signed_photo("/uploads/" + media) if (media and not recalled) else "",
             "media_mime": (row["media_mime"] or "") if "media_mime" in names else "",
             "media_size": int(row["media_size"] or 0) if "media_size" in names else 0,
+            "asr_text": "" if recalled else ((row["asr_text"] or "") if "asr_text" in names else ""),
             "created_at": row["created_at"],
             "read_at": row["read_at"], "request_id": row["request_id"]}
 
@@ -5202,6 +5210,56 @@ def chat_messages(with_user: int, cursor: int = 0, limit: int = 30,
                 "more": len(rows) > size}
     finally:
         conn.close()
+
+
+_asr_lock = asyncio.Lock()
+_asr_hits = {}
+
+
+def _asr_rate_ok(uid):
+    now = time.time()
+    hits = [t for t in _asr_hits.get(int(uid), []) if now - t < 300]
+    if len(hits) >= 8:
+        return False
+    hits.append(now)
+    _asr_hits[int(uid)] = hits
+    return True
+
+
+@app.post("/api/chat/asr")
+async def chat_asr(req: DmAsrReq, user: dict = Depends(get_current_user)):
+    """把一条语音消息转成文字；结果跟着消息存，双方都能看到。"""
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM messages WHERE id=?", (int(req.message_id),)).fetchone()
+        if not row or int(user["id"]) not in (int(row["from_id"]), int(row["to_id"])):
+            raise HTTPException(status_code=404, detail="找不到这条语音")
+        if (row["kind"] or "text") != "audio" or row["recalled_at"]:
+            raise HTTPException(status_code=400, detail="只有语音消息能转文字")
+        if row["asr_text"]:
+            return {"code": 0, "text": row["asr_text"], "cached": True}
+        media = row["media_name"] or ""
+    finally:
+        conn.close()
+    path = os.path.join(UPLOAD_DIR, media)
+    if not media or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="这条语音的文件已经不在了")
+    if not _asr_rate_ok(user["id"]):
+        raise HTTPException(status_code=429, detail="转文字太频繁，歇一下再试")
+    async with _asr_lock:
+        try:
+            text = await asyncio.to_thread(asr.transcribe, path)
+        except asr.AsrUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error))
+    text = (text or "").strip()[:500]
+    if text:
+        conn = get_db()
+        try:
+            conn.execute("UPDATE messages SET asr_text=? WHERE id=?", (text, int(req.message_id)))
+            conn.commit()
+        finally:
+            conn.close()
+    return {"code": 0, "text": text}
 
 
 @app.post("/api/chat/read")

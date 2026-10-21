@@ -1,0 +1,6 @@
+WARM_AFTER_TOGGLE { live: true, tracks: 1 }
+{"round":0,"toRecordingMs":13}
+{"round":1,"toRecordingMs":7}
+WARM_AFTER_SEND { live: true }
+AFTER_TEXT_MODE { live: false }
+WARMMIC_FOLDER D:\RuanJian\JiaZhiSuXianApk\_audit_sandbox\warmmic-12932
