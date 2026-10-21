@@ -15,7 +15,7 @@
 
 公网真实浏览器 3/3：搜索结果只有图/名称/选择；发送的中文梗图气泡只有图片；按住说话松开后直接出现语音消息，没有二次确认。线上 `r39585325751` / source `588c71c` / 2.2.8（53），APK SHA-256 `04f409f23540a3f0b54a5ec234a590c305aea4829558abe0c5938d28b5790520`，备份 `/opt/qingsu/backups/release-20261021-184046`。
 
-监控 18:39 窗口：CPU 0.3%、内存 42.2%、swap 0.4%、load/core 0.05、磁盘 25.4%，`coturn=active`、`turn=true`、`problems: []`、`errors_5xx=0`。此前加的 Directus 768MB/1核、llama 1.2GB/2核、qingsu+coturn CPUWeight=500 仍生效。测试夹具删除 2 个账号和 2 个媒体，最终真实用户 2、夹具 0、外键 0、完整性 ok。
+监控 18:44 窗口：CPU 0.8%、内存 41.0%、swap 0.4%、load/core 0.03、磁盘 25.4%，`coturn=active`、`turn=true`、`problems: []`、`errors_5xx=0`、p95 48.2ms。此前加的 Directus 768MB/1核、llama 1.2GB/2核、qingsu+coturn CPUWeight=500 仍生效。测试夹具删除 2 个账号和 2 个媒体，最终真实用户 2、夹具 0、外键 0、完整性 ok。
 
 ## 边界
 
