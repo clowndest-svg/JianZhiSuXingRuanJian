@@ -600,6 +600,11 @@ def _cn_page_url(value, fallback):
         return fallback
 
 
+def _cn_title(value):
+    text = _plain(value, 120) or "中文梗图"
+    return text if len(text) <= 18 else text[:17] + "…"
+
+
 def _cn_size(value):
     try:
         number = int(value)
@@ -649,7 +654,7 @@ def _cn_records_360(term, opener=None):
         width, height = _cn_size(item.get("width")), _cn_size(item.get("height"))
         if width and height and (width < 80 or height < 80):
             continue
-        title = _plain(item.get("title"), 120) or "中文梗图"
+        title = _cn_title(item.get("title"))
         author = _plain(item.get("site"), 80) or "原图作者"
         records.append(dict(title=title, preview_url=image, download_url=image,
             source_url=_cn_page_url(item.get("link"), "https://image.so.com/"),
@@ -681,7 +686,7 @@ def _cn_records_baidu(term, opener=None):
         width, height = _cn_size(query.get("w")), _cn_size(query.get("h"))
         if width and height and (width < 80 or height < 80):
             continue
-        title = _plain(item.get("fromPageTitleEnc"), 120) or "中文梗图"
+        title = _cn_title(item.get("fromPageTitleEnc"))
         author = _plain(item.get("fromURLHost"), 80) or "原图作者"
         source = "https://image.baidu.com/search/index?" + urlencode({"tn": "baiduimage", "word": term})
         records.append(dict(title=title, preview_url=image, download_url=image,
