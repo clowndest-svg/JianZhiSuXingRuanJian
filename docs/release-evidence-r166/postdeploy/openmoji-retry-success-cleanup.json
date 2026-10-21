@@ -1,0 +1,21 @@
+{
+  "dry_run": {
+    "fixtures": [
+      "releasecheck_web_735cc454cd_a"
+    ],
+    "ids": [
+      418
+    ],
+    "media": [
+      "b603e64e136d45ffad8fe900d71ebca6.png"
+    ],
+    "real_users_before": 2
+  },
+  "result": {
+    "fixture_users_removed": 1,
+    "fixture_files_removed": 1,
+    "real_users_unchanged": 2,
+    "foreign_key_errors": 0,
+    "integrity": "ok"
+  }
+}

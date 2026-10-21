@@ -21,8 +21,9 @@
   "fixtures_removed_today": {
     "initial": 2,
     "postdeploy": 2,
-    "openmoji_retry": 1,
-    "media_files": 3
+    "openmoji_retry_503": 1,
+    "openmoji_retry_success": 1,
+    "media_files": 4
   },
   "foreign_key_errors": 0,
   "integrity": "ok",
@@ -71,16 +72,16 @@
     "errors": []
   },
   "openmoji_retry": {
-    "search": {
-      "status": 200,
-      "provider": "OpenMoji",
-      "items": 12
-    },
-    "import": {
+    "first_attempt": {
       "status": 503,
-      "detail": "Service Unavailable"
+      "detail": "upstream image host"
     },
-    "interpretation": "upstream image host transient 503; search works, browser keeps draft and allows cancelling; earlier 13:58 successful import remains in production-browser.json"
+    "second_attempt": {
+      "status": 200,
+      "name": "b603e64e136d45ffad8fe900d71ebca6.png",
+      "kind": "sticker"
+    },
+    "interpretation": "search stayed 200/12 throughout; first download attempt hit a transient upstream 503 at ~14:45, retry at ~14:55 succeeded; browser degraded honestly during the outage"
   },
   "ci_incoming": "empty; deploy tar moved to /opt/qingsu/ci-archive/r166-followup-20261021",
   "media_orphans": {

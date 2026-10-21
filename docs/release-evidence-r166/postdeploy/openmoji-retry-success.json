@@ -1,0 +1,17 @@
+{
+  "search": {
+    "status": 200,
+    "provider": "OpenMoji",
+    "items": 12
+  },
+  "import": {
+    "status": 200,
+    "name": "b603e64e136d45ffad8fe900d71ebca6.png",
+    "kind": "sticker"
+  },
+  "first_postdeploy_attempt": {
+    "status": 503,
+    "detail": "Service Unavailable"
+  },
+  "note": "First post-deploy attempt (~14:45) hit an upstream image-host 503; a retry about 10 minutes later succeeded. Search stayed 200/12 items throughout."
+}

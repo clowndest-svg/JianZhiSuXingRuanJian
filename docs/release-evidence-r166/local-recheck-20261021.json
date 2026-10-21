@@ -110,8 +110,8 @@
     "backup": "/opt/qingsu/backups/release-20261021-144224"
   },
   "cleanup": {
-    "fixture_users_removed": 5,
-    "fixture_files_removed": 3,
+    "fixture_users_removed": 6,
+    "fixture_files_removed": 4,
     "rounds": 3,
     "real_users": 2,
     "fixtures_remaining": 0,
@@ -159,23 +159,10 @@
     ]
   },
   "openmoji_postdeploy": {
-    "search": {
-      "status": 200,
-      "provider": "OpenMoji",
-      "items": 12
-    },
-    "import": {
-      "status": 503,
-      "detail": "Service Unavailable"
-    },
-    "browser": {
-      "unavailable": [
-        "OpenMoji image import"
-      ],
-      "draft_retained_and_cancellable": true,
-      "errors": []
-    },
-    "interpretation": "Upstream image host returned 503 during import. Search and draft handling stay correct; the earlier 13:58 successful import is in production-browser.json. Not counted as a post-deploy OpenMoji success."
+    "search": "200/12",
+    "first_import": "503 upstream",
+    "retry_import": "200 sticker",
+    "browser_degradation": "draft retained and cancellable during outage"
   },
   "monitor_transient": "2 upstream 503s at 14:49 window; clean at 14:54"
 }
