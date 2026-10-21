@@ -48,6 +48,21 @@ public class WebAppInterface {
     }
 
     @JavascriptInterface
+    public String microphonePermissionState() {
+        return context instanceof MainActivity ? ((MainActivity) context).microphonePermissionState() : "unknown";
+    }
+
+    @JavascriptInterface
+    public void requestMicrophonePermission() {
+        if (context instanceof MainActivity) ((MainActivity) context).requestMicPreflight();
+    }
+
+    @JavascriptInterface
+    public void openAppSettings() {
+        openAppSettingsPage();
+    }
+
+    @JavascriptInterface
     public void vibrate(long milliseconds) {
         Vibrator v = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
         if (v != null && v.hasVibrator()) {

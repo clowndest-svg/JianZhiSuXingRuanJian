@@ -34,7 +34,9 @@
 
 服务器需安装 `ffmpeg` / `ffprobe` 并包含 libopus。发布入口 `verify_live.py` 在11项常规冒烟之后调用 `verify-chat-media-live.py`：验证18枚官方素材、真实语音转码/时长/发送/重试/归属、图片表情与撤回；仅按随机夹具账号ID回收数据库行和对应媒体。隔离QA自动根据 `QINGSU_VERIFY_DB` 选择其 qa-uploads，生产使用 `/opt/qingsu/uploads`。
 
-显式 `QINGSU_VERIFY_NETWORK=1 python3 .../verify-chat-media-live.py` 可检查真实 OpenMoji 搜索、下载与带署名发送。外部来源网络故障不应被当作本地流程通过；CI中的网络界面检查使用固定夹具，正式网络实测另记。OpenMoji17.0.0索引和许可说明位于app_modules，原图按需下载；Commons从当前主机握手超时，界面明确提示。两来源都不是全网梗图搜索。
+显式 `QINGSU_VERIFY_NETWORK=1 python3 .../verify-chat-media-live.py` 可检查真实 OpenMoji 搜索、下载与带署名发送。外部来源网络故障不应被当作本地流程通过；CI中的网络界面检查使用固定夹具，正式网络实测另记。OpenMoji17.0.0索引和许可说明位于app_modules，原图按需下载；Commons从当前主机握手超时，界面明确提示。
+
+r167 起网络表情默认是中文梗图：服务端检索 360 图片（主）和百度图片（兜底），只取检索结果的 HTTPS 缩略图，来源页、作者和“版权归原作者、未声明许可”随消息保留；关键词会发送给对应检索服务。360 拒绝或无结果时切百度；两者都没结果时客户端用 Memegen 模板或内置背景生成一张带用户文字的图，走现有本地表情上传。搜索缓存 10 分钟、结果 token 15 分钟、Memegen 模板缓存 1 小时，Memegen 预览图使用 `?width=240`，导入仍取原图。360/百度的图片 URL 走主机+路径白名单，不跟随重定向，避免 SSRF；上游 HTTP 错误不会当成成功。
 
 - `systemctl status qingsu`：专用账号运行，只读代码，数据与媒体目录可写。
 - 发布脚本显式将代码/网页目录设为root所有、目录755、文件644，避免Windows归档的可写权限进入服务器。服务账号不可写`server.py`；数据和媒体继续由服务账号管理。

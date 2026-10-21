@@ -100,11 +100,25 @@ interface ValueCallback<T> { void onReceiveValue(T value); }
 class WebView {
     boolean destroyed;
     void destroy() { destroyed = true; }
+    boolean isDestroyed() { return destroyed; }
+    void post(Runnable action) { action.run(); }
+    void evaluateJavascript(String script, ValueCallback<String> callback) {}
+}
+class SharedPreferences {
+    boolean getBoolean(String key, boolean fallback) { return fallback; }
+    Editor edit() { return new Editor(); }
+    static class Editor {
+        Editor putBoolean(String key, boolean value) { return this; }
+        void apply() {}
+    }
 }
 class TestActivity {
     boolean permissionGranted, finishing, frameworkDestroyed, throwOnPrompt;
     int prompts, lastRequestCode, starts, stops;
     String[] requestedPermissions;
+    static final int MODE_PRIVATE = 0;
+    SharedPreferences getSharedPreferences(String name, int mode) { return new SharedPreferences(); }
+    boolean shouldShowRequestPermissionRationale(String permission) { return false; }
     int checkSelfPermission(String permission) {
         if (!android.Manifest.permission.RECORD_AUDIO.equals(permission)) {
             throw new AssertionError("unexpected permission check: " + permission);
@@ -487,6 +501,17 @@ class NativeMediaContractTest(unittest.TestCase):
         self.assertEqual(len(features), 1)
         self.assertEqual(features[0].get(ANDROID_NS + "required"), "false")
         self.assertNotIn("android.permission.CAMERA", permissions)
+
+    def test_microphone_preflight_bridge_and_js(self):
+        bridge = (ROOT / "app/src/main/java/com/fitcoach/shapemaster/WebAppInterface.java").read_text(encoding="utf-8")
+        for token in ("requestMicrophonePermission", "microphonePermissionState", "openAppSettings"):
+            self.assertIn(token, bridge)
+        self.assertIn("MIC_PREFLIGHT_REQUEST", self.source)
+        self.assertIn("qsMicPermissionResult", self.source)
+        features = (ROOT / "app/src/main/assets/features.js").read_text(encoding="utf-8")
+        for token in ("dmEnsureMicrophone", "dmMicHelp", "NotReadable", "microphonePermissionState"):
+            self.assertIn(token, features)
+        self.assertNotIn("麦克风不可用，未录音；请检查设备后重试", features)
 
     def test_only_literal_audio_allowlist_is_granted(self):
         grants = re.findall(r"\b\w+\.grant\((.*?)\);", self.source, flags=re.DOTALL)

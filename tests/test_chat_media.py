@@ -133,6 +133,19 @@ class ChatMedia(unittest.TestCase):
         r = self.c.post('/api/chat/stickers/upload', headers=self.auth(), files={'file': ('x.svg', b'<svg/>', 'image/png')})
         self.assertEqual(r.status_code, 400)
 
+    def test_sticker_search_route_reports_fallback_sources(self):
+        with patch.object(stickers, 'search', return_value={
+                'items': [], 'provider': '中文梗图', 'available': False, 'detail': '没搜到',
+                'sources': ['360 图片'], 'unavailable': ['百度图片']}):
+            r = self.c.get('/api/chat/stickers/search', params={'q': '你好', 'provider': 'cn'},
+                           headers=self.auth())
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body['available'], False)
+        self.assertEqual(body['sources'], ['360 图片'])
+        self.assertEqual(body['unavailable'], ['百度图片'])
+        self.assertEqual(body['detail'], '没搜到')
+
     def test_official_manifest_assets_and_validation(self):
         manifest = self.c.get('/stickers.json')
         self.assertEqual(manifest.status_code, 200)
@@ -175,6 +188,7 @@ class ProviderSecurity(unittest.TestCase):
         with patch.object(stickers,'_memes',(0,())):
             result=stickers.search('猫',1,b'key',provider='memegen',opener=opener)
             self.assertEqual(len(result['items']),1)
+            self.assertTrue(result['items'][0]['preview_url'].endswith('?width=240'))
             token=result['items'][0]['id'];blob,meta=stickers.import_media(token,1,b'key',opener=opener)
             self.assertEqual(blob,image.getvalue());self.assertIn('未声明',meta['license'])
             self.assertTrue(meta['source_url'].startswith('https://knowyourmeme.com/'))
@@ -219,6 +233,70 @@ class ProviderSecurity(unittest.TestCase):
                     'https://upload.wikimedia.org:444/wikipedia/commons/a',
                     'https://upload.wikimedia.org/wikipedia/commons/%2e%2e/x']:
             with self.subTest(url=url), self.assertRaises(stickers.InvalidSticker): stickers._media_url(url)
+
+    def test_chinese_sources_fallback_import_and_boundaries(self):
+        image = io.BytesIO()
+        Image.new('RGB', (10, 10), (20, 180, 90)).save(image, format='JPEG')
+        image_bytes = image.getvalue()
+        list360 = json.dumps({'list': [{
+            'thumb': 'https://p1.ssl.qhimgs1.com/t' + 'a' * 16 + '.jpg',
+            'title': '你好表情包', 'site': 'fabiaoqing.com',
+            'link': 'https://fabiaoqing.com/detail/1', 'width': '300', 'height': '300'}]}).encode()
+        list360_empty = json.dumps({'list': []}).encode()
+        list_baidu = json.dumps({'data': [{
+            'middleURL': 'https://img1.baidu.com/it/u=1,2&fm=253&f=JPEG?w=300&h=300',
+            'fromPageTitleEnc': '你好梗图', 'fromURLHost': 'xiaohongshu.com'}]}).encode()
+
+        def opener(request, timeout):
+            url = request.full_url
+            body = (list360 if url.startswith(stickers.SO360_API)
+                    else list_baidu if url.startswith(stickers.BAIDU_API)
+                    else image_bytes)
+            response = io.BytesIO(body)
+            response.headers = {'Content-Type': 'application/json' if body in (list360, list_baidu)
+                                else 'image/jpeg'}
+            response.getcode = lambda: 200
+            response.geturl = lambda: url
+            return response
+
+        with patch.object(stickers, '_cn_search', stickers.OrderedDict()), \
+                patch.object(stickers, '_cn_results', stickers.OrderedDict()):
+            result = stickers.search('你好', 1, b'key', provider='cn', opener=opener)
+            self.assertTrue(result['available'])
+            self.assertIn('360 图片', result['sources'])
+            self.assertEqual(len(result['items']), 2)
+            token = result['items'][0]['id']
+            blob, meta = stickers.import_media(token, 1, b'key', opener=opener)
+            self.assertEqual(blob, image_bytes)
+            self.assertEqual(meta['license'], stickers.CN_LICENSE)
+            self.assertTrue(meta['source_url'].startswith('https://'))
+            with self.assertRaises(stickers.InvalidSticker):
+                stickers.import_media(token, 2, b'key', opener=opener)
+
+        def baidu_only(request, timeout):
+            url = request.full_url
+            body = list360_empty if url.startswith(stickers.SO360_API) else (
+                list_baidu if url.startswith(stickers.BAIDU_API) else image_bytes)
+            response = io.BytesIO(body)
+            response.headers = {'Content-Type': 'application/json' if body in (list360_empty, list_baidu)
+                                else 'image/jpeg'}
+            response.getcode = lambda: 200
+            response.geturl = lambda: url
+            return response
+
+        with patch.object(stickers, '_cn_search', stickers.OrderedDict()), \
+                patch.object(stickers, '_cn_results', stickers.OrderedDict()):
+            result = stickers.search('你好', 1, b'key', provider='cn', opener=baidu_only)
+            self.assertEqual(result['sources'], ['百度图片'])
+            self.assertEqual(result['items'][0]['source_label'], '百度图片')
+
+        for url in ['https://p1.ssl.qhimgs1.com/../secret.jpg',
+                    'https://p1.ssl.qhimgs1.com.evil.test/t' + 'a' * 16 + '.jpg',
+                    'https://evil.test/t' + 'a' * 16 + '.jpg',
+                    'https://img1.baidu.com/it/u=1,2/../../secret',
+                    'https://img1.baidu.com/not-it/u=1,2']:
+            with self.subTest(url=url), self.assertRaises(stickers.InvalidSticker):
+                stickers._media_url(url)
 
 
 if __name__ == '__main__': unittest.main(verbosity=2)

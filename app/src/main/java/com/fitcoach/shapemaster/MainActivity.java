@@ -271,9 +271,11 @@ public class MainActivity extends Activity {
 
     // ================= 麦克风授权：私聊语音 =================
     private static final int MIC_PERM_REQUEST = 2028;
+    private static final int MIC_PREFLIGHT_REQUEST = 2029;
     private PermissionRequest pendingMediaRequest;
     // 网页取消或退后台后，旧系统弹窗仍可能返回；结果回来前不接下一次授权。
     private boolean micPermissionInFlight;
+    private boolean micPreflightInFlight;
     private boolean mediaPermissionStopped;
     private boolean mediaPermissionDestroyed;
 
@@ -332,6 +334,7 @@ public class MainActivity extends Activity {
         }
         pendingMediaRequest = request;
         micPermissionInFlight = true;
+        getSharedPreferences("qingsu", MODE_PRIVATE).edit().putBoolean("mic_requested", true).apply();
         try {
             requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, MIC_PERM_REQUEST);
         } catch (Exception e) {
@@ -339,6 +342,42 @@ public class MainActivity extends Activity {
             denyPendingMediaRequest();
             Toast.makeText(this, "系统没让调起录音授权，语音发不了", Toast.LENGTH_LONG).show();
         }
+    }
+
+    public String microphonePermissionState() {
+        if (hasMicrophonePermission()) return "granted";
+        boolean asked = getSharedPreferences("qingsu", MODE_PRIVATE).getBoolean("mic_requested", false);
+        if (!asked) return "prompt";
+        return shouldShowRequestPermissionRationale(android.Manifest.permission.RECORD_AUDIO) ? "denied" : "blocked";
+    }
+
+    public void requestMicPreflight() {
+        if (hasMicrophonePermission()) {
+            notifyMicPreflight(true);
+            return;
+        }
+        if (micPreflightInFlight) return;
+        micPreflightInFlight = true;
+        getSharedPreferences("qingsu", MODE_PRIVATE).edit().putBoolean("mic_requested", true).apply();
+        try {
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, MIC_PREFLIGHT_REQUEST);
+        } catch (Exception error) {
+            micPreflightInFlight = false;
+            notifyMicPreflight(false);
+        }
+    }
+
+    private void notifyMicPreflight(boolean granted) {
+        if (webView == null) return;
+        webView.post(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            try {
+                webView.evaluateJavascript(
+                        "window.qsMicPermissionResult&&window.qsMicPermissionResult(" + granted + ")", null);
+            } catch (Exception ignored) {
+                // WebView 已销毁时不再回调网页。
+            }
+        });
     }
 
     private boolean hasLocationPermission() {
@@ -389,6 +428,11 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == MIC_PREFLIGHT_REQUEST) {
+            micPreflightInFlight = false;
+            notifyMicPreflight(hasMicrophonePermission());
+            return;
+        }
         if (requestCode == MIC_PERM_REQUEST) {
             if (!micPermissionInFlight) return;
             micPermissionInFlight = false;

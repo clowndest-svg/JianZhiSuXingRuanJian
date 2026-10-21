@@ -51,9 +51,12 @@ try {
   await page.locator('#dm-emoji-btn').click();await page.locator('#dm-sticker-query').fill('jiayou');
   assert.equal(await page.locator('.dm-sticker-tile').count(),1);checks.push('official pinyin search');
   // A deterministic provider result tests the browser flow, not upstream availability.
-  await page.route('**/api/chat/stickers/search?*',route=>route.fulfill({json:{code:0,available:true,items:[{id:'fixture',title:'Fixture',preview_url:'https://upload.wikimedia.org/wikipedia/commons/f/fixture.png',source_url:'https://commons.wikimedia.org/wiki/File:Fixture.png',license:'CC0',author:'Fixture artist'}]}}));
+  let stickerSearch = {code:0,available:true,sources:['360 图片'],items:[{id:'fixture',title:'Fixture',preview_url:'https://upload.wikimedia.org/wikipedia/commons/f/fixture.png',source_url:'https://commons.wikimedia.org/wiki/File:Fixture.png',license:'CC0',author:'Fixture artist',source_label:'360 图片'}]};
+  await page.route('**/api/chat/stickers/search?*',route=>route.fulfill({json:stickerSearch}));
   await page.locator('#dm-tab-network').click();await page.locator('#dm-sticker-query').fill('happy');
-  await page.locator('#dm-sticker-search button').click();await page.getByRole('button',{name:'选择表情',exact:true}).click();
+  await page.locator('#dm-sticker-search button').click();
+  assert.equal(await page.locator('.dm-network-source').first().textContent(),'360 图片');
+  await page.getByRole('button',{name:'选择表情',exact:true}).click();
   assert.equal((await api('/api/chat/messages?with_user='+bid,null,a.token)).items.length,1);
   await page.locator('#dm-draft-cancel').click();checks.push('network selection remains a draft; attribution is visible');
   await page.locator('#dm-sticker-file').setInputFiles({name:'local.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')});
@@ -82,6 +85,9 @@ try {
   assert.match(featuresSource,/<video[^>]*oncontextmenu="event\.stopPropagation\(\);return true"/);
   checks.push('real MediaRecorder preview/upload/Opus playback; incoming message preserves input and audio node');
   checks.push('audio playback and audio/video native context menus survive bubble handling');
+  const micGate=await page.evaluate(async()=>{const saved=window.AndroidBridge;window.AndroidBridge={microphonePermissionState:()=> 'blocked',requestMicrophonePermission(){}};const blocked=await dmEnsureMicrophone();window.AndroidBridge={microphonePermissionState:()=> 'granted',requestMicrophonePermission(){}};const granted=await dmEnsureMicrophone();window.AndroidBridge=saved;return {blocked,granted};});
+  assert.deepEqual(micGate,{blocked:false,granted:true});
+  checks.push('microphone preflight blocks blocked state and passes granted state');
   await page.locator('#dm-emoji-btn').click();await page.locator('#dm-tab-official').click();
   for(const width of [320,393,1200]){
     await page.setViewportSize({width,height:850});
@@ -103,6 +109,27 @@ try {
   const retryRows=(await api('/api/chat/messages?with_user='+bid,null,a.token)).items;
   assert.equal(retryRows.filter(m=>m.body==='重试验证').length,1);
   checks.push('lost HTTP response retries the same request ID and stores one message');
+  stickerSearch={code:0,available:false,items:[],detail:'上游暂时没返回'};
+  await page.locator('#dm-emoji-btn').click();
+  await page.locator('#dm-tab-network').click();
+  await page.locator('#dm-sticker-query').fill('你好');
+  await page.locator('#dm-sticker-search button').click();
+  await page.waitForSelector('.dm-generate-btn');
+  await page.evaluate(()=>{window.__QS_TEST_MEME_BG__='data:image/svg+xml;charset=utf-8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420"><rect width="640" height="420" fill="#0F766E"/></svg>');});
+  await page.locator('.dm-generate-btn').click();
+  await page.waitForSelector('#dm-draft:not([hidden]) img');
+  assert.ok((await page.locator('#dm-draft img').getAttribute('src')).startsWith('blob:'));
+  const stickersBefore=await page.locator('#thread-bubbles img.dm-sticker-img').count();
+  await page.locator('.dm-send').click();
+  await page.waitForFunction(n=>document.querySelectorAll('#thread-bubbles img.dm-sticker-img').length>n,stickersBefore);
+  checks.push('empty upstream offers a generated text meme and sends it as a sticker');
+  await page.locator('#dm-input').focus();
+  await page.setViewportSize({width:393,height:520});
+  await page.waitForTimeout(450);
+  const keyboardState=await page.evaluate(()=>{const host=document.getElementById('thread-bubbles'),last=host.lastElementChild,hr=host.getBoundingClientRect(),lr=last.getBoundingClientRect();return {atBottom:host.scrollHeight-host.scrollTop-host.clientHeight<2,inside:lr.bottom<=hr.bottom+2&&lr.top>=hr.top-2};});
+  assert.deepEqual(keyboardState,{atBottom:true,inside:true});
+  await page.setViewportSize({width:393,height:850});
+  checks.push('keyboard-sized viewport keeps the latest message visible');
   if(process.env.QINGSU_LIVE_STICKERS==='1'){
     const result=await api('/api/chat/stickers/search?q='+encodeURIComponent('开心'),null,a.token);
     assert.equal(result.provider,'OpenMoji');assert.ok(result.items.length>0);

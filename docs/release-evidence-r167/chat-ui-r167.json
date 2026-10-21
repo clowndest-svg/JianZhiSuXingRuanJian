@@ -1,0 +1,20 @@
+{
+  "folder": "D:\\RuanJian\\JiaZhiSuXianApk\\_audit_sandbox\\ui-r164-4652",
+  "checks": [
+    "emoji inserts at caret and does not send; panel blurs input",
+    "official sticker previews then sends; text draft survives acknowledgement",
+    "official pinyin search",
+    "network selection remains a draft; attribution is visible",
+    "local image selection previews before upload and sends without mutual follow",
+    "sent image sticker opens the full-size image viewer",
+    "real MediaRecorder preview/upload/Opus playback; incoming message preserves input and audio node",
+    "audio playback and audio/video native context menus survive bubble handling",
+    "microphone preflight blocks blocked state and passes granted state",
+    "320/393/1200 layout without horizontal overflow",
+    "lost HTTP response retries the same request ID and stores one message",
+    "empty upstream offers a generated text meme and sends it as a sticker",
+    "keyboard-sized viewport keeps the latest message visible",
+    "cleanup and late account response rejection"
+  ],
+  "errors": []
+}

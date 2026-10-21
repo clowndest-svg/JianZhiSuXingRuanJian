@@ -5036,7 +5036,9 @@ def search_chat_stickers(q: str = "", provider: str = 'openmoji', user: dict = D
         raise HTTPException(status_code=400, detail="请输入 1 到 60 字的表情关键词")
     try:
         result = stickers.search(q, user["id"], media_key(), provider=provider)
-        return {"code": 0, "items": result["items"], "provider": result.get('provider', provider), "available": True}
+        return {"code": 0, "items": result["items"], "provider": result.get('provider', provider),
+                "available": result.get('available', True), "detail": result.get('detail'),
+                "sources": result.get('sources', []), "unavailable": result.get('unavailable', [])}
     except stickers.ProviderUnavailable:
         return {"code": 0, "items": [], "provider": provider, "available": False,
                 "detail": "网络表情来源暂不可用，请稍后重试或上传自己的表情"}

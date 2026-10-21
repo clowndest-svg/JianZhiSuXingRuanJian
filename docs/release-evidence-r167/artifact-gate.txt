@@ -1,0 +1,3 @@
+release artifacts agree: version_code=51 size=5434902 sha256=a43f97a268d3cf9ad961b206772360098aaa69c5b55fd91c81728b40d10ea8b7
+apksigner: v2=true v3=true signer=CN=QingSu Release, O=QingSu, C=CN
+asset raw equality: 33/33 (plus dexopt baseline files inside APK)

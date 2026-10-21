@@ -18,11 +18,12 @@ from html.parser import HTMLParser
 import json
 from pathlib import Path
 import re
+import secrets
 import ssl
 import threading
 import time
 from urllib.error import HTTPError
-from urllib.parse import quote, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 
@@ -41,9 +42,22 @@ _openmoji = (0, ())
 MEME_API = 'https://api.memegen.link/templates'
 _memes = (0, ())
 
+# 中文梗图：公开图片检索结果。只取检索站自己的 HTTPS 缩略图，不直连结果页外链。
+SO360_API = "https://image.so.com/j"
+BAIDU_API = "https://image.baidu.com/search/acjson"
+CN_LICENSE = "版权归原作者，来源未声明许可"
+CN_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+         "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+CN_SEARCH_TTL = 10 * 60
+CN_RESULT_TTL = 15 * 60
+_cn_search = OrderedDict()
+_cn_results = OrderedDict()
+
 _MEDIA_HOSTS = frozenset(("upload.wikimedia.org", "thumb.wikimedia.org"))
+_CN_360_HOST = re.compile(r"p[0-9]{1,3}\.ssl\.qhimgs1\.com")
+_CN_BAIDU_HOST = re.compile(r"img[0-9]{1,3}\.baidu\.com")
 _RASTER_MIMES = frozenset((
-    "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp",
+    "image", "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp",
     "image/x-ms-bmp", "image/tiff", "image/x-icon", "image/vnd.microsoft.icon",
     "image/avif",
 ))
@@ -110,6 +124,36 @@ def _media_url(url):
         if not re.fullmatch(r'/hfg-gmuend/openmoji/17\.0\.0/color/72x72/[A-F0-9]+(?:-[A-F0-9]+)*\.png', parts.path):
             raise InvalidSticker()
         return urlunsplit(('https', parts.hostname, parts.path, '', ''))
+    if isinstance(url, str):
+        try:
+            candidate = urlsplit(url)
+            host = candidate.hostname
+        except ValueError:
+            raise InvalidSticker() from None
+        if host and _CN_360_HOST.fullmatch(host):
+            parts = _https_parts(url, frozenset((host,)))
+            path = unquote(parts.path, errors="strict")
+            if not re.fullmatch(r"/t[0-9a-f]{6,64}\.(?:jpe?g|png|gif|webp)", path):
+                raise InvalidSticker()
+            return urlunsplit(("https", host, parts.path, "", ""))
+        if host and _CN_BAIDU_HOST.fullmatch(host):
+            parts = _https_parts(url, frozenset((host,)))
+            path = unquote(parts.path, errors="strict")
+            base, *params = path.split("&")
+            if not re.fullmatch(r"/it/u=[0-9]+,[0-9]+", base):
+                raise InvalidSticker()
+            for param in params:
+                key, _, value = param.partition("=")
+                if (key not in {"fm", "fmt", "app", "f"}
+                        or not re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", value)):
+                    raise InvalidSticker()
+            allowed = {}
+            for key, value in parse_qsl(parts.query, keep_blank_values=False):
+                if (key in {"fm", "fmt", "app", "f", "w", "h"}
+                        and re.fullmatch(r"[A-Za-z0-9_.-]{1,20}", key)
+                        and re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", value)):
+                    allowed[key] = value
+            return urlunsplit(("https", host, parts.path, urlencode(sorted(allowed.items())), ""))
     parts = _https_parts(url, _MEDIA_HOSTS)
     try:
         path = unquote(parts.path, errors="strict")
@@ -123,14 +167,17 @@ def _media_url(url):
     return urlunsplit(("https", parts.hostname, parts.path, "", ""))
 
 
-def _read_url(url, limit, *, image=False, opener=None):
+def _read_url(url, limit, *, image=False, opener=None, headers=None):
     # All connections, including through an injected opener, pass these guards.
     if image:
         url = _media_url(url)
     else:
-        parts = _https_parts(url, frozenset(("commons.wikimedia.org", "raw.githubusercontent.com", 'api.memegen.link')))
+        parts = _https_parts(url, frozenset(("commons.wikimedia.org", "raw.githubusercontent.com",
+                                             "api.memegen.link", "image.so.com", "image.baidu.com")))
         if not ((parts.hostname == 'commons.wikimedia.org' and parts.path == '/w/api.php')
-                or url in (OPENMOJI_CATALOG, MEME_API)):
+                or url in (OPENMOJI_CATALOG, MEME_API)
+                or (parts.hostname == 'image.so.com' and parts.path == '/j')
+                or (parts.hostname == 'image.baidu.com' and parts.path == '/search/acjson')):
             raise InvalidSticker()
     response = None
     deadline = time.monotonic() + TIMEOUT
@@ -139,6 +186,7 @@ def _read_url(url, limit, *, image=False, opener=None):
             "User-Agent": "QingsuStickers/1.0 (licensed Wikimedia Commons emoticons)",
             "Accept": "image/*" if image else "application/json",
             "Accept-Encoding": "identity",
+            **(headers or {}),
         })
         response = (opener or _http.open)(request, timeout=TIMEOUT)
         # A custom opener must not silently follow redirects either.
@@ -147,7 +195,10 @@ def _read_url(url, limit, *, image=False, opener=None):
         content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
         if image and content_type not in _RASTER_MIMES:
             raise InvalidSticker()
-        if not image and content_type != "application/json" and not (url == OPENMOJI_CATALOG and content_type == 'text/plain'):
+        if (not image and content_type != "application/json"
+                and not (parts.hostname == "image.so.com"
+                         and content_type in ("application/javascript", "text/javascript"))
+                and not (url == OPENMOJI_CATALOG and content_type == 'text/plain')):
             raise ProviderUnavailable()
         if response.headers.get("Content-Encoding", "identity").strip().lower() not in ("", "identity"):
             raise ProviderUnavailable()
@@ -440,13 +491,31 @@ def search_commons(q, uid, secret, *, opener=None):
 
 def import_media(id, uid, secret, *, opener=None):
     """Verify a user-bound ID, re-fetch its current licence/URL, then download."""
+    if isinstance(id, str) and id.startswith('cn.'):
+        key = _identity(uid, secret)
+        try:
+            parts = id.split('.', 3)
+            if (len(parts) != 4 or not re.fullmatch(r'[a-f0-9]{16}', parts[1])
+                    or not re.fullmatch(r'[0-9]{1,3}', parts[2])):
+                raise ValueError()
+            index = int(parts[2])
+            if _verify(parts[3], uid, key) != index + 1:
+                raise ValueError()
+        except ValueError:
+            raise InvalidSticker() from None
+        records = _cn_lookup(parts[1])
+        if records is None or index >= len(records):
+            raise InvalidSticker()
+        record = records[index]
+        blob = _read_url(record['download_url'], MEDIA_LIMIT, image=True, opener=opener)
+        return blob, {field: record[field] for field in ('title', 'source_url', 'license', 'author')}
     if isinstance(id, str) and id.startswith('mg.'):
         key = hmac.digest(_identity(uid, secret), b'memegen-v1', 'sha256')
         wanted = _verify(id[3:], uid, key)
         record = next((r for r in _meme_records(opener) if _meme_id(r['slug']) == wanted), None)
         if record is None:
             raise InvalidSticker()
-        blob = _read_url(record['preview_url'], MEDIA_LIMIT, image=True, opener=opener)
+        blob = _read_url(record.get('download_url') or record['preview_url'], MEDIA_LIMIT, image=True, opener=opener)
         return blob, {f: record[f] for f in ('title', 'source_url', 'license', 'author')}
     if isinstance(id, str) and id.startswith('om.'):
         key = hmac.digest(_identity(uid, secret), b'openmoji-v1', 'sha256')
@@ -500,7 +569,222 @@ def _openmoji_records(opener=None):
     return records
 
 
+def _cn_query(q):
+    if (not isinstance(q, str) or not 1 <= len(q) <= 60
+            or re.search(r"[\x00-\x1f\x7f\ud800-\udfff]", q)):
+        raise InvalidSticker("搜索词须为1到60个字符")
+    q = " ".join(q.split())
+    if not q:
+        raise InvalidSticker("搜索词须为1到60个字符")
+    return q
+
+
+def _cn_360_url(term):
+    return SO360_API + "?" + urlencode({"q": term, "src": "srp", "correct": term, "pn": 0, "rn": 48})
+
+
+def _cn_baidu_url(term):
+    return BAIDU_API + "?" + urlencode({"tn": "resultjson_com", "ipn": "rj", "word": term, "pn": 0, "rn": 30})
+
+
+def _cn_page_url(value, fallback):
+    try:
+        if not isinstance(value, str) or len(value) > 2048 or re.search(r"[\x00-\x20\x7f\\]", value):
+            return fallback
+        parts = urlsplit(value)
+        if (parts.scheme != "https" or not parts.hostname or parts.username is not None
+                or parts.password is not None or parts.port not in (None, 443) or parts.fragment):
+            return fallback
+        return urlunsplit(("https", parts.hostname, parts.path, parts.query, ""))
+    except ValueError:
+        return fallback
+
+
+def _cn_size(value):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return number if 0 < number <= 10000 else 0
+
+
+def _cn_cached(source, term, loader):
+    key = (source, term)
+    now = time.monotonic()
+    with _cache_lock:
+        for expired in [k for k, (until, _) in _cn_search.items() if until <= now]:
+            del _cn_search[expired]
+        hit = _cn_search.get(key)
+        if hit:
+            _cn_search.move_to_end(key)
+            return hit[1]
+    records = tuple(loader())
+    with _cache_lock:
+        _cn_search[key] = (time.monotonic() + CN_SEARCH_TTL, records)
+        _cn_search.move_to_end(key)
+        while len(_cn_search) > 64:
+            _cn_search.popitem(last=False)
+    return records
+
+
+def _cn_records_360(term, opener=None):
+    raw = _read_url(_cn_360_url(term), API_LIMIT, opener=opener,
+                    headers={"Accept": "*/*", "Accept-Language": "zh-CN,zh;q=0.9",
+                             "Referer": "https://image.so.com/"})
+    try:
+        data = json.loads(raw)
+        items = data.get("list") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ProviderUnavailable() from None
+    records = []
+    for item in items[:48]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            image = _media_url(item.get("thumb"))
+        except InvalidSticker:
+            continue
+        width, height = _cn_size(item.get("width")), _cn_size(item.get("height"))
+        if width and height and (width < 80 or height < 80):
+            continue
+        title = _plain(item.get("title"), 120) or "中文梗图"
+        author = _plain(item.get("site"), 80) or "原图作者"
+        records.append(dict(title=title, preview_url=image, download_url=image,
+            source_url=_cn_page_url(item.get("link"), "https://image.so.com/"),
+            license=CN_LICENSE, author=author, source_label="360 图片",
+            width=width, height=height))
+    return records
+
+
+def _cn_records_baidu(term, opener=None):
+    raw = _read_url(_cn_baidu_url(term), API_LIMIT, opener=opener,
+                    headers={"Accept": "*/*", "Accept-Language": "zh-CN,zh;q=0.9",
+                             "Referer": "https://image.baidu.com/"})
+    try:
+        data = json.loads(raw)
+        items = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ProviderUnavailable() from None
+    records = []
+    for item in items[:40]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            image = _media_url(item.get("middleURL") or item.get("thumbURL") or item.get("hoverURL"))
+        except InvalidSticker:
+            continue
+        query = dict(parse_qsl(urlsplit(image).query))
+        width, height = _cn_size(query.get("w")), _cn_size(query.get("h"))
+        if width and height and (width < 80 or height < 80):
+            continue
+        title = _plain(item.get("fromPageTitleEnc"), 120) or "中文梗图"
+        author = _plain(item.get("fromURLHost"), 80) or "原图作者"
+        source = "https://image.baidu.com/search/index?" + urlencode({"tn": "baiduimage", "word": term})
+        records.append(dict(title=title, preview_url=image, download_url=image,
+            source_url=source, license=CN_LICENSE, author=author,
+            source_label="百度图片", width=width, height=height))
+    return records
+
+
+_CN_MEME_WORDS = ("表情", "梗图", "搞笑", "沙雕", "动态图", "配图", "meme")
+_CN_GOOD_SITES = ("fabiaoqing.com", "soogif.com", "doutula.com", "kanqq.com", "qqtn.com")
+
+
+def _cn_score(record, q):
+    title, author = record["title"].lower(), record["author"].lower()
+    meme_in_title = any(word in title for word in _CN_MEME_WORDS)
+    score = 3 if meme_in_title else (1 if any(word in author for word in _CN_MEME_WORDS) else 0)
+    if q.lower() in title:
+        score += 2
+    width, height = record.get("width") or 0, record.get("height") or 0
+    if width and height and 0.6 <= width / height <= 1.7:
+        score += 1
+    if any(site in author for site in _CN_GOOD_SITES):
+        score += 1
+    if not meme_in_title and any(word in title for word in ("图片", "图赏", "简笔画", "怎么画", "壁纸", "摄影")):
+        score -= 2
+    return score
+
+
+def _cn_store(records):
+    token = secrets.token_hex(8)
+    now = time.monotonic()
+    with _cache_lock:
+        for expired in [k for k, (until, _) in _cn_results.items() if until <= now]:
+            del _cn_results[expired]
+        _cn_results[token] = (now + CN_RESULT_TTL, tuple(records))
+        while len(_cn_results) > 128:
+            _cn_results.popitem(last=False)
+    return token
+
+
+def _cn_lookup(token):
+    now = time.monotonic()
+    with _cache_lock:
+        item = _cn_results.get(token)
+        if not item:
+            return None
+        if item[0] <= now:
+            _cn_results.pop(token, None)
+            return None
+        return item[1]
+
+
+def search_cn(q, uid, secret, *, opener=None):
+    key = _identity(uid, secret)
+    q = _cn_query(q)
+    plain = q
+    meme = q if ("表情" in q or "梗图" in q) else q + " 表情包"
+    records, sources, unavailable = [], [], []
+    for term in dict.fromkeys((plain, meme)):
+        try:
+            found = _cn_cached("360", term, lambda term=term: _cn_records_360(term, opener))
+            if found:
+                sources.append("360 图片")
+                records.extend(found)
+        except (ProviderUnavailable, InvalidSticker):
+            unavailable.append("360 图片")
+    seen, merged = set(), []
+    for record in records:
+        if record["download_url"] in seen:
+            continue
+        seen.add(record["download_url"])
+        merged.append(record)
+    if len(merged) < 8:
+        try:
+            found = _cn_cached("baidu", meme, lambda: _cn_records_baidu(meme, opener))
+            if found:
+                sources.append("百度图片")
+                for record in found:
+                    if record["download_url"] not in seen:
+                        seen.add(record["download_url"])
+                        merged.append(record)
+        except (ProviderUnavailable, InvalidSticker):
+            unavailable.append("百度图片")
+    merged.sort(key=lambda record: -_cn_score(record, q))
+    merged = merged[:RESULT_LIMIT]
+    sources = list(dict.fromkeys(sources))
+    unavailable = list(dict.fromkeys(unavailable))
+    if not merged:
+        return {"items": [], "provider": "中文梗图", "sources": sources,
+                "unavailable": unavailable, "available": False,
+                "detail": "没有搜到中文梗图，换个关键词，或用这句话生成一张"}
+    token = _cn_store(merged)
+    items = [dict(id="cn." + token + "." + str(index) + "." + _sign(index + 1, uid, key),
+                  **{field: record[field] for field in
+                     ("title", "preview_url", "source_url", "license", "author", "source_label")})
+             for index, record in enumerate(merged)]
+    return {"items": items, "provider": "中文梗图", "sources": sources,
+            "unavailable": unavailable, "available": True}
+
+
 def search(q, uid, secret, *, opener=None, provider='openmoji'):
+    if provider == 'cn':
+        return search_cn(q, uid, secret, opener=opener)
     if provider == 'memegen':
         key = hmac.digest(_identity(uid, secret), b'memegen-v1', 'sha256')
         _search_terms(q)  # shared input limits/control-character validation
@@ -564,7 +848,8 @@ def _meme_records(opener=None):
             if not source.startswith('https://knowyourmeme.com/memes/') or re.search(r'[\x00-\x20<>"\\]', source):
                 source = 'https://github.com/jacebrowning/memegen/tree/main/templates/' + slug
             records.append(dict(slug=slug, title=_plain(item.get('name'), 200),
-                preview_url=image, source_url=source, author='原图作者见来源',
+                preview_url=image + '?width=240', download_url=image, source_url=source,
+                author='原图作者见来源',
                 license='原图许可未声明，请查看来源',
                 terms=' '.join((slug, str(item.get('name', '')), str(item.get('keywords', [])))).lower()))
         if not records:
@@ -573,5 +858,5 @@ def _meme_records(opener=None):
     except (ValueError, TypeError, AttributeError, InvalidSticker):
         raise ProviderUnavailable() from None
     with _cache_lock:
-        _memes = (time.monotonic() + 300, records)
+        _memes = (time.monotonic() + 3600, records)
     return records

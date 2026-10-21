@@ -1,0 +1,82 @@
+{
+  "checked_at": "2026-10-21T17:05:00+08:00",
+  "version": {
+    "code": 51,
+    "name": "2.2.6",
+    "apk_sha256": "a43f97a268d3cf9ad961b206772360098aaa69c5b55fd91c81728b40d10ea8b7",
+    "size": 5434902,
+    "signature": "v2+v3",
+    "asset_raw_match": 33
+  },
+  "suites": [
+    {
+      "suite": "legacy-backend.py",
+      "tests": 619,
+      "green": 619,
+      "red": 0,
+      "ok": true
+    },
+    {
+      "suite": "legacy-frontend.mjs",
+      "tests": 334,
+      "ok": true
+    },
+    {
+      "suite": "frontend-integration.mjs",
+      "groups": 4,
+      "ok": true
+    },
+    {
+      "suite": "test_integration.py",
+      "tests": 62,
+      "ok": true
+    },
+    {
+      "suite": "test_chat_media.py",
+      "tests": 15,
+      "ok": true
+    },
+    {
+      "suite": "test_native_media_contract.py",
+      "tests": 21,
+      "ok": true
+    },
+    {
+      "suite": "test_update_copy.py",
+      "tests": 3,
+      "ok": true
+    },
+    {
+      "suite": "chat-ui.mjs",
+      "checks": 14,
+      "errors": [],
+      "ok": true
+    },
+    {
+      "suite": "test_multiprocess.py",
+      "checks": 3,
+      "runs": 4,
+      "ok": true
+    }
+  ],
+  "search_performance": {
+    "cn_cold_seconds": [
+      0.78,
+      1.2
+    ],
+    "cn_warm_seconds": 0.0,
+    "memegen_cold_seconds": 1.86,
+    "memegen_warm_seconds": 0.0,
+    "memegen_thumb_bytes": 14822,
+    "memegen_full_bytes": 89038
+  },
+  "fixed": [
+    "microphone preflight and error classification",
+    "keyboard viewport keeps latest message",
+    "sticker panel redesign",
+    "360/baidu Chinese meme search with fallback",
+    "text meme generator fallback",
+    "search thumbnails and caches"
+  ],
+  "postdeploy": "pending"
+}
