@@ -1,0 +1,11 @@
+test_missing_notes_says_so_instead_of_lying (__main__.UpdateCopyTest.test_missing_notes_says_so_instead_of_lying) ... ok
+test_real_changelog_notes_render_clean (__main__.UpdateCopyTest.test_real_changelog_notes_render_clean) ... D:\RuanJian\JiaZhiSuXianApk\make_version_json.py:72: ResourceWarning: unclosed file <_io.TextIOWrapper name='D:\\RuanJian\\JiaZhiSuXianApk\\CHANGELOG.md' mode='r' encoding='utf-8'>
+  text = io.open(os.path.join(ROOT, "CHANGELOG.md"), encoding="utf-8").read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_size_and_disclaimer_present (__main__.UpdateCopyTest.test_size_and_disclaimer_present) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 1.140s
+
+OK

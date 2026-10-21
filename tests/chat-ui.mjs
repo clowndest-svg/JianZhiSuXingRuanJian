@@ -264,8 +264,15 @@ try {
   await page.waitForSelector('#account-tools-dialog[open]');
   const accountText=await page.locator('#account-tools-dialog').textContent();
   assert.match(accountText,/切换账号/);assert.match(accountText,/退出登录/);
-  await page.evaluate(()=>document.getElementById('account-tools-dialog').close());
   checks.push('account center exposes switch-account and logout');
+  // 点“切换账号”必须是清会话+弹登录框，而不是整页刷新（用页面内标志证明没导航）
+  await page.evaluate(()=>{window.__switchNoReload=1;});
+  await page.getByRole('button',{name:'切换账号',exact:true}).click();
+  await page.waitForFunction(()=>document.getElementById('auth-modal')?.classList.contains('show'),null,{timeout:10000});
+  assert.equal(await page.evaluate(()=>window.__switchNoReload===1),true,'switch-account must not reload the page');
+  assert.equal(await page.evaluate(()=>!localStorage.getItem('QINGSU_AUTH_TOKEN')),true);
+  await page.evaluate(()=>closeAuthModal());
+  checks.push('switch-account clears the session and opens login without a reload');
   await page.evaluate(()=>dmCleanup());
   assert.equal(await page.evaluate(()=>dmUi.record===null&&dmUi.draft===null),true);
   // An old response must not insert data into a later account.

@@ -240,7 +240,7 @@ function restoreOfflineDashboard(error){
     }catch(e){callNativeToast('网络不可用，无法读取历史缓存');}
 }
 const accountLogout=logoutUser;
-logoutUser=async function(){localStorage.removeItem(draftKey());localStorage.removeItem('QINGSU_LAST_'+(state.user?.username||'guest'));return accountLogout();};
+logoutUser=async function(reload=true){localStorage.removeItem(draftKey());localStorage.removeItem('QINGSU_LAST_'+(state.user?.username||'guest'));return accountLogout(reload);};
 const accountApply=applyDashboardData;
 applyDashboardData=function(data){
     if(isPublicScreen()){renderPublicView(data);return;}

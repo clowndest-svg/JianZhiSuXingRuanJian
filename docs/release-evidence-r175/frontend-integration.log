@@ -1,0 +1,4 @@
+PASS: share, checklist, water, concurrent writes, offline refresh, logout, browser/APK routing
+PASS: persistent request IDs, offline sync, account isolation, malformed storage, logout cleanup, static-only PWA cache
+PASS: late responses and failed writes cannot cross account changes
+PASS: never-submitted drafts remain editable without duplicating uncertain cloud writes

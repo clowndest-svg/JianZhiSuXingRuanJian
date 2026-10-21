@@ -1,0 +1,53 @@
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_asr_contract_denies_strangers_and_stays_honest (__main__.ChatMedia.test_asr_contract_denies_strangers_and_stays_honest) ... D:\RuanJian\JiaZhiSuXianApk\app_modules\audio.py:55: ResourceWarning: unclosed file <_io.BufferedReader name='C:\\Users\\23793\\AppData\\Local\\Temp\\tmp00fc81ub\\UPLOAD\\dde51a14f675480394a353f5f4ba018b.audio.ogg'>
+  data = open(path, "rb").read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+WARNING:root:key_regenerated name=media-signing.key 此前签发的签名链接与 WS 票据已全部失效
+ok
+test_asr_result_is_cached_on_the_message (__main__.ChatMedia.test_asr_result_is_cached_on_the_message) ... D:\RuanJian\JiaZhiSuXianApk\app_modules\audio.py:55: ResourceWarning: unclosed file <_io.BufferedReader name='C:\\Users\\23793\\AppData\\Local\\Temp\\tmp00fc81ub\\UPLOAD\\779088b5604640d3b51511e2705df0f6.audio.ogg'>
+  data = open(path, "rb").read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_blocking_and_mutual_follow_boundaries (__main__.ChatMedia.test_blocking_and_mutual_follow_boundaries) ... ok
+test_fake_audio_and_oversized_cleaned (__main__.ChatMedia.test_fake_audio_and_oversized_cleaned) ... ok
+test_missing_and_stolen_voice_rejected (__main__.ChatMedia.test_missing_and_stolen_voice_rejected) ... D:\RuanJian\JiaZhiSuXianApk\app_modules\audio.py:55: ResourceWarning: unclosed file <_io.BufferedReader name='C:\\Users\\23793\\AppData\\Local\\Temp\\tmp00fc81ub\\UPLOAD\\787772c1b1e94164acca5301c221c5f5.audio.ogg'>
+  data = open(path, "rb").read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_network_import_metadata_and_outage (__main__.ChatMedia.test_network_import_metadata_and_outage) ... ok
+test_official_manifest_assets_and_validation (__main__.ChatMedia.test_official_manifest_assets_and_validation) ... ok
+test_sticker_search_route_reports_fallback_sources (__main__.ChatMedia.test_sticker_search_route_reports_fallback_sources) ... ok
+test_sticker_type_owner_and_invalid_content (__main__.ChatMedia.test_sticker_type_owner_and_invalid_content) ... D:\RuanJian\JiaZhiSuXianApk\app_modules\audio.py:55: ResourceWarning: unclosed file <_io.BufferedReader name='C:\\Users\\23793\\AppData\\Local\\Temp\\tmp00fc81ub\\UPLOAD\\04692a4adfd14184a1cef87be4f58b3c.audio.ogg'>
+  data = open(path, "rb").read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_sticker_upload_send_replay_and_recall (__main__.ChatMedia.test_sticker_upload_send_replay_and_recall) ... ok
+test_video_track_disguised_as_audio_and_long_voice (__main__.ChatMedia.test_video_track_disguised_as_audio_and_long_voice) ... D:\RuanJian\JiaZhiSuXianApk\app_modules\audio.py:55: ResourceWarning: unclosed file <_io.BufferedReader name='C:\\Users\\23793\\AppData\\Local\\Temp\\tmp00fc81ub\\UPLOAD\\93129fd65b6f4023aff9d5e9be1420c2.audio.ogg'>
+  data = open(path, "rb").read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_voice_all_containers_and_authoritative_duration (__main__.ChatMedia.test_voice_all_containers_and_authoritative_duration) ... D:\RuanJian\JiaZhiSuXianApk\app_modules\audio.py:55: ResourceWarning: unclosed file <_io.BufferedReader name='C:\\Users\\23793\\AppData\\Local\\Temp\\tmp00fc81ub\\UPLOAD\\32b13667dba44db7b37917a0194b65e2.audio.ogg'>
+  data = open(path, "rb").read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+D:\RuanJian\JiaZhiSuXianApk\app_modules\audio.py:55: ResourceWarning: unclosed file <_io.BufferedReader name='C:\\Users\\23793\\AppData\\Local\\Temp\\tmp00fc81ub\\UPLOAD\\e7b65b8713da4198af9f63fb62a69bf0.audio.ogg'>
+  data = open(path, "rb").read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_voice_duration_rounds_to_nearest_second (__main__.ChatMedia.test_voice_duration_rounds_to_nearest_second) ... D:\RuanJian\JiaZhiSuXianApk\app_modules\audio.py:55: ResourceWarning: unclosed file <_io.BufferedReader name='C:\\Users\\23793\\AppData\\Local\\Temp\\tmp00fc81ub\\UPLOAD\\8c369e712a3647cab987e6aac9b47683.audio.ogg'>
+  data = open(path, "rb").read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+D:\RuanJian\JiaZhiSuXianApk\app_modules\audio.py:55: ResourceWarning: unclosed file <_io.BufferedReader name='C:\\Users\\23793\\AppData\\Local\\Temp\\tmp00fc81ub\\UPLOAD\\bc63bb24f8104f608b49f0ba81b2f245.audio.ogg'>
+  data = open(path, "rb").read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_chinese_sources_fallback_import_and_boundaries (__main__.ProviderSecurity.test_chinese_sources_fallback_import_and_boundaries) ... ok
+test_media_ssrf_boundaries (__main__.ProviderSecurity.test_media_ssrf_boundaries) ... ok
+test_meme_catalog_search_import_and_source_boundaries (__main__.ProviderSecurity.test_meme_catalog_search_import_and_source_boundaries) ... ok
+test_openmoji_catalog_import_and_user_binding (__main__.ProviderSecurity.test_openmoji_catalog_import_and_user_binding) ... ok
+test_signed_ids_are_user_bound_expiring_and_tamper_proof (__main__.ProviderSecurity.test_signed_ids_are_user_bound_expiring_and_tamper_proof) ... ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 7.248s
+
+OK
