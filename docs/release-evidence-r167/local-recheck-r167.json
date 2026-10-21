@@ -6,7 +6,9 @@
     "apk_sha256": "a43f97a268d3cf9ad961b206772360098aaa69c5b55fd91c81728b40d10ea8b7",
     "size": 5434902,
     "signature": "v2+v3",
-    "asset_raw_match": 33
+    "asset_raw_match": 33,
+    "local_build_sha256": "a43f97a268d3cf9ad961b206772360098aaa69c5b55fd91c81728b40d10ea8b7",
+    "deployed_apk_sha256": "270d0fa50f12d9ffb00402534542fe1b398e41bd809f7e6f3a78036916a52447"
   },
   "suites": [
     {
@@ -55,7 +57,24 @@
     {
       "suite": "test_multiprocess.py",
       "checks": 3,
-      "runs": 4,
+      "runs": 1,
+      "ok": true
+    },
+    {
+      "suite": "test_consistency.py",
+      "tests": 24,
+      "green": 24,
+      "red": 0,
+      "ok": true
+    },
+    {
+      "suite": "test_ai_contract.py",
+      "tests": 6,
+      "ok": true
+    },
+    {
+      "suite": "test_companion.py",
+      "tests": 8,
       "ok": true
     }
   ],
@@ -78,5 +97,12 @@
     "text meme generator fallback",
     "search thumbnails and caches"
   ],
-  "postdeploy": "pending"
+  "postdeploy": "r39574222714 / ffd6c04 / 2.2.6 (51); public browser 6/6; monitor problems []",
+  "live": {
+    "release": "r39574222714",
+    "source_revision": "ffd6c0400ff1041919aade899f49f976fb7a15de",
+    "build": 51,
+    "apk_sha256": "270d0fa50f12d9ffb00402534542fe1b398e41bd809f7e6f3a78036916a52447",
+    "backup": "/opt/qingsu/backups/release-20261021-171351"
+  }
 }

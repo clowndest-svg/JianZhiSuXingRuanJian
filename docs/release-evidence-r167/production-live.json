@@ -1,0 +1,24 @@
+{
+  "release": "r39574222714",
+  "source_revision": "ffd6c0400ff1041919aade899f49f976fb7a15de",
+  "status": "ok",
+  "build": 51,
+  "version_name": "2.2.6",
+  "apk_sha256": "270d0fa50f12d9ffb00402534542fe1b398e41bd809f7e6f3a78036916a52447",
+  "apk_size": 5434902,
+  "rate_store": "redis",
+  "apk_source_assets_normalized_match": 33,
+  "public_browser": {
+    "build": 51,
+    "checks": [
+      "Chinese meme search returned 12 items from 360 图片",
+      "Chinese meme imported, sent and attributed",
+      "text meme generator produced and sent a sticker",
+      "keyboard viewport keeps the latest message visible",
+      "voice record, preview, send and playback",
+      "real production HTTP-to-WebSocket delivery"
+    ],
+    "unavailable": [],
+    "errors": []
+  }
+}

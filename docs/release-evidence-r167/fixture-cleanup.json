@@ -1,0 +1,27 @@
+{
+  "dry_run": {
+    "fixtures": [
+      "releasecheck_web_1c031a0306_a",
+      "releasecheck_web_1c031a0306_b",
+      "releasecheck_web_9bfe53675a_a"
+    ],
+    "ids": [
+      423,
+      424,
+      419
+    ],
+    "media": [
+      "514a7810ff424433ba2e5464c3f99d29.gif",
+      "c943b8e2ed3f465f8aa14d0ba15298c6.png",
+      "d76c54b11c4c4a89bf0b9566fcfc5998.audio.ogg"
+    ],
+    "real_users_before": 2
+  },
+  "result": {
+    "fixture_users_removed": 3,
+    "fixture_files_removed": 3,
+    "real_users_unchanged": 2,
+    "foreign_key_errors": 0,
+    "integrity": "ok"
+  }
+}

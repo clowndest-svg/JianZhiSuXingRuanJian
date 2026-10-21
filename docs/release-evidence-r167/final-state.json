@@ -1,0 +1,32 @@
+{
+  "checked_at": 1792573921,
+  "users": 2,
+  "fixtures": 0,
+  "media_rows": 3,
+  "media_files": 4,
+  "missing": [],
+  "orphans": [
+    "avatar-2.jpg"
+  ],
+  "orphan_note": "avatar-2.jpg belongs to real user 2 (profiles.avatar_url)",
+  "fk": 0,
+  "integrity": "ok",
+  "qa": "inactive",
+  "monitor": {
+    "checked_at": 1792574221,
+    "qingsu": "active",
+    "qingsu-llama": "active",
+    "qingsu-backup.timer": "active",
+    "qingsu-cert-renew.timer": "active",
+    "ready": 200,
+    "free_disk_mb": 30522,
+    "backup_age_hours": 0.1,
+    "certificate_hours_left": 129.9,
+    "requests": 154,
+    "errors_5xx": 0,
+    "p95_ms": 52.9,
+    "sqlite_lock_errors": 0,
+    "cache_degraded": 0,
+    "problems": []
+  }
+}
