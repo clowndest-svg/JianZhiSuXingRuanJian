@@ -1,0 +1,43 @@
+{
+  "checked_at": 1792594791,
+  "users": 2,
+  "fixtures": 0,
+  "media_rows": 10,
+  "fk": 0,
+  "integrity": "ok",
+  "qa": "inactive",
+  "coturn": "active",
+  "monitor": {
+    "checked_at": 1792594748,
+    "qingsu": "active",
+    "qingsu-llama": "active",
+    "qingsu-backup.timer": "active",
+    "qingsu-cert-renew.timer": "active",
+    "coturn": "active",
+    "ready": 200,
+    "turn": true,
+    "cpu_percent": 1.0,
+    "memory_percent": 41.3,
+    "memory_available_mb": 2145,
+    "swap_percent": 0.4,
+    "load1": 0.0,
+    "load_per_core": 0.0,
+    "free_disk_mb": 30405,
+    "disk_percent": 25.7,
+    "thresholds": {
+      "cpu_percent": 85.0,
+      "memory_percent": 85.0,
+      "swap_percent": 25.0,
+      "load_per_core": 1.5,
+      "disk_percent": 85.0
+    },
+    "backup_age_hours": 0.1,
+    "certificate_hours_left": 124.2,
+    "requests": 124,
+    "errors_5xx": 0,
+    "p95_ms": 9.0,
+    "sqlite_lock_errors": 0,
+    "cache_degraded": 0,
+    "problems": []
+  }
+}

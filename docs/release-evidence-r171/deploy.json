@@ -1,0 +1,17 @@
+{
+  "release": "r39618909418",
+  "source_revision": "694e1440870ffee548bec6d4a6323d2429b39012",
+  "backup": "/opt/qingsu/backups/release-20261021-225342",
+  "units": {
+    "qingsu": "active",
+    "qingsu-llama": "active",
+    "coturn": "active",
+    "qingsu-qa": "inactive"
+  },
+  "counter_audit": {
+    "ok": true,
+    "drift": [],
+    "count": 0
+  },
+  "ci_incoming": "empty; tar archived at /opt/qingsu/ci-archive/r171-20261021"
+}

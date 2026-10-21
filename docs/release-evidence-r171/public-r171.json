@@ -1,0 +1,16 @@
+{
+  "build": 55,
+  "checks": [
+    "left button switches text and voice input modes on production",
+    "wechat-style hold overlay, instant sending bubble and confirmed voice message on production",
+    "wechat-style voice bubble plays and decodes on production",
+    "text mode send and realtime inbound delivery on production",
+    "full-screen incoming call page on production",
+    "call page mutes, minimizes to floating bar and restores on production",
+    "public call connects (relay relay) and hangs up on both ends"
+  ],
+  "timing": {
+    "bubbleMs": 23,
+    "confirmMs": 328
+  }
+}

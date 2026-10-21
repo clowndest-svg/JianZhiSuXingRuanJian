@@ -1,0 +1,29 @@
+{
+  "release": "r39618909418",
+  "source_revision": "694e1440870ffee548bec6d4a6323d2429b39012",
+  "status": "ok",
+  "build": 55,
+  "version_name": "2.2.10",
+  "apk_sha256": "0bee4bc23b1e4521eb6836d93cb3e9616e2a14eab022f469b64694bbe6bb37ec",
+  "apk_size": 5447190,
+  "apk_certificate_sha256": "c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f",
+  "chat_turn": true,
+  "public": {
+    "build": 55,
+    "checks": [
+      "left button switches text and voice input modes on production",
+      "wechat-style hold overlay, instant sending bubble and confirmed voice message on production",
+      "wechat-style voice bubble plays and decodes on production",
+      "text mode send and realtime inbound delivery on production",
+      "full-screen incoming call page on production",
+      "call page mutes, minimizes to floating bar and restores on production",
+      "public call connects (relay relay) and hangs up on both ends"
+    ],
+    "timing": {
+      "bubbleMs": 23,
+      "confirmMs": 328
+    }
+  },
+  "rate_store": "redis",
+  "min_build_override": 0
+}
