@@ -76,7 +76,12 @@ try {
   await page.waitForFunction(()=>cm.bubbles.some(m=>m.body==='对方发来的消息'));
   assert.equal(await page.locator('#dm-input').inputValue(),'未发送草稿');
   assert.equal(await audio.evaluate(e=>e===window.savedAudio),true);
+  const audioMenuPrevented=await audio.evaluate(e=>{const ev=new MouseEvent('contextmenu',{bubbles:true,cancelable:true});e.dispatchEvent(ev);return ev.defaultPrevented;});
+  assert.equal(audioMenuPrevented,false,'audio contextmenu must keep the browser menu');
+  const featuresSource=fs.readFileSync(path.join(root,'app/src/main/assets/features.js'),'utf8');
+  assert.match(featuresSource,/<video[^>]*oncontextmenu="event\.stopPropagation\(\);return true"/);
   checks.push('real MediaRecorder preview/upload/Opus playback; incoming message preserves input and audio node');
+  checks.push('audio playback and audio/video native context menus survive bubble handling');
   await page.locator('#dm-emoji-btn').click();await page.locator('#dm-tab-official').click();
   for(const width of [320,393,1200]){
     await page.setViewportSize({width,height:850});

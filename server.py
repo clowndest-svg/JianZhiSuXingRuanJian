@@ -272,7 +272,13 @@ def _ensure_columns(c, table, cols):
     have = {r[1] for r in c.execute("PRAGMA table_info(%s)" % table)}
     for name, ddl in cols:
         if name not in have:
-            c.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, ddl))
+            try:
+                c.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, ddl))
+            except sqlite3.OperationalError as error:
+                # 两个 worker 同时冷启动时都会看到"缺列"，后到的 ALTER 报
+                # duplicate column name；补列本来就是幂等操作，吞掉这一种。
+                if "duplicate column name" not in str(error):
+                    raise
 
 
 def migrate_db():

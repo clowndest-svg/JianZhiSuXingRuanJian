@@ -7,7 +7,8 @@
 判据：两个独立 Uvicorn 进程打同一个键，加起来只放行 limit 次；
       两边 /health/ready 都要如实报 rate.store=redis。
 
-Redis 不在就跳过（不静默通过）：这条测的是"共享"，本机没有共享存储就无从谈起。
+Redis 不在就跳过共享计数断言（不静默通过）；但两个进程的冷启动始终要验，
+否则"多进程"这条连进程都起不来也能算绿。
 
 用法:
     python tests/test_multiprocess.py
@@ -48,24 +49,30 @@ def api(port, path, body=None, token=None, timeout=30):
         return 599, {'detail': type(e).__name__}
 
 
-def wait_up(port, seconds=30):
-    for _ in range(int(seconds * 10)):
+def wait_up(port, proc, seconds=30):
+    for _ in range(int(seconds * 4)):
+        if proc.poll() is not None:
+            return False
         try:
-            with OPENER.open('http://127.0.0.1:%d/health' % port, timeout=1):
+            with OPENER.open('http://127.0.0.1:%d/health' % port, timeout=.25):
                 return True
         except Exception:
             time.sleep(.1)
     return False
 
 
-def main():
+def redis_ready():
     try:
         import redis
         redis.Redis(host='127.0.0.1', port=6379, socket_connect_timeout=.4,
                     decode_responses=True).ping()
-    except Exception as e:
-        print('跳过：本机没有可用的 Redis（%s），多进程共享计数无从验证' % type(e).__name__)
-        return 0
+        return True
+    except Exception:
+        return False
+
+
+def main():
+    shared = redis_ready()
 
     (ROOT / '_audit_sandbox').mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=ROOT / '_audit_sandbox',
@@ -88,8 +95,8 @@ def main():
                     # Windows 上另起一个进程组：否则 terminate 会把跑测试的这个 shell 一起带走
                     creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP
                                    if os.name == 'nt' else 0)))
-            for port in PORTS:
-                if not wait_up(port):
+            for port, proc in zip(PORTS, procs):
+                if not wait_up(port, proc):
                     log = os.path.join(temp, 'srv-%d.log' % port)
                     detail = ''
                     if os.path.exists(log):
@@ -97,6 +104,10 @@ def main():
                     print('红 进程 %d 没起来' % port)
                     print(detail)
                     return 1
+            print('绿 两个独立进程能在同一个数据库上同时冷启动')
+            if not shared:
+                print('跳过：本机没有可用的 Redis，多进程共享计数无从验证')
+                return 0
 
             stamp = int(time.time() * 1000) % 100000
             made = []
