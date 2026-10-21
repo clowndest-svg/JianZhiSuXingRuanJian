@@ -1,0 +1,16 @@
+{
+  "build": 54,
+  "checks": [
+    "left button switches text and voice input modes on production",
+    "hold-to-talk sends immediately and the wechat-style bubble plays on production",
+    "text mode send and realtime inbound delivery on production",
+    "full-screen incoming call page on production",
+    "call page mutes, minimizes to floating bar and restores on production",
+    "public call connects (relay relay) and hangs up on both ends"
+  ],
+  "stats": {
+    "connection": "connected",
+    "pair": true,
+    "local": "relay"
+  }
+}

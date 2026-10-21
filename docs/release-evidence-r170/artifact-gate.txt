@@ -1,1 +1,6 @@
 release artifacts agree: version_code=54 size=5447190 sha256=c1b04703dcc9
+apksigner: v2=true v3=true signer=CN=QingSu Release, O=QingSu, C=CN
+asset raw equality: 33/33 (committed LF source vs CI-built apk)
+contains: dm-mode-btn / dm-audio-wx / dm-call-page / dmHoldPaint
+
+live CI-signed apk: fbb210c30db80e300659f71e791fe3b79b3f88ce2262e1dc3b9082d70e364a9d

@@ -1,0 +1,25 @@
+{
+  "dry_run": {
+    "fixtures": [
+      "releasecheck_web_1ff8cd1209_a",
+      "releasecheck_web_1ff8cd1209_b"
+    ],
+    "ids": [
+      448,
+      449
+    ],
+    "media": [
+      "9f74ba4174404436a3103b2463a614c0.audio.ogg"
+    ],
+    "real_users_before": 2
+  },
+  "result": {
+    "fixture_users_removed": 2,
+    "fixture_files_removed": 1,
+    "selftest_users_cleaned": 2,
+    "selftest_files_cleaned": 2,
+    "real_users_unchanged": 2,
+    "foreign_key_errors": 0,
+    "integrity": "ok"
+  }
+}
