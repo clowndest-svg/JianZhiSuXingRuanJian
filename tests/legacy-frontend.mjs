@@ -647,6 +647,15 @@ if (hasSceneSwitch) {
   check("切场景后本机状态立即生效", false, "switchWorkoutScene missing");
 }
 
+// 档案弹窗必须预填顶栏那个数：否则"弹窗 138 / 顶栏 140"，用户改完保存还是对不上
+run(h.context, `state.currentWeightJin=152; state.profile.weightJin=138; openProfileModal();`);
+check("档案弹窗预填顶栏显示的当前体重",
+      String(run(h.context, `document.getElementById("prof-weight-jin").value`)) === "152",
+      run(h.context, `document.getElementById("prof-weight-jin").value`));
+run(h.context, `state.currentWeightJin=0; state.profile.weightJin=138; openProfileModal();`);
+check("没有称重记录时弹窗退回档案值",
+      String(run(h.context, `document.getElementById("prof-weight-jin").value`)) === "138", "");
+
 // 档案写入串行化：先选场景、后点保存时，后一次必须等前一次真的写完，
 // 否则先发后到的旧身高体重会把新保存的值覆盖回去（r176 实测过一次）。
 run(h.context, `state.token="tk"; state.profile.gender="female"; state.profile.goalType="female_hourglass";

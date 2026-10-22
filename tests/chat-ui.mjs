@@ -254,7 +254,11 @@ try {
     checks.push('LIVE network meme catalog search/import/send with original source');
   }
   // 档案保存：顶栏的身高与体重都要立刻变，训练场景选择要走自定义卡片
+  await api('/api/weight/log',{weight_jin:152},a.token);
+  await page.evaluate(()=>syncRemoteDashboard());
+  await page.waitForFunction(()=>Number(state.currentWeightJin)===152,null,{timeout:15000});
   await page.evaluate(()=>openProfileModal());
+  assert.equal(await page.locator('#prof-weight-jin').inputValue(),'152','档案弹窗要预填顶栏那个数');
   await page.locator('#prof-height').fill('173');
   await page.locator('#prof-weight-jin').fill('138.5');
   await page.locator('#prof-scene-cards .choice-card[data-value="band"]').click();

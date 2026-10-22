@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 60;
+const APP_BUILD = 61;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -2973,7 +2973,10 @@ function openProfileModal() {
     if (profGenderSelect) profGenderSelect.value = g;
     document.getElementById("prof-age").value = (p.age == null ? "" : p.age);
     document.getElementById("prof-height").value = (p.height == null ? "" : p.height);
-    document.getElementById("prof-weight-jin").value = (p.weightJin == null ? "" : p.weightJin);
+    // 顶栏显示的是"最近一次称重"，档案字段可能比它旧；弹窗预填必须用同一个数，
+    // 否则用户看到"弹窗 138 / 顶栏 140"，改完保存还是对不上。
+    const shownWeight = Number(state.currentWeightJin) > 0 ? state.currentWeightJin : p.weightJin;
+    document.getElementById("prof-weight-jin").value = (shownWeight == null ? "" : shownWeight);
     document.getElementById("prof-target-jin").value = (p.targetWeightJin == null ? "" : p.targetWeightJin);
     syncTargetWeightPlaceholder();
     

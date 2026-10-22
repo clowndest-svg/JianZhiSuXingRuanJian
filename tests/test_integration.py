@@ -32,6 +32,33 @@ class Integration(unittest.TestCase):
     def test_validation(self):
         for path,data in [('/api/food/log',{'slot':'早餐','food_name':'x','cal':-1}),('/api/weight/log',{'weight_jin':-1}),('/api/workout/complete',{'duration_minutes':-1}),('/api/register',dict(self.body,username='',password=''))]:
             with self.subTest(path=path):self.assertEqual(self.c.post(path,headers=self.auth,json=data).status_code,422)
+    def test_profile_save_reconciles_stale_weigh_in(self):
+        # 历史分叉：档案已是 138，最新称重记录还停在旧日期的 140（补写逻辑上线前留下的）。
+        # 只按"档案值变了没"补写的话，用户再怎么保存顶栏都是 140。
+        setup = self.m.get_db()
+        setup.execute("UPDATE weight_logs SET log_date='2026-01-01', weight_jin=140 WHERE user_id=?", (self.signup['id'],))
+        setup.execute("UPDATE profiles SET weight_jin=138 WHERE user_id=?", (self.signup['id'],))
+        setup.commit(); setup.close()
+        self.assertEqual(self.c.get('/api/dashboard', headers=self.auth).json()['current_weight_jin'], 140)
+
+        saved = self.c.post('/api/profile/update', headers=self.auth, json={'weight_jin': 138, 'height': 170})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        dash = self.c.get('/api/dashboard', headers=self.auth).json()
+        self.assertEqual(dash['current_weight_jin'], 138)
+
+        conn = self.m.get_db()
+        rows = [tuple(r) for r in conn.execute(
+            "SELECT log_date, weight_jin FROM weight_logs WHERE user_id=? ORDER BY log_date", (self.signup['id'],))]
+        conn.close()
+        self.assertEqual(len(rows), 2, rows)
+        self.assertEqual(rows[0][0], '2026-01-01')          # 旧记录保留，不抹历史
+        self.assertEqual(rows[1][1], 138)                    # 今天补的就是档案值
+        self.c.post('/api/profile/update', headers=self.auth, json={'weight_jin': 138, 'height': 171})
+        conn = self.m.get_db()
+        again = conn.execute("SELECT COUNT(*) FROM weight_logs WHERE user_id=?", (self.signup['id'],)).fetchone()[0]
+        conn.close()
+        self.assertEqual(again, 2, "数值已一致时不该再插一条")
+
     def test_profile_scene_and_goal_validation(self):
         bad_scene = self.c.post('/api/profile/update', headers=self.auth, json={'scene': 'moon'})
         self.assertEqual(bad_scene.status_code, 400)

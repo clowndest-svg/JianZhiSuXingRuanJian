@@ -1358,22 +1358,26 @@ def update_profile(req: ProfileUpdateReq, user: dict = Depends(get_current_user)
         WHERE user_id = ?
         """, (gender, age, height, weight_jin, target_weight_jin, goal_type, dining_mode, scene, now, user["id"]))
 
-        # 档案里改体重=今天称了一次重：顶栏读的是"最新体重记录"，
-        # 只改档案表会让页面继续显示旧数字（140 斤那个 bug）。
-        try:
-            changed = weight_jin is not None and abs(float(weight_jin) - float(cur.get("weight_jin") or 0)) >= 0.01
-        except (TypeError, ValueError):
-            changed = False
-        if changed:
-            today = date.today().isoformat()
-            row = c.execute("SELECT id FROM weight_logs WHERE user_id=? AND log_date=? "
-                            "ORDER BY id DESC LIMIT 1", (user["id"], today)).fetchone()
-            if row:
-                c.execute("UPDATE weight_logs SET weight_jin=?, created_at=? WHERE id=?",
-                          (weight_jin, now, row["id"]))
-            else:
-                c.execute("INSERT INTO weight_logs (user_id, log_date, weight_jin, waist_cm, created_at) "
-                          "VALUES (?,?,?,0,?)", (user["id"], today, weight_jin, now))
+        # 档案里改体重=今天称了一次重：顶栏读的是"最新称重记录"，只改档案表会继续显示旧数字。
+        # 判据必须是"最新记录 ≠ 刚保存的体重"，不能是"档案值变了没"——
+        # 这条补写逻辑上线前留下的分叉（档案 138、记录还停在 140）用后者永远修不好。
+        if weight_jin is not None:
+            latest = c.execute("SELECT weight_jin FROM weight_logs WHERE user_id=? "
+                               "ORDER BY log_date DESC, id DESC LIMIT 1", (user["id"],)).fetchone()
+            try:
+                diverged = latest is None or abs(float(latest["weight_jin"]) - float(weight_jin)) >= 0.01
+            except (TypeError, ValueError):
+                diverged = True
+            if diverged:
+                today = date.today().isoformat()
+                row = c.execute("SELECT id FROM weight_logs WHERE user_id=? AND log_date=? "
+                                "ORDER BY id DESC LIMIT 1", (user["id"], today)).fetchone()
+                if row:
+                    c.execute("UPDATE weight_logs SET weight_jin=?, created_at=? WHERE id=?",
+                              (weight_jin, now, row["id"]))
+                else:
+                    c.execute("INSERT INTO weight_logs (user_id, log_date, weight_jin, waist_cm, created_at) "
+                              "VALUES (?,?,?,0,?)", (user["id"], today, weight_jin, now))
 
         conn.commit()
     except Exception:conn.rollback();raise
