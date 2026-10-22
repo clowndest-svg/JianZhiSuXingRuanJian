@@ -1,0 +1,80 @@
+{
+  "checked_at": 1792646786,
+  "users": 2,
+  "user_ids": [
+    2,
+    3
+  ],
+  "fixtures": 0,
+  "media_rows": 15,
+  "real_media_rows": 15,
+  "fk": 0,
+  "integrity": "ok",
+  "qingsu": "active",
+  "qingsu-qa": "inactive",
+  "coturn": "active",
+  "qingsu-asr": "active",
+  "reported_account_repair": {
+    "user_id": 2,
+    "before_logs": [
+      {
+        "log_date": "2026-10-15",
+        "weight_jin": 140.0
+      }
+    ],
+    "after_logs": [
+      {
+        "log_date": "2026-10-15",
+        "weight_jin": 140.0
+      },
+      {
+        "log_date": "2026-10-22",
+        "weight_jin": 138.0
+      }
+    ],
+    "header_now": {
+      "log_date": "2026-10-22",
+      "weight_jin": 138.0
+    },
+    "note": "只补写今天这一条，历史 140 保留；另一个真实账号未改动"
+  },
+  "deleted_fixtures": [
+    "releasecheck_weight_55bfbc971f",
+    "releasecheck_weight_cbfa1fba60"
+  ],
+  "monitor": {
+    "checked_at": 1792646786,
+    "qingsu": "active",
+    "qingsu-llama": "active",
+    "qingsu-backup.timer": "active",
+    "qingsu-cert-renew.timer": "active",
+    "coturn": "active",
+    "qingsu-asr": "active",
+    "ready": 200,
+    "turn": true,
+    "asr_http": 200,
+    "cpu_percent": 9.3,
+    "memory_percent": 79.7,
+    "memory_available_mb": 743,
+    "swap_percent": 13.6,
+    "load1": 0.27,
+    "load_per_core": 0.07,
+    "free_disk_mb": 26597,
+    "disk_percent": 35.0,
+    "thresholds": {
+      "cpu_percent": 85.0,
+      "memory_percent": 85.0,
+      "swap_percent": 25.0,
+      "load_per_core": 1.5,
+      "disk_percent": 85.0
+    },
+    "backup_age_hours": 0.1,
+    "certificate_hours_left": 109.8,
+    "requests": 96,
+    "errors_5xx": 0,
+    "p95_ms": 49.6,
+    "sqlite_lock_errors": 0,
+    "cache_degraded": 0,
+    "problems": []
+  }
+}

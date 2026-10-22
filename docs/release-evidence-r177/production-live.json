@@ -1,0 +1,80 @@
+{
+  "release": "r39726638153",
+  "source_revision": "6889a5650997ca60cf4ae8df51d9e5128a63b7cd",
+  "status": "ok",
+  "build": 61,
+  "version_name": "2.2.16",
+  "apk_sha256": "a5613de654814ca0c21e8319fb67a6090e6d5ad0777bb676aef43ec7903812d2",
+  "apk_size": 5459478,
+  "apk_md5": "72704aad3a9460cd8e24673b23872e2d",
+  "apk_certificate_sha256": "c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f",
+  "min_build_override": 0,
+  "chat_turn": true,
+  "public": {
+    "build": 61,
+    "checks": [
+      "header keeps showing the newest weigh-in (140) while the profile says 138",
+      "profile modal prefills the same weight the header shows",
+      "saving an unchanged profile weight reconciles today record and the header follows"
+    ]
+  },
+  "self_check": {
+    "assets_media": [
+      "18 official assets served",
+      "real voice normalize/send/read/retry; authoritative duration; stolen media rejected",
+      "local/official stickers send without mutual follow; recall"
+    ],
+    "passed": [
+      "two simultaneous sessions",
+      "fresh account and share URL",
+      "share access boundary",
+      "latest daily weight",
+      "idempotent workout",
+      "checklist persistence",
+      "private 30-day summary",
+      "shared goal creation, real progress and removal",
+      "push capability and public guide",
+      "session revocation",
+      "update gate min_build=0 override=True blocked=0",
+      "new-client registration requires an email code"
+    ],
+    "fixture_users_removed": 2,
+    "fixture_files_removed": 2,
+    "remaining_users": 2
+  },
+  "monitor": {
+    "checked_at": 1792646786,
+    "qingsu": "active",
+    "qingsu-llama": "active",
+    "qingsu-backup.timer": "active",
+    "qingsu-cert-renew.timer": "active",
+    "coturn": "active",
+    "qingsu-asr": "active",
+    "ready": 200,
+    "turn": true,
+    "asr_http": 200,
+    "cpu_percent": 9.3,
+    "memory_percent": 79.7,
+    "memory_available_mb": 743,
+    "swap_percent": 13.6,
+    "load1": 0.27,
+    "load_per_core": 0.07,
+    "free_disk_mb": 26597,
+    "disk_percent": 35.0,
+    "thresholds": {
+      "cpu_percent": 85.0,
+      "memory_percent": 85.0,
+      "swap_percent": 25.0,
+      "load_per_core": 1.5,
+      "disk_percent": 85.0
+    },
+    "backup_age_hours": 0.1,
+    "certificate_hours_left": 109.8,
+    "requests": 96,
+    "errors_5xx": 0,
+    "p95_ms": 49.6,
+    "sqlite_lock_errors": 0,
+    "cache_degraded": 0,
+    "problems": []
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "version": "2.2.16 (61)",
+  "source_commit": "6889a56",
+  "artifact": {
+    "deployed_size": 5459478,
+    "deployed_sha256": "a5613de654814ca0c21e8319fb67a6090e6d5ad0777bb676aef43ec7903812d2",
+    "local_build_sha256": "863e388f7ce4",
+    "note": "本地构建与 CI 签名包同尺寸不同指纹，仓库同步的是线上那份"
+  },
+  "frontend_vm": {
+    "suite": "tests/legacy-frontend.mjs",
+    "total": 355,
+    "green": 355,
+    "red": 0,
+    "mutant_ref": "7c2a31a",
+    "mutant_green": 352,
+    "mutant_red": 3
+  },
+  "backend_legacy": {
+    "suite": "tests/legacy-backend.py",
+    "total": 619,
+    "green": 619,
+    "red": 0
+  },
+  "integration": {
+    "suite": "tests/test_integration.py",
+    "tests": 64,
+    "result": "OK",
+    "new_check": "test_profile_save_reconciles_stale_weigh_in"
+  },
+  "browser_chat": {
+    "suite": "tests/chat-ui.mjs",
+    "result": "OK",
+    "errors": [],
+    "new_check": "档案弹窗要预填顶栏那个数"
+  },
+  "browser_call": {
+    "suite": "tests/call-ui.mjs",
+    "checks": 7,
+    "result": "OK",
+    "local_candidate": "relay",
+    "remote_candidate": "relay"
+  },
+  "other_suites": {
+    "ai_contract": 6,
+    "update_copy": 3,
+    "companion": 8,
+    "chat_media": 18,
+    "calls": 3,
+    "native_media": 21,
+    "r173_contracts": 5,
+    "consistency": "24 绿",
+    "multiprocess": "2 绿"
+  }
+}

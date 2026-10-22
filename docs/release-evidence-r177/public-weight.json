@@ -1,0 +1,9 @@
+{
+  "build": 61,
+  "fixture": "releasecheck_weight_cbfa1fba60",
+  "checks": [
+    "header keeps showing the newest weigh-in (140) while the profile says 138",
+    "profile modal prefills the same weight the header shows",
+    "saving an unchanged profile weight reconciles today record and the header follows"
+  ]
+}

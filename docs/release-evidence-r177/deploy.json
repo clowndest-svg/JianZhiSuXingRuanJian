@@ -1,0 +1,27 @@
+{
+  "release": "r39726638153",
+  "run_number": 91,
+  "source_revision": "6889a5650997ca60cf4ae8df51d9e5128a63b7cd",
+  "backup": "/opt/qingsu/backups/release-20261022-131846",
+  "run_url": "https://github.com/clowndest-svg/JianZhiSuXingRuanJian/actions/runs/39726638153",
+  "jobs": {
+    "android": {
+      "conclusion": "success",
+      "completed_at": "2026-10-22T05:13:52Z"
+    },
+    "integration": {
+      "conclusion": "success",
+      "completed_at": "2026-10-22T05:15:41Z"
+    },
+    "deploy": {
+      "conclusion": "success",
+      "completed_at": "2026-10-22T05:19:10Z"
+    }
+  },
+  "units": {
+    "qingsu": "active",
+    "coturn": "active",
+    "qingsu-asr": "active",
+    "qingsu-qa": "inactive"
+  }
+}
