@@ -1,0 +1,48 @@
+{
+  "version": "2.2.17 (62)",
+  "source_commit": "c31ecdd",
+  "artifact": {
+    "deployed_size": 5459478,
+    "deployed_sha256": "9d2c11b9a90f54da4a5eb6ae52550315939a26a30324b5cea54ea43a514d456e"
+  },
+  "device_test": {
+    "suite": "app/src/androidTest UpdateDialogTest",
+    "result": "OK (2 tests)",
+    "time_seconds": 3.233,
+    "device": "MuMu Android 12"
+  },
+  "backend_legacy": {
+    "suite": "tests/legacy-backend.py",
+    "total": 622,
+    "green": 622,
+    "red": 0,
+    "mutant_ref": "721b689",
+    "mutant_green": 618,
+    "mutant_red": 4
+  },
+  "frontend_vm": {
+    "suite": "tests/legacy-frontend.mjs",
+    "total": 355,
+    "green": 355,
+    "red": 0
+  },
+  "integration": {
+    "suite": "tests/test_integration.py",
+    "tests": 64,
+    "result": "OK"
+  },
+  "update_copy": {
+    "suite": "tests/test_update_copy.py",
+    "tests": 3,
+    "result": "OK"
+  },
+  "browser_chat": {
+    "suite": "tests/chat-ui.mjs",
+    "result": "OK",
+    "errors": []
+  },
+  "screenshots": [
+    "update-dialog-top.png",
+    "update-dialog-bottom.png"
+  ]
+}

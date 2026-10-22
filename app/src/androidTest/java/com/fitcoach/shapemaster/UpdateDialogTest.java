@@ -4,7 +4,6 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Instrumentation;
 import android.content.Intent;
-import android.graphics.Bitmap;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -17,11 +16,14 @@ import org.junit.runner.RunWith;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
 /**
@@ -35,6 +37,14 @@ import static org.junit.Assert.fail;
 public class UpdateDialogTest {
 
     private final Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+
+    /** 一次弹窗测量的全部读数；断言只说"过了"，看图的人要能对上号。 */
+    private static final class Probe {
+        int viewport, content, textLayout, scrollYAtBottom, buttonBottom, skipBottom, windowHeight;
+        boolean canDownAtTop, canDownAtBottom;
+        ScrollView scroll;
+        AlertDialog dialog;
+    }
 
     private Activity launchHost() throws Exception {
         Intent intent = new Intent(instrumentation.getTargetContext(), MainActivity.class)
@@ -54,68 +64,32 @@ public class UpdateDialogTest {
         return resumed.get();
     }
 
-    private void save(Bitmap image, String name) throws Exception {
-        File dir = new File(instrumentation.getTargetContext().getExternalFilesDir(null), "qa");
-        dir.mkdirs();
-        File stale = new File(dir, name + ".png");
-        if (stale.exists()) stale.delete();
-        try (FileOutputStream out = new FileOutputStream(stale)) {
-            image.compress(Bitmap.CompressFormat.PNG, 100, out);
-        }
-    }
-
-    /** 长说明：比屏幕一半还高，必须靠滑动才看得完。 */
-    private static String longNotes() {
-        StringBuilder sb = new StringBuilder("修「更新说明一长就被吃掉」。");
-        for (int i = 1; i <= 22; i++) {
-            sb.append("\n• 第 ").append(i).append(" 条更新说明，故意写得长一点，用来验证弹窗真的能上下滑动而不是把后半截裁掉。");
-        }
-        return sb.toString();
-    }
-
-    @Test(timeout = 180000)
-    public void longUpdateNotesScrollAndButtonsStayOnScreen() throws Exception {
-        Activity host = launchHost();
-        AtomicReference<AlertDialog> ref = new AtomicReference<>();
-        AtomicReference<ScrollView> scrollRef = new AtomicReference<>();
+    /** 走产品同一个建弹窗函数，量视口/内容/滚动/按钮位置。 */
+    private Probe probe(Activity host, String title, String message) throws Exception {
+        AtomicReference<Probe> holder = new AtomicReference<>(new Probe());
         instrumentation.runOnMainSync(() -> {
-            String message = UpdateCopy.body(60, 999, "5.2 MB", longNotes());
-            AlertDialog dialog = UpdateManager.showUpdateDialog(host, "发现新版本 2.9.9", message, () -> { }, () -> { });
-            ref.set(dialog);
-            View custom = dialog.findViewById(android.R.id.custom);
-            scrollRef.set((ScrollView) ((ViewGroup) custom).getChildAt(0));
+            Probe p = holder.get();
+            p.dialog = UpdateManager.showUpdateDialog(host, title, message, () -> { }, () -> { });
+            View custom = p.dialog.findViewById(android.R.id.custom);
+            ViewGroup panel = (ViewGroup) custom;
+            p.scroll = (ScrollView) panel.getChildAt(0);
         });
-        AlertDialog dialog = ref.get();
-        ScrollView scroll = scrollRef.get();
-        assertNotNull("弹窗没建起来", dialog);
+        Probe p = holder.get();
+        ScrollView scroll = p.scroll;
         assertNotNull("弹窗正文不在滚动容器里", scroll);
-
         View content = scroll.getChildAt(0);
         for (int i = 0; i < 60 && (scroll.getHeight() <= 0 || content.getHeight() <= 0); i++) {
             instrumentation.runOnMainSync(() -> { });
             Thread.sleep(100);
         }
-        final int scrollHeight = scroll.getHeight();
-        final int contentHeight = content.getHeight();
-        assertTrue("弹窗还没量出高度", scrollHeight > 0 && contentHeight > 0);
-
-        // 1) 说明确实比视口高（封顶生效），不是被 TextView 自己裁掉
-        assertTrue("内容没有超出视口，量不到滚动（视口 " + scrollHeight + " / 内容 " + contentHeight + "）",
-                contentHeight > scrollHeight);
-        int textHeight = ((TextView) content).getLayout().getHeight()
+        final AtomicReference<Boolean> downAtTop = new AtomicReference<>(Boolean.FALSE);
+        instrumentation.runOnMainSync(() -> downAtTop.set(scroll.canScrollVertically(1)));
+        p.viewport = scroll.getHeight();
+        p.content = content.getHeight();
+        p.textLayout = ((TextView) content).getLayout().getHeight()
                 + content.getPaddingTop() + content.getPaddingBottom();
-        assertTrue("TextView 被自己裁掉了（布局高 " + textHeight + " > 视图高 " + contentHeight + "）",
-                contentHeight >= textHeight);
-
-        // 2) 顶部时还能往下滑
-        final AtomicReference<Boolean> canDown = new AtomicReference<>(Boolean.FALSE);
-        instrumentation.runOnMainSync(() -> canDown.set(scroll.canScrollVertically(1)));
-        assertTrue("封顶后不能往下滑，用户就看不到后半段说明", canDown.get());
+        p.canDownAtTop = downAtTop.get();
         assertEquals("刚打开不该已经在底部", 0, scroll.getScrollY());
-
-        save(instrumentation.getUiAutomation().takeScreenshot(), "update-dialog-top");
-
-        // 3) 真的滑得动，滑到底后不再能往下滑
         instrumentation.runOnMainSync(() -> scroll.fullScroll(View.FOCUS_DOWN));
         Thread.sleep(300);
         final AtomicReference<Integer> endY = new AtomicReference<>(0);
@@ -124,38 +98,100 @@ public class UpdateDialogTest {
             endY.set(scroll.getScrollY());
             stillDown.set(scroll.canScrollVertically(1));
         });
-        assertTrue("滑动没生效（scrollY 还是 " + endY.get() + "）", endY.get() > 0);
-        assertTrue("已经到底还能往下滑，说明量到的不是真内容", !stillDown.get());
-        save(instrumentation.getUiAutomation().takeScreenshot(), "update-dialog-bottom");
-
-        // 4) 两个按钮始终在屏内：说明再长也不能把它们挤出屏幕
-        final int[] box = new int[4];
+        p.scrollYAtBottom = endY.get();
+        p.canDownAtBottom = stillDown.get();
+        final int[] box = new int[3];
         instrumentation.runOnMainSync(() -> {
-            View decor = dialog.getWindow().getDecorView();
-            Button go = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
-            Button skip = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            View decor = p.dialog.getWindow().getDecorView();
+            Button go = p.dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            Button skip = p.dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
             int[] loc = new int[2];
             go.getLocationInWindow(loc);
-            box[0] = loc[1];
-            box[1] = loc[1] + go.getHeight();
-            box[2] = decor.getHeight();
+            box[0] = loc[1] + go.getHeight();
             int[] loc2 = new int[2];
             skip.getLocationInWindow(loc2);
-            box[3] = loc2[1] + skip.getHeight();
+            box[1] = loc2[1] + skip.getHeight();
+            box[2] = decor.getHeight();
         });
-        assertTrue("按钮底部跑出屏幕（按钮底 " + box[1] + " / 窗口高 " + box[2] + "）",
-                box[0] > 0 && box[1] <= box[2] && box[3] <= box[2]);
+        p.buttonBottom = box[0];
+        p.skipBottom = box[1];
+        p.windowHeight = box[2];
+        return p;
+    }
 
+    private void assertReadable(Probe p, String label) {
+        assertTrue(label + "：弹窗还没量出高度（视口 " + p.viewport + " / 内容 " + p.content + "）",
+                p.viewport > 0 && p.content > 0);
+        assertTrue(label + "：正文被 TextView 自己裁掉了（布局高 " + p.textLayout + " > 视图高 "
+                + p.content + "）", p.content >= p.textLayout);
+        if (p.content > p.viewport) {
+            assertTrue(label + "：内容超出视口却滑不动", p.canDownAtTop);
+            assertTrue(label + "：滑到底还能往下滑（scrollY " + p.scrollYAtBottom + "）", !p.canDownAtBottom);
+            assertTrue(label + "：滑到底没真的移动（scrollY 还是 " + p.scrollYAtBottom + "）",
+                    p.scrollYAtBottom > 0);
+        }
+        assertTrue(label + "：按钮被挤出屏幕（去下载底 " + p.buttonBottom + " / 窗口高 " + p.windowHeight + "）",
+                p.buttonBottom > 0 && p.buttonBottom <= p.windowHeight);
+        assertTrue(label + "：按钮被挤出屏幕（这次不更新底 " + p.skipBottom + " / 窗口高 " + p.windowHeight + "）",
+                p.skipBottom > 0 && p.skipBottom <= p.windowHeight);
+    }
+
+    private void dump(String name, String text) throws Exception {
         File dir = new File(instrumentation.getTargetContext().getExternalFilesDir(null), "qa");
         dir.mkdirs();
-        try (FileOutputStream out = new FileOutputStream(new File(dir, "update-dialog.json"))) {
-            String record = "{\"viewport\":" + scrollHeight + ",\"content\":" + contentHeight
-                    + ",\"scrollY_at_bottom\":" + endY.get() + ",\"button_bottom\":" + box[1]
-                    + ",\"window_height\":" + box[2] + ",\"text_layout_height\":" + textHeight + "}";
-            out.write(record.getBytes("UTF-8"));
+        try (FileOutputStream out = new FileOutputStream(new File(dir, name))) {
+            out.write(text.getBytes("UTF-8"));
         }
-        instrumentation.runOnMainSync(dialog::dismiss);
-        if (!new File(dir, "update-dialog-top.png").exists()) fail("没留下顶部截图");
-        if (!new File(dir, "update-dialog-bottom.png").exists()) fail("没留下底部截图");
+    }
+
+    /** 比屏幕一半高得多的说明：必须能一路滑到底，两个按钮始终在屏内。 */
+    @Test(timeout = 180000)
+    public void longUpdateNotesScrollAndButtonsStayOnScreen() throws Exception {
+        Activity host = launchHost();
+        StringBuilder notes = new StringBuilder("修「更新说明一长就被吃掉」。");
+        for (int i = 1; i <= 22; i++) {
+            notes.append("\n• 第 ").append(i).append(" 条更新说明，故意写得长一点，用来验证弹窗真的能上下滑动而不是把后半截裁掉。");
+        }
+        Probe p = probe(host, "发现新版本 2.9.9", UpdateCopy.body(60, 999, "5.2 MB", notes.toString()));
+        assertTrue("22 条说明居然没溢出（视口 " + p.viewport + " / 内容 " + p.content + "），量不到滚动",
+                p.content > p.viewport);
+        assertReadable(p, "长说明");
+        dump("update-dialog.json", "{\"viewport\":" + p.viewport + ",\"content\":" + p.content
+                + ",\"text_layout\":" + p.textLayout + ",\"scrollY_at_bottom\":" + p.scrollYAtBottom
+                + ",\"button_bottom\":" + p.buttonBottom + ",\"window_height\":" + p.windowHeight + "}");
+        instrumentation.runOnMainSync(() -> p.dialog.dismiss());
+    }
+
+    /** 线上清单里那份真实文案：同样不许裁正文、不许把按钮顶出屏幕。 */
+    @Test(timeout = 180000)
+    public void liveManifestNoteStaysReadable() throws Exception {
+        Activity host = launchHost();
+        HttpURLConnection c = (HttpURLConnection) new URL(BuildConfig.API_BASE_URL + "/version.json").openConnection();
+        c.setConnectTimeout(15000);
+        c.setReadTimeout(15000);
+        c.setRequestProperty("Cache-Control", "no-cache");
+        String json = null;
+        try (InputStream in = c.getInputStream()) {
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+            json = new String(bo.toByteArray(), "UTF-8");
+        } finally {
+            c.disconnect();
+        }
+        assertNotNull("读不到线上版本清单", json);
+        org.json.JSONObject o = new org.json.JSONObject(json);
+        int remote = o.optInt("version_code", 0);
+        String notes = o.optString("notes", "");
+        assertTrue("线上清单没带更新说明", notes.length() > 0);
+        Probe p = probe(host, "发现新版本 " + o.optString("version_name", String.valueOf(remote)),
+                UpdateCopy.body(60, remote, "5.2 MB", notes));
+        assertReadable(p, "线上文案");
+        dump("update-dialog-live.json", "{\"remote\":" + remote + ",\"notes_chars\":" + notes.length()
+                + ",\"viewport\":" + p.viewport + ",\"content\":" + p.content
+                + ",\"text_layout\":" + p.textLayout + ",\"scrollY_at_bottom\":" + p.scrollYAtBottom
+                + ",\"button_bottom\":" + p.buttonBottom + ",\"window_height\":" + p.windowHeight + "}");
+        instrumentation.runOnMainSync(() -> p.dialog.dismiss());
     }
 }

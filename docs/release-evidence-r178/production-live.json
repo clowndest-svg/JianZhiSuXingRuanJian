@@ -1,0 +1,103 @@
+{
+  "release": "r39734173380",
+  "source_revision": "c31ecdd94d5176bdbbd7e0b128a1a73095aa06d9",
+  "status": "ok",
+  "build": 62,
+  "version_name": "2.2.17",
+  "apk_sha256": "9d2c11b9a90f54da4a5eb6ae52550315939a26a30324b5cea54ea43a514d456e",
+  "apk_size": 5459478,
+  "apk_md5": "51cf50944e9029d7e6d89763836e2fd3",
+  "apk_certificate_sha256": "c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f",
+  "min_build_override": 0,
+  "chat_turn": true,
+  "device_update_dialog": {
+    "device": "MuMu Android 12 (API 32), adb 127.0.0.1:16384",
+    "instrumentation": "com.fitcoach.shapemaster.UpdateDialogTest — OK (2 tests), Time: 3.233",
+    "long_note": {
+      "label": "22 条合成说明（比屏幕一半高得多）",
+      "viewport_px": 468,
+      "content_px": 1868,
+      "text_layout_px": 1868,
+      "scrollY_at_bottom": 1400,
+      "button_bottom": 638,
+      "window_height": 668,
+      "verdict": "内容 4 倍于视口仍滑得到底；正文没被 TextView 自己裁掉（content == text_layout）；两个按钮底 638 ≤ 窗口 668"
+    },
+    "live_note": {
+      "label": "线上 version.json 的真实文案（r177，262 字）",
+      "remote_build": 61,
+      "notes_chars": 262,
+      "viewport_px": 468,
+      "content_px": 536,
+      "text_layout_px": 536,
+      "scrollY_at_bottom": 68,
+      "button_bottom": 638,
+      "window_height": 668,
+      "verdict": "机主实拍那份长度的文案确实溢出视口 68px，旧版就是被吃掉这 68px；现在能滑到底"
+    },
+    "regression_being_gated": "r174 把高度封顶加在 TextView 上：文本自己裁掉、ScrollView 永远撑不满，静态判据全绿而真机滑不动",
+    "screenshots": [
+      "update-dialog-top.png",
+      "update-dialog-bottom.png"
+    ]
+  },
+  "self_check": {
+    "assets_media": [
+      "18 official assets served",
+      "real voice normalize/send/read/retry; authoritative duration; stolen media rejected",
+      "local/official stickers send without mutual follow; recall"
+    ],
+    "passed": [
+      "two simultaneous sessions",
+      "fresh account and share URL",
+      "share access boundary",
+      "latest daily weight",
+      "idempotent workout",
+      "checklist persistence",
+      "private 30-day summary",
+      "shared goal creation, real progress and removal",
+      "push capability and public guide",
+      "session revocation",
+      "update gate min_build=0 override=True blocked=0",
+      "new-client registration requires an email code"
+    ],
+    "fixture_users_removed": 2,
+    "fixture_files_removed": 2,
+    "remaining_users": 2
+  },
+  "monitor": {
+    "checked_at": 1792651151,
+    "qingsu": "active",
+    "qingsu-llama": "active",
+    "qingsu-backup.timer": "active",
+    "qingsu-cert-renew.timer": "active",
+    "coturn": "active",
+    "qingsu-asr": "active",
+    "ready": 200,
+    "turn": true,
+    "asr_http": 200,
+    "cpu_percent": 2.2,
+    "memory_percent": 70.0,
+    "memory_available_mb": 1097,
+    "swap_percent": 13.6,
+    "load1": 0.11,
+    "load_per_core": 0.03,
+    "free_disk_mb": 26565,
+    "disk_percent": 35.0,
+    "thresholds": {
+      "cpu_percent": 85.0,
+      "memory_percent": 85.0,
+      "swap_percent": 25.0,
+      "load_per_core": 1.5,
+      "disk_percent": 85.0
+    },
+    "backup_age_hours": 0.1,
+    "certificate_hours_left": 108.6,
+    "requests": 128,
+    "errors_5xx": 0,
+    "p95_ms": 51.9,
+    "sqlite_lock_errors": 0,
+    "cache_degraded": 0,
+    "problems": []
+  }
+}

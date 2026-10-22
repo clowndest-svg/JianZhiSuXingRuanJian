@@ -1,0 +1,29 @@
+{
+  "device": "MuMu Android 12 (API 32), adb 127.0.0.1:16384, 面板 900x1600 / SurfaceOrientation=1（横屏，VM 锁方向）",
+  "orientation_note": "横屏取短边做 52% 封顶，视口 468px 比机主竖屏更矮，是更严的一侧；判据是不变量（正文不自裁、溢出必滑到底、按钮在窗口内），与方向无关",
+  "instrumentation": "com.fitcoach.shapemaster.UpdateDialogTest — OK (2 tests), Time: 3.233",
+  "long_note": {
+    "label": "22 条合成说明（比屏幕一半高得多）",
+    "viewport_px": 468,
+    "content_px": 1868,
+    "text_layout_px": 1868,
+    "scrollY_at_bottom": 1400,
+    "button_bottom": 638,
+    "window_height": 668,
+    "verdict": "内容 4 倍于视口仍滑得到底；正文没被 TextView 自己裁掉（content == text_layout）；两个按钮底 638 ≤ 窗口 668"
+  },
+  "live_note": {
+    "label": "线上 version.json 的真实文案（r177，262 字）",
+    "remote_build": 61,
+    "notes_chars": 262,
+    "viewport_px": 468,
+    "content_px": 536,
+    "text_layout_px": 536,
+    "scrollY_at_bottom": 68,
+    "button_bottom": 638,
+    "window_height": 668,
+    "verdict": "机主实拍那份长度的文案确实溢出视口 68px，旧版就是被吃掉这 68px；现在能滑到底"
+  },
+  "regression_being_gated": "r174 把高度封顶加在 TextView 上：文本自己裁掉、ScrollView 永远撑不满，静态判据全绿而真机滑不动",
+  "screenshots": ["update-dialog-top.png", "update-dialog-bottom.png"]
+}
