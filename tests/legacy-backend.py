@@ -2475,10 +2475,21 @@ def main():
           'internal = ("消息存法", "判据", "验收方式"' in _vj
           and "bullets = [b for b in bullets if not any(word in b for word in internal)]" in _vj, "")
     _up = _repo_file("app/src/main/java/com/fitcoach/shapemaster/UpdateManager.java")
+    _udt = _repo_file("app/src/androidTest/java/com/fitcoach/shapemaster/UpdateDialogTest.java")
     check("更新弹窗改用自定义正文（可滚动、有行距与字号，不再是一坨默认小字）",
-          ("setView(body)" in _up or "setView(scroll)" in _up)
-          and "COMPLEX_UNIT_SP, 15f" in _up
+          "setView(scroll)" in _up and "COMPLEX_UNIT_SP, 15f" in _up
           and "setLineSpacing(" in _up and "ScrollView" in _up, "")
+    # r174 的漏法：封顶加在 TextView 上，文本自己裁掉、ScrollView 永远撑不满，
+    # 当时"有 ScrollView + setView(scroll)"全绿，机主实拍长说明仍被吃掉半行。
+    # 判据必须钉"加在谁身上"，否则下一轮还会以同样的方式绿过去。
+    check("更新弹窗高度封顶加在滚动容器上，不是加在 TextView 上",
+          "body.setMaxHeight" not in _up and "class ScrollCap extends android.widget.ScrollView" in _up
+          and "MeasureSpec.AT_MOST" in _up, "")
+    check("更新弹窗滚动条常显（让人看得出还能往下滑）",
+          "setScrollbarFadingEnabled(false)" in _up, "")
+    check("更新弹窗有真机判据：长说明要量到溢出、滑得动、按钮还在屏内",
+          "showUpdateDialog(" in _up and "canScrollVertically(1)" in _udt
+          and "BUTTON_POSITIVE" in _udt and "getLayout().getHeight()" in _udt, "")
     check("更新弹窗不硬编没量过的下载速度",
           "0.33 MB/s" not in _up and "UpdateCopy.body(" in _up, "")
     check("弹窗文案抽成纯 Java 类，能脱离 Android 运行时真跑",

@@ -127,36 +127,90 @@ public final class UpdateManager {
                 || (downloadUri.getPort() != -1 && downloadUri.getPort() != 443)) return;
         String mb = size > 0 ? String.format(java.util.Locale.CHINA, "%.1f MB", size / 1048576.0) : "未知大小";
         final int r = remote;
+        showUpdateDialog(act, "发现新版本 " + (name.isEmpty() ? r : name),
+                UpdateCopy.body(mine, r, mb, notes),
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            Intent it = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                            it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            act.startActivity(it);
+                        } catch (Exception e) {
+                            Toast.makeText(act, "打不开下载链接：" + url, Toast.LENGTH_LONG).show();
+                        }
+                    }
+                },
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        sp.edit().putInt("skipped", r).apply();
+                    }
+                });
+    }
+
+    /**
+     * 更新弹窗。高度封顶只能加在滚动容器上：加在 TextView 上，文本会自己裁掉、
+     * ScrollView 永远撑不满，于是"能上下滑"是假的——r174 就是这么漏过一次，
+     * 机主 10-22 实拍长说明仍然被吃掉半行。
+     */
+    static android.app.AlertDialog showUpdateDialog(Activity act, String title, CharSequence message,
+                                                    final Runnable onDownload, final Runnable onSkip) {
+        float density = act.getResources().getDisplayMetrics().density;
         TextView body = new TextView(act);
-        body.setText(UpdateCopy.body(mine, r, mb, notes));
+        body.setText(message);
         body.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f);
         body.setTextColor(0xFF0F172A);
-        float density = act.getResources().getDisplayMetrics().density;
         body.setLineSpacing(6f * density, 1.08f);
         body.setPadding((int) (24 * density), (int) (10 * density),
                 (int) (24 * density), (int) (6 * density));
-        // 更新说明一长就把按钮挤出屏幕：套一层可滚动容器，高度封顶在屏幕一半左右。
-        body.setMaxHeight(Math.round(act.getResources().getDisplayMetrics().heightPixels * 0.52f));
-        body.setVerticalScrollBarEnabled(true);
-        android.widget.ScrollView scroll = new android.widget.ScrollView(act);
+        int maxPx = Math.round(act.getResources().getDisplayMetrics().heightPixels * 0.52f);
+        ScrollCap scroll = new ScrollCap(act, maxPx);
         scroll.addView(body, new android.widget.FrameLayout.LayoutParams(
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT));
-        new android.app.AlertDialog.Builder(act)
-                .setTitle("发现新版本 " + (name.isEmpty() ? r : name))
+        final android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(act)
+                .setTitle(title)
                 .setView(scroll)
-                .setPositiveButton("去下载", (d, w) -> {
-                    try {
-                        Intent it = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                        it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        act.startActivity(it);
-                    } catch (Exception e) {
-                        Toast.makeText(act, "打不开下载链接：" + url, Toast.LENGTH_LONG).show();
-                    }
-                })
-                .setNeutralButton("这次不更新", (d, w) -> sp.edit().putInt("skipped", r).apply())
+                .setPositiveButton("去下载", null)
+                .setNeutralButton("这次不更新", null)
                 .setCancelable(true)
-                .show();
+                .create();
+        dialog.show();
+        // show() 之后按钮才存在；自己接管点击，免得 dismiss 与回调顺序说不清
+        android.widget.Button go = dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
+        android.widget.Button skip = dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL);
+        if (go != null) {
+            go.setOnClickListener(v -> {
+                dialog.dismiss();
+                onDownload.run();
+            });
+        }
+        if (skip != null) {
+            skip.setOnClickListener(v -> {
+                dialog.dismiss();
+                onSkip.run();
+            });
+        }
+        return dialog;
+    }
+
+    /** 说明超过屏幕一半时自己封顶，剩下的交给滑动；滚动条常显，让人看得出还能滑。 */
+    static final class ScrollCap extends android.widget.ScrollView {
+        private final int maxPx;
+
+        ScrollCap(Context c, int maxPx) {
+            super(c);
+            this.maxPx = maxPx;
+            setVerticalScrollBarEnabled(true);
+            setScrollbarFadingEnabled(false);
+        }
+
+        @Override
+        protected void onMeasure(int widthSpec, int heightSpec) {
+            super.onMeasure(widthSpec, android.view.View.MeasureSpec.makeMeasureSpec(
+                    maxPx, android.view.View.MeasureSpec.AT_MOST));
+        }
     }
 
     private static int mine(Context c) {
