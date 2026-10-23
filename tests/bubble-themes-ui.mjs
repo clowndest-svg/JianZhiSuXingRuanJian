@@ -20,7 +20,7 @@ try{
  for(let i=0;i<100;i++){try{if((await fetch(base+'/health')).ok)break;}catch{}await new Promise(r=>setTimeout(r,100));}
  const profile={password:'ThemeReview!123',age:30,height:170,weight_jin:160,target_weight_jin:140};
  const a=await api('/api/register',{...profile,username:'wardrobeowner'}),b=await api('/api/register',{...profile,username:'wardrobepeer'});
- await api('/api/chat/send',{to:b.id,text:'今天也要开心呀',request_id:'theme-short'},a.token);
+ await api('/api/chat/send',{to:b.id,text:'你好',request_id:'theme-short'},a.token);
  await api('/api/chat/send',{to:b.id,text:'长消息也要清楚可读。'.repeat(30),request_id:'theme-long'},a.token);
  await api('/api/chat/send',{to:a.id,text:'对方的气泡保持原样',request_id:'theme-peer'},b.token);
  browser=await chromium.launch({headless:true,...(process.env.QINGSU_CHROME_PATH?{executablePath:process.env.QINGSU_CHROME_PATH}:{}),args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
@@ -57,8 +57,29 @@ try{
   assert.equal(await page.locator('.cm-bubble.them[data-skin]').count(),0);
   assert.equal(await page.locator('.cm-bubble.me[data-skin] .dm-status').count(),2);
   assert.equal(await page.locator('#dm-input').isEditable(),true);
+  const compact=await page.locator('.cm-bubble.me[data-skin]').first().evaluate(el=>{const b=el.getBoundingClientRect(),m=el.querySelector('.dm-bubble-meta').getBoundingClientRect();return {height:b.height,width:b.width,metaY:m.top,bottom:b.bottom};});
+  assert.ok(compact.height<=49&&compact.width>compact.height&&compact.metaY>=compact.bottom,JSON.stringify(compact));
   assert.ok(await page.locator('.cm-bubble.me.skin-long[data-skin]').evaluate(el=>getComputedStyle(el).outlineStyle==='solid'&&getComputedStyle(el.querySelector('.skin-frame')).display==='none'),'long messages use adaptive outline without stretched curves crossing text or status');
  }
+
+ // Actual local IndexedDB wallpaper persistence, image decoding and chat scope.
+ const openWall=async()=>{await page.getByRole('button',{name:'气泡',exact:true}).click();await page.getByRole('button',{name:'聊天背景',exact:true}).click();await page.waitForSelector('[data-wallpaper-apply]');};
+ await openWall();assert.equal(await page.locator('[data-wallpaper-id]').count(),20);
+ const walls=await page.evaluate(()=>QSWallpapers.items);
+ for(const w of walls){await page.locator('[data-wallpaper-id="'+w.id+'"]').click();await page.locator('[data-wallpaper-apply]').click();await page.waitForFunction(()=>!document.getElementById('account-tools-dialog')?.open);assert.ok(await page.locator('#thread-bubbles').evaluate(el=>el.style.backgroundImage.startsWith('url(')));await openWall();}
+ await page.locator('#account-tools-dialog .td-close').click();
+ await page.screenshot({path:path.join(folder,'compact-chat-393.png')});
+ const png=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=600;c.height=1000;const x=c.getContext('2d');x.fillStyle='#d6e9e1';x.fillRect(0,0,600,1000);x.fillStyle='#a8c8bb';x.fillRect(0,700,600,300);return c.toDataURL('image/png').split(',')[1];});
+ await openWall();await page.locator('[data-wallpaper-upload]').setInputFiles({name:'custom.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});await page.waitForFunction(()=>document.querySelector('.wallpaper-hint').textContent.includes('图片已就绪'));
+ await page.locator('[data-wallpaper-apply]').click();await page.waitForFunction(()=>document.getElementById('thread-bubbles').style.backgroundImage.includes('blob:'));
+ await page.reload();await page.waitForFunction(()=>window.QSWallpapers&&typeof openDM==='function');await page.evaluate(id=>openDM(id),b.id);await page.waitForFunction(()=>document.getElementById('thread-bubbles')?.style.backgroundImage.includes('blob:'));
+ const peerPage=await context.newPage();await peerPage.addInitScript(({b})=>{localStorage.setItem('QINGSU_AUTH_TOKEN',b.token);localStorage.setItem('QINGSU_AUTH_USER',JSON.stringify({id:b.id,username:'wardrobepeer'}));},{b});await peerPage.goto(base);await peerPage.waitForFunction(()=>window.QSWallpapers&&typeof openDM==='function');await peerPage.evaluate(id=>openDM(id),a.id);await peerPage.waitForSelector('#dm-input');await peerPage.waitForTimeout(150);assert.equal(await peerPage.locator('#thread-bubbles').evaluate(el=>el.style.backgroundImage),'');await peerPage.close();
+ // The other page shares localStorage; restore the current account before reload.
+ await page.reload();await page.waitForFunction(()=>window.QSWallpapers&&typeof openDM==='function');await page.evaluate(id=>openDM(id),b.id);await page.waitForFunction(()=>document.getElementById('thread-bubbles')?.style.backgroundImage.includes('blob:'));
+ const c=await api('/api/register',{...profile,username:'wallpaperthird'});await page.evaluate(id=>openDM(id),c.id);await page.waitForSelector('#dm-input');await page.waitForTimeout(150);assert.equal(await page.locator('#thread-bubbles').evaluate(el=>el.style.backgroundImage),'');
+ await page.evaluate(id=>openDM(id),b.id);await page.waitForFunction(()=>document.getElementById('thread-bubbles')?.style.backgroundImage.includes('blob:'));
+ await openWall();await page.locator('[data-wallpaper-upload]').setInputFiles({name:'bad.svg',mimeType:'image/svg+xml',buffer:Buffer.from('<svg/>')});await page.waitForFunction(()=>document.querySelector('.wallpaper-hint').textContent.includes('请选择'));await page.locator('[data-wallpaper-delete]').click();await page.waitForFunction(()=>!document.getElementById('account-tools-dialog')?.open);assert.equal(await page.locator('#thread-bubbles').evaluate(el=>el.style.backgroundImage),'');
+ checks.push('20 local wallpaper presets; decoded custom image survives reload; different chats and accounts isolated; invalid images rejected; delete restores default');
  assert.equal(shapes.size,20);assert.equal(palettes.size,20);checks.push('all 20 save through API, update actual short/long messages and keep peer bubbles/status unchanged');
  await page.reload();await page.waitForFunction(()=>window.QSBubbles&&typeof openDM==='function');await page.evaluate(id=>openDM(id),b.id);
  await page.waitForSelector('.cm-bubble.me[data-skin="skin-whale"]');checks.push('theme survives browser reload and API settings hydration');
@@ -86,6 +107,12 @@ try{
  // Real generated art requests, not empty PNG placeholders.
  for(const f of ['bubble-ai.png','bubble-moon.png']){const r=await fetch(base+'/'+f);assert.equal(r.status,200);assert.ok(Number(r.headers.get('content-length'))>100000);}
  assert.deepEqual(errors,[]);checks.push('original illustrations delivered and no page errors');
+ for(let i=0;i<4;i++)await api('/api/chat/send',{to:c.id,text:['你好','今天也要开心呀','晚点一起聊','收到啦'][i],request_id:'compact-'+i},a.token);
+ await page.evaluate(id=>openDM(id),c.id);await page.waitForSelector('#dm-input');await page.getByRole('button',{name:'气泡',exact:true}).click();await page.locator('[data-pick-skin="skin-ai"]').click();await page.locator('[data-skin-apply]').click();await page.waitForSelector('.cm-bubble.me[data-skin="skin-ai"]');await openWall();await page.locator('[data-wallpaper-id="mist"]').click();await page.locator('[data-wallpaper-apply]').click();await page.waitForFunction(()=>!document.getElementById('account-tools-dialog')?.open);await page.screenshot({path:path.join(folder,'compact-ai-mist-393.png')});
+ for(const w of [320,393,1200]){await page.setViewportSize({width:w,height:850});await openWall();const box=await page.locator('[data-wallpaper-apply]').boundingBox();assert.ok(box.y+box.height<=850);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.locator('#account-tools-dialog .td-close').click();}await page.setViewportSize({width:393,height:850});
+ await openWall();await page.screenshot({path:path.join(folder,'wallpaper-panel-393.png')});await page.locator('#account-tools-dialog .td-close').click();
+ const wallsPage=await context.newPage();await wallsPage.setViewportSize({width:1200,height:1200});await wallsPage.goto(base);await wallsPage.waitForFunction(()=>window.QSWallpapers);await wallsPage.evaluate(()=>{document.body.innerHTML='<main style="padding:30px;font-family:Microsoft YaHei;background:#f5f8f6"><h1>轻塑 · 20款聊天背景</h1><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:18px">'+QSWallpapers.items.map(t=>'<article style="background:white;border-radius:16px;overflow:hidden;text-align:center"><div style="height:270px;background:center/cover url(&quot;'+QSWallpapers.preview(t.id)+'&quot;)"></div><p>'+t.name+'</p></article>').join('')+'</div></main>';});await wallsPage.screenshot({path:path.join(folder,'wallpapers-20.png'),fullPage:true});await wallsPage.close();
+
  const gallery=await context.newPage();await gallery.setViewportSize({width:1400,height:1100});
  await gallery.setContent('<html lang="zh-CN"><head><base href="'+base+'/"><link rel="stylesheet" href="bubble-themes.css"><style>body{margin:0;background:#eef2f4;font-family:"Microsoft YaHei",sans-serif;color:#273d48}main{padding:36px 44px}h1{font-size:30px;margin:0 0 8px}.note{font-size:15px;color:#72858d;margin:0 0 24px}.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:18px}.skin-card{padding-bottom:18px;border-radius:21px}.skin-stage{height:155px;padding:38px 24px 20px}.skin-sample{padding:25px 15px 20px;font-size:13px}.skin-stage .skin-art-main{width:46px;height:46px;top:-24px;left:-10px}.skin-stage .skin-art-main.skin-portrait{width:72px;height:72px;top:-45px;left:-22px}.skin-card-name{font-size:15px}.skin-card-kind{font-size:11px}.foot{margin-top:22px;font-size:13px;color:#7d8c96}</style></head><body><main><h1>轻塑 · 气泡图鉴</h1><p class="note">20 款原创装扮 / 轮廓、角饰与色彩各有不同</p><div class="grid"></div><p class="foot">AI 娘 · 动漫 · 科幻 · 浪漫 · 萌趣 · 自然 · 梦幻　｜　支持动态与静态切换</p></main></body></html>');
  await gallery.addScriptTag({url:base+'/bubble-themes.js'});

@@ -76,9 +76,9 @@
             ? ''
             : svg(icons[t.motif]);
         const path=frames[t.shape];
-        return '<svg class="skin-frame" viewBox="0 0 300 100" preserveAspectRatio="none" focusable="false" aria-hidden="true"><path d="'+path+'"/><path class="skin-stitch" d="'+path+'"/></svg>'
+        return '<svg class="skin-frame" viewBox="0 0 300 100" preserveAspectRatio="none" focusable="false" aria-hidden="true"><path d="'+path+'"/><path class="skin-stitch" d="'+path+'"/><g class="skin-detail"><circle cx="281" cy="13" r="2"/><circle cx="275" cy="13" r="1"/><path d="M18 83h16m-12 4h7M256 12h12"/></g></svg>'
             +'<span class="skin-art skin-art-main'+(t.motif==='ai'||t.motif==='luna'?' skin-portrait':'')+'" aria-hidden="true">'+art+'</span>'
-            +'<span class="skin-art skin-art-small" aria-hidden="true">'+svg(t.type==='浪漫'?heart:star)+'</span>';
+            +'<span class="skin-art skin-art-small" aria-hidden="true">'+svg(icons[({cat:'heart',bear:'heart',sakura:'sakura',rose:'heart',forest:'leaf',ocean:'jelly',orbit:'planet',holo:'crystal',tea:'leaf',whale:'moon'})[t.motif]]||(t.type==='浪漫'?heart:star))+'</span>';
     }
     function preview(id,large) {
         return '<div class="skin-stage'+(large?' skin-stage-large':'')+'"><div class="skin-sample" data-skin="'+id+'">'+decor(id)
@@ -103,7 +103,7 @@
     function open() {
         selected=get(cm.myTheme)?cm.myTheme:items[0].id;category='全部';syncMotion();
         const types=['全部','AI娘','动漫','科幻','浪漫','萌趣','自然','梦幻'];
-        toolDialog('气泡装扮','<section class="bubble-wardrobe"><p class="skin-intro">20 款原创装扮 · 免费切换</p><p class="skin-scope">只装扮你看到的自己消息，对方显示不变。</p>'
+        toolDialog('气泡装扮','<section class="bubble-wardrobe"><p class="skin-intro">20 款原创装扮 · 免费切换<button type="button" class="skin-background-entry" onclick="QSWallpapers.open()">聊天背景</button></p><p class="skin-scope">只装扮你看到的自己消息，对方显示不变。</p>'
             +'<div class="skin-live" aria-hidden="true"></div><div class="skin-selection"><div><strong class="skin-selected-name"></strong><p class="skin-selected-note"></p></div>'
             +'<label class="skin-motion"><input type="checkbox" data-skin-motion'+(motion?' checked':'')+'> 动效</label></div>'
             +'<nav class="skin-categories" aria-label="气泡风格">'+types.map(c=>'<button type="button" data-skin-category="'+c+'" aria-pressed="'+(c==='全部')+'">'+c+'</button>').join('')+'</nav>'

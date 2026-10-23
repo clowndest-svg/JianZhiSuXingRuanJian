@@ -29,6 +29,8 @@ const BUDGET = {
   // r182: 20 original frames and wardrobe live in their own bounded files.
   "bubble-themes.js": { raw: 32_768, gzip: 10_240 },
   "bubble-themes.css": { raw: 24_576, gzip: 6_144 },
+  "chat-backgrounds.js": { raw: 20_480, gzip: 8_192 },
+  "chat-backgrounds.css": { raw: 4_096, gzip: 1_536 },
 };
 
 const results = [];

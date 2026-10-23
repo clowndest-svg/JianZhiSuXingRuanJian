@@ -150,6 +150,7 @@ jobs:
       - run: python tests/test_backup_verify.py
       - run: python tests/test_backup_snapshot.py
       - run: node --check app/src/main/assets/app.js
+      - run: node --check app/src/main/assets/chat-backgrounds.js
       - run: node --check app/src/main/assets/bubble-themes.js
       - run: node --check app/src/main/assets/features.js
       - run: node --check app/src/main/assets/sw.js

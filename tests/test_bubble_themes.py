@@ -42,7 +42,7 @@ class BubbleThemes(unittest.TestCase):
         self.assertEqual(self.c.post('/api/community/profile',headers=self.headers,json={'bubble_theme':'x'*1000}).status_code,422)
         c=self.s.get_db();self.assertEqual(c.execute('SELECT bubble_theme FROM community_profile WHERE user_id=?',(self.users[0]['id'],)).fetchone()[0],'skin-cat');c.close()
     def test_original_assets_are_served_with_correct_type(self):
-        for name,mime in [('bubble-themes.js','application/javascript'),('bubble-themes.css','text/css'),('bubble-ai.png','image/png'),('bubble-moon.png','image/png')]:
+        for name,mime in [('bubble-themes.js','application/javascript'),('bubble-themes.css','text/css'),('bubble-ai.png','image/png'),('bubble-moon.png','image/png'),('chat-backgrounds.js','application/javascript'),('chat-backgrounds.css','text/css')]:
             r=self.c.get('/'+name);self.assertEqual(r.status_code,200);self.assertTrue(r.headers['content-type'].startswith(mime));self.assertEqual(r.content,(ROOT/'app/src/main/assets'/name).read_bytes())
     def test_art_is_not_in_install_precache(self):
         sw=(ROOT/'app/src/main/assets/sw.js').read_text(encoding='utf-8').split('const MAX_ENTRIES')[0]

@@ -269,6 +269,8 @@ def render_index_html():
         ('src="features.js"', 'src="features.js?v=%s"', "features.js"),
         ('href="features.css"', 'href="features.css?v=%s"', "features.css"),
         ('src="bubble-themes.js"', 'src="bubble-themes.js?v=%s"', "bubble-themes.js"),
+        ('src="chat-backgrounds.js"', 'src="chat-backgrounds.js?v=%s"', "chat-backgrounds.js"),
+        ('href="chat-backgrounds.css"', 'href="chat-backgrounds.css?v=%s"', "chat-backgrounds.css"),
         ('href="bubble-themes.css"', 'href="bubble-themes.css?v=%s"', "bubble-themes.css"),
         ('src="companion.js"', 'src="companion.js?v=%s"', "companion.js"),
         ('href="/qingsu.apk"', 'href="/qingsu.apk?v=%s"', "qingsu.apk"),
@@ -4062,7 +4064,7 @@ ASSET_MEDIA = {"js": "application/javascript", "css": "text/css", "svg": "image/
                "png": "image/png", "webmanifest": "application/manifest+json",
                "json": "application/json"}
 PUBLIC_ASSETS = ("features.js", "features.css", "companion.js", "sw.js", "manifest.webmanifest",
-                 "app-icon.png", "guidance.json", "bubble-themes.js", "bubble-themes.css", "bubble-ai.png", "bubble-moon.png")
+                 "app-icon.png", "guidance.json", "bubble-themes.js", "bubble-themes.css", "bubble-ai.png", "bubble-moon.png", "chat-backgrounds.js", "chat-backgrounds.css")
 # 扩展名没登记类型就要在启动时炸，不能等到用户请求才发现是 500：
 # app-icon.png 换图标那次正是这么静默上线的，页面只是不显示图标，没人会去点它。
 for asset in PUBLIC_ASSETS:

@@ -3444,6 +3444,7 @@ function dmRenderBubbles() {
     else if (host.firstElementChild?.dataset.dmKey === 'older') host.scrollTop += host.scrollHeight - previousHeight;
     dmUi.stickBottom = host.scrollHeight - host.scrollTop - host.clientHeight < 120;
     if (window.QSBubbles) window.QSBubbles.watch(host);
+    if (window.QSWallpapers) window.QSWallpapers.apply(host);
 }
 
 function cmBubbleHTML(m, me, st) {
@@ -3464,6 +3465,7 @@ function cmBubbleHTML(m, me, st) {
     const status = pending ? (isMedia && !m.media_url ? "上传中" : "发送中")
         : failed ? "没发出去" : mine ? (m.read_at ? "已读" : "已发送") : "";
     const statusCls = failed ? "dm-status-fail" : pending ? "dm-status-wait" : "dm-status-ok";
+    const dressed = mine && kind !== "sticker" && window.QSBubbles && window.QSBubbles.has(cm.myTheme);
     const bubble = '<div class="cm-bubble ' + (mine ? "me" : "them")
         + (kind === "sticker" ? " sticker" : "") + (isMedia ? " media" : "")
         + (kind === "text" && String(m.body || "").length > 100 ? " skin-long" : "")
@@ -3480,10 +3482,12 @@ function cmBubbleHTML(m, me, st) {
         + ((kind === "audio" && !pending && !m.recalled_at) ? dmAsrHTML(m) : "")
         + ((kind === "audio" && !pending && !m.recalled_at && !m.asr_text && !m.asr_pending && !m.asr_failed && !m.asr_empty)
             ? '<button type="button" class="dm-asr-btn" onclick="dmTranscribe(' + mid + ')">转文字</button>' : "")
+        + (dressed ? '<span class="dm-bubble-meta">' : "")
         + "<time>" + escapeHtml(pending || failed ? "" : cmAgo(m.created_at)) + "</time>"
         + (status ? '<span class="dm-status ' + statusCls + '">' + status
             + (failed ? '<button type="button" class="dm-retry" onclick="dmRetrySend(\''
                 + escapeHtml(m.request_id || "") + '\')">重试</button>' : "") + "</span>" : "")
+        + (dressed ? "</span>" : "")
         + "</div>";
     // 自己发的靠右、对方靠左，各带一个头像——小红书的私信就是这条规矩；
     // 只靠 align-self 时气泡和背景同色，看起来像"没有气泡"（截图里的样子）。
