@@ -133,6 +133,7 @@ jobs:
       # 发布入口那道版本配对门：后台先于主服务上线必须被拦住，而不是等运营点炸
       - run: python tests/test_deploy_pairing.py
       - run: python tests/test_bubble_themes.py
+      - run: python tests/test_chat_history.py
       - run: python tests/test_calls.py
       - run: python tests/test_native_media_contract.py
       - run: python tests/test_douyin_bridge.py
@@ -151,6 +152,7 @@ jobs:
       - run: python tests/test_backup_snapshot.py
       - run: node --check app/src/main/assets/app.js
       - run: node --check app/src/main/assets/chat-backgrounds.js
+      - run: node --check app/src/main/assets/chat-tools.js
       - run: node --check app/src/main/assets/bubble-themes.js
       - run: node --check app/src/main/assets/features.js
       - run: node --check app/src/main/assets/sw.js
@@ -183,6 +185,7 @@ jobs:
         run: |
           node tests/bubble-themes-ui.mjs
           node tests/chat-ui.mjs
+          node tests/chat-history-ui.mjs
           node tests/media-cache-ui.mjs
           node tests/recovery-ui.mjs
           node tests/offline-day-ui.mjs

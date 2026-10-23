@@ -1,0 +1,16 @@
+{
+  "folder": "D:\\RuanJian\\JiaZhiSuXianApk\\_audit_sandbox\\bubble-ui-21996",
+  "checks": [
+    "20 unique silhouettes; category filters; preview and cancel do not save or lock chat",
+    "failed save keeps current theme and allows retry without closing preview",
+    "20 local wallpaper presets; decoded custom image survives reload; different chats and accounts isolated; invalid images rejected; delete restores default",
+    "all 20 save through API, update actual short/long messages and keep peer bubbles/status unchanged",
+    "theme survives browser reload and API settings hydration",
+    "320/393/1200: dialog fits viewport, all cards scrollable, apply button visible",
+    "system reduced motion and explicit motion switch stop ornament animation",
+    "all legacy colors remain available; classic clears decorative frame",
+    "original illustrations delivered and no page errors"
+  ],
+  "errors": [],
+  "theme_count": 20
+}

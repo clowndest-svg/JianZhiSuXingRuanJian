@@ -269,6 +269,8 @@ def render_index_html():
         ('src="features.js"', 'src="features.js?v=%s"', "features.js"),
         ('href="features.css"', 'href="features.css?v=%s"', "features.css"),
         ('src="bubble-themes.js"', 'src="bubble-themes.js?v=%s"', "bubble-themes.js"),
+        ('src="chat-tools.js"', 'src="chat-tools.js?v=%s"', "chat-tools.js"),
+        ('href="chat-tools.css"', 'href="chat-tools.css?v=%s"', "chat-tools.css"),
         ('src="chat-backgrounds.js"', 'src="chat-backgrounds.js?v=%s"', "chat-backgrounds.js"),
         ('href="chat-backgrounds.css"', 'href="chat-backgrounds.css?v=%s"', "chat-backgrounds.css"),
         ('href="bubble-themes.css"', 'href="bubble-themes.css?v=%s"', "bubble-themes.css"),
@@ -544,7 +546,15 @@ def _community_schema(c):
         ("quote_name", "TEXT NOT NULL DEFAULT ''"),
         ("quote_kind", "TEXT NOT NULL DEFAULT ''"),
         ("quote_snippet", "TEXT NOT NULL DEFAULT ''"),
+        ("edited_at", "TEXT NOT NULL DEFAULT ''"),
+        ("edit_version", "INTEGER NOT NULL DEFAULT 0"),
     ])
+    c.execute("""CREATE TABLE IF NOT EXISTS message_preferences (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        deleted INTEGER NOT NULL DEFAULT 0, asr_hidden INTEGER NOT NULL DEFAULT 0,
+        asr_request TEXT NOT NULL DEFAULT '', cancelled_requests TEXT NOT NULL DEFAULT '[]', PRIMARY KEY(user_id,message_id))""")
+    c.execute("CREATE INDEX IF NOT EXISTS message_preferences_message ON message_preferences(message_id)")
     c.execute("""
     CREATE TABLE IF NOT EXISTS user_blocks (
         blocker INTEGER NOT NULL, blocked INTEGER NOT NULL, created_at TEXT NOT NULL,
@@ -4064,7 +4074,7 @@ ASSET_MEDIA = {"js": "application/javascript", "css": "text/css", "svg": "image/
                "png": "image/png", "webmanifest": "application/manifest+json",
                "json": "application/json"}
 PUBLIC_ASSETS = ("features.js", "features.css", "companion.js", "sw.js", "manifest.webmanifest",
-                 "app-icon.png", "guidance.json", "bubble-themes.js", "bubble-themes.css", "bubble-ai.png", "bubble-moon.png", "chat-backgrounds.js", "chat-backgrounds.css")
+                 "app-icon.png", "guidance.json", "bubble-themes.js", "bubble-themes.css", "bubble-ai.png", "bubble-moon.png", "chat-backgrounds.js", "chat-backgrounds.css", "chat-tools.js", "chat-tools.css")
 # 扩展名没登记类型就要在启动时炸，不能等到用户请求才发现是 500：
 # app-icon.png 换图标那次正是这么静默上线的，页面只是不显示图标，没人会去点它。
 for asset in PUBLIC_ASSETS:
@@ -4279,10 +4289,12 @@ class StickerImportReq(ValidatedModel):
 
 class DmReadReq(ValidatedModel):
     with_user: int
+    message_ids: list[int] | None = Field(default=None, max_length=120)
 
 
 class DmAsrReq(ValidatedModel):
     message_id: int
+    request_id: str = Field(default="", max_length=96)
 
 
 class RecallReq(ValidatedModel):
@@ -5057,7 +5069,7 @@ def community_stats(user: dict = Depends(get_current_user)):
                 "notices_unread": int(conn.execute(
                     "SELECT COUNT(*) FROM notifications WHERE user_id=? AND read_at IS NULL", (uid,)).fetchone()[0]),
                 "dm_unread": int(conn.execute(
-                    "SELECT COUNT(*) FROM messages WHERE to_id=? AND read_at IS NULL", (uid,)).fetchone()[0])}
+                    "SELECT COUNT(*) FROM messages WHERE to_id=? AND read_at IS NULL AND NOT EXISTS (SELECT 1 FROM message_preferences p WHERE p.message_id=messages.id AND p.user_id=messages.to_id AND p.deleted=1)", (uid,)).fetchone()[0])}
     finally:
         conn.close()
 
@@ -5247,10 +5259,13 @@ def _message_dict(row):
             "media_url": signed_photo("/uploads/" + media, scope='message', ref=int(row['id'])) if (media and not recalled) else "",
             "media_mime": (row["media_mime"] or "") if "media_mime" in names else "",
             "media_size": int(row["media_size"] or 0) if "media_size" in names else 0,
-            "asr_text": "" if recalled else ((row["asr_text"] or "") if "asr_text" in names else ""),
+            "asr_text": "" if recalled or ("asr_hidden" in names and row["asr_hidden"]) else ((row["asr_text"] or "") if "asr_text" in names else ""),
             "quote": ({"id": int(row["quote_id"]), "name": row["quote_name"] or "",
                        "kind": row["quote_kind"] or "", "text": row["quote_snippet"] or ""}
                       if "quote_id" in names and int(row["quote_id"] or 0) else None),
+            "edited_at": row["edited_at"] if "edited_at" in names else "",
+            "edit_version": int(row["edit_version"] or 0) if "edit_version" in names else 0,
+            "asr_hidden": bool(row["asr_hidden"]) if "asr_hidden" in names else False,
             "created_at": row["created_at"],
             "read_at": row["read_at"], "request_id": row["request_id"]}
 
@@ -5606,10 +5621,14 @@ def chat_conversations(user: dict = Depends(get_current_user)):
         for r in rows:
             other = int(r["b_id"]) if int(r["a_id"]) == int(user["id"]) else int(r["a_id"])
             unread = int(conn.execute("SELECT COUNT(*) FROM messages WHERE conv_key=? AND to_id=?"
-                                      " AND read_at IS NULL", (r["conv_key"], user["id"])).fetchone()[0])
+                                      " AND read_at IS NULL AND NOT EXISTS (SELECT 1 FROM message_preferences p WHERE p.message_id=messages.id AND p.user_id=messages.to_id AND p.deleted=1)", (r["conv_key"], user["id"])).fetchone()[0])
             brief = _user_brief(conn, other) or {}
-            out.append({"with": brief, "key": r["conv_key"], "last_body": r["last_body"],
-                        "last_at": r["last_at"], "last_from": int(r["last_from"]),
+            visible = conn.execute("SELECT m.* FROM messages m WHERE m.conv_key=? AND NOT EXISTS "
+                "(SELECT 1 FROM message_preferences p WHERE p.user_id=? AND p.message_id=m.id AND p.deleted=1) ORDER BY m.id DESC LIMIT 1", (r["conv_key"], user["id"])).fetchone()
+            if not visible: continue
+            preview = {"image":"［图片］","video":"［视频］","audio":"［语音］","sticker":"［表情］"}.get(visible["kind"],visible["body"][:60])
+            out.append({"with": brief, "key": r["conv_key"], "last_body": "（已撤回）" if visible["recalled_at"] else preview,
+                        "last_at": visible["created_at"], "last_from": int(visible["from_id"]),
                         "unread": unread, "online": _presence_online(other),
                         "blocked": bool(conn.execute("SELECT 1 FROM user_blocks WHERE blocker=? AND blocked=?",
                                                      (user["id"], other)).fetchone())})
@@ -5619,15 +5638,15 @@ def chat_conversations(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/chat/messages")
-def chat_messages(with_user: int, cursor: int = 0, limit: int = 30,
+def chat_messages(with_user: int, cursor: int = 0, limit: int = 30, q: str = "",
                   user: dict = Depends(get_current_user)):
     size = community.page_size(limit, 30)
     after = community.cursor_id(cursor)
     ck = chat.conv_key(user["id"], with_user)
     conn = get_db()
     try:
-        rows = conn.execute("SELECT * FROM messages WHERE conv_key=? AND (?=0 OR id<?) "
-                            "ORDER BY id DESC LIMIT ?", (ck, after, after or 0, size + 1)).fetchall()
+        from app_modules import chat_history
+        rows = chat_history.rows(conn, int(user["id"]), ck, after, size + 1, q)
         items = [_message_dict(r) for r in rows[:size]]
         items.reverse()
         partner = _user_brief(conn, with_user, True)
@@ -5647,6 +5666,10 @@ def chat_messages(with_user: int, cursor: int = 0, limit: int = 30,
         conn.close()
 
 
+from app_modules import chat_history
+chat_history.install(app, globals())
+
+
 _asr_lock = asyncio.Lock()
 _asr_hits = {}
 
@@ -5663,14 +5686,15 @@ def _asr_rate_ok(uid):
 
 @app.post("/api/chat/asr")
 async def chat_asr(req: DmAsrReq, user: dict = Depends(get_current_user)):
-    """把一条语音消息转成文字；结果跟着消息存，双方都能看到。"""
+    """共享转写缓存；取消与隐藏按用户隔离，迟到结果不能覆盖取消状态。"""
     conn = get_db()
     try:
-        row = conn.execute("SELECT * FROM messages WHERE id=?", (int(req.message_id),)).fetchone()
-        if not row or int(user["id"]) not in (int(row["from_id"]), int(row["to_id"])):
-            raise HTTPException(status_code=404, detail="找不到这条语音")
+        row = chat_history.accessible(conn, int(user["id"]), int(req.message_id))
         if (row["kind"] or "text") != "audio" or row["recalled_at"]:
             raise HTTPException(status_code=400, detail="只有语音消息能转文字")
+        rid = req.request_id or secrets.token_urlsafe(16)
+        if not chat_history.start_asr(conn, int(user["id"]), int(req.message_id), rid):
+            return {"code": 0, "text": "", "cancelled": True}
         if row["asr_text"]:
             return {"code": 0, "text": row["asr_text"], "cached": True}
         media = row["media_name"] or ""
@@ -5682,6 +5706,11 @@ async def chat_asr(req: DmAsrReq, user: dict = Depends(get_current_user)):
     if not _asr_rate_ok(user["id"]):
         raise HTTPException(status_code=429, detail="转文字太频繁，歇一下再试")
     async with _asr_lock:
+        check = get_db()
+        try:
+            if not chat_history.asr_active(check, int(user["id"]), int(req.message_id), rid):
+                return {"code": 0, "text": "", "cancelled": True}
+        finally: check.close()
         try:
             text = await asyncio.to_thread(asr.transcribe, path)
         except asr.AsrUnavailable as error:
@@ -5690,7 +5719,10 @@ async def chat_asr(req: DmAsrReq, user: dict = Depends(get_current_user)):
     if text:
         conn = get_db()
         try:
-            conn.execute("UPDATE messages SET asr_text=? WHERE id=?", (text, int(req.message_id)))
+            conn.execute("BEGIN IMMEDIATE")
+            if not chat_history.asr_active(conn, int(user["id"]), int(req.message_id), rid):
+                return {"code": 0, "text": "", "cancelled": True}
+            conn.execute("UPDATE messages SET asr_text=? WHERE id=? AND recalled_at IS NULL", (text, int(req.message_id)))
             conn.commit()
         finally:
             conn.close()
@@ -5699,18 +5731,8 @@ async def chat_asr(req: DmAsrReq, user: dict = Depends(get_current_user)):
 
 @app.post("/api/chat/read")
 def chat_read(req: DmReadReq, user: dict = Depends(get_current_user)):
-    ck = chat.conv_key(user["id"], int(req.with_user))
-    conn = get_db()
-    try:
-        cur = conn.execute("UPDATE messages SET read_at=? WHERE conv_key=? AND to_id=? AND read_at IS NULL",
-                           (_now(), ck, user["id"]))
-        conn.commit()
-        marked = int(cur.rowcount or 0)
-    finally:
-        conn.close()
-    if marked:
-        _push(int(req.with_user), {"t": "read", "by": int(user["id"]), "marked": marked})
-    return {"code": 0, "marked": marked}
+    return chat_history.mark_read(globals(), int(user["id"]), int(req.with_user), req.message_ids)
+
 
 
 @app.post("/api/chat/block")
@@ -6039,18 +6061,8 @@ async def chat_socket(ws: WebSocket, ticket: str = ""):
                     await ws.send_json({"t": "ack", "request_id": data.get("request_id"),
                                         "message": msg, "duplicate": dup})
                 elif kind == "read":
-                    ck = chat.conv_key(uid, int(data.get("with") or 0))
-                    conn = get_db()
-                    try:
-                        cur = conn.execute("UPDATE messages SET read_at=? WHERE conv_key=? AND to_id=?"
-                                           " AND read_at IS NULL", (_now(), ck, uid))
-                        conn.commit()
-                        marked = int(cur.rowcount or 0)
-                    finally:
-                        conn.close()
-                    if marked:
-                        _push(int(data.get("with") or 0), {"t": "read", "by": uid, "marked": marked})
-                    await ws.send_json({"t": "read", "with": data.get("with"), "marked": marked})
+                    result = chat_history.mark_read(globals(), uid, int(data.get("with") or 0), data.get("message_ids"))
+                    await ws.send_json({"t": "read", "with": data.get("with"), **result})
                 elif isinstance(kind, str) and kind.startswith("call_"):
                     try:
                         await _handle_call(ws, uid, kind, data)

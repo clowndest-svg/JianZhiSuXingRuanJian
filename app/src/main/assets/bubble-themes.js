@@ -103,7 +103,7 @@
     function open() {
         selected=get(cm.myTheme)?cm.myTheme:items[0].id;category='全部';syncMotion();
         const types=['全部','AI娘','动漫','科幻','浪漫','萌趣','自然','梦幻'];
-        toolDialog('气泡装扮','<section class="bubble-wardrobe"><p class="skin-intro">20 款原创装扮 · 免费切换<button type="button" class="skin-background-entry" onclick="QSWallpapers.open()">聊天背景</button></p><p class="skin-scope">只装扮你看到的自己消息，对方显示不变。</p>'
+        toolDialog('气泡装扮','<section class="bubble-wardrobe"><p class="skin-intro">20 款原创装扮 · 免费切换<button type="button" class="skin-background-entry" onclick="QSWallpapers.open()">聊天背景</button></p><button type="button" class="skin-background-entry" onclick="QSChatTools.search()">查找聊天记录</button><p class="skin-scope">只装扮你看到的自己消息，对方显示不变。</p>'
             +'<div class="skin-live" aria-hidden="true"></div><div class="skin-selection"><div><strong class="skin-selected-name"></strong><p class="skin-selected-note"></p></div>'
             +'<label class="skin-motion"><input type="checkbox" data-skin-motion'+(motion?' checked':'')+'> 动效</label></div>'
             +'<nav class="skin-categories" aria-label="气泡风格">'+types.map(c=>'<button type="button" data-skin-category="'+c+'" aria-pressed="'+(c==='全部')+'">'+c+'</button>').join('')+'</nav>'

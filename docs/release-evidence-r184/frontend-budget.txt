@@ -1,0 +1,28 @@
+{"app.js":{"raw":275876,"gzip":92130},"features.js":{"raw":267352,"gzip":78737},"index.html":{"raw":122595,"gzip":29904},"style.css":{"raw":84602,"gzip":19202},"features.css":{"raw":77685,"gzip":20538},"bubble-themes.js":{"raw":17813,"gzip":6925},"bubble-themes.css":{"raw":16237,"gzip":4722},"chat-backgrounds.js":{"raw":14179,"gzip":5937},"chat-backgrounds.css":{"raw":2163,"gzip":877},"chat-tools.js":{"raw":12938,"gzip":4705},"chat-tools.css":{"raw":2784,"gzip":1196}}
+  绿 app.js 原始体积没越过预算  -> 实测 275876 B / 预算 280576 B
+  绿 app.js gzip 后没越过预算  -> 实测 92130 B / 预算 92160 B
+  绿 features.js 原始体积没越过预算  -> 实测 267352 B / 预算 270336 B
+  绿 features.js gzip 后没越过预算  -> 实测 78737 B / 预算 79872 B
+  绿 index.html 原始体积没越过预算  -> 实测 122595 B / 预算 122880 B
+  绿 index.html gzip 后没越过预算  -> 实测 29904 B / 预算 30720 B
+  绿 style.css 原始体积没越过预算  -> 实测 84602 B / 预算 88064 B
+  绿 style.css gzip 后没越过预算  -> 实测 19202 B / 预算 20480 B
+  绿 features.css 原始体积没越过预算  -> 实测 77685 B / 预算 81920 B
+  绿 features.css gzip 后没越过预算  -> 实测 20538 B / 预算 22528 B
+  绿 bubble-themes.js 原始体积没越过预算  -> 实测 17813 B / 预算 32768 B
+  绿 bubble-themes.js gzip 后没越过预算  -> 实测 6925 B / 预算 10240 B
+  绿 bubble-themes.css 原始体积没越过预算  -> 实测 16237 B / 预算 24576 B
+  绿 bubble-themes.css gzip 后没越过预算  -> 实测 4722 B / 预算 6144 B
+  绿 chat-backgrounds.js 原始体积没越过预算  -> 实测 14179 B / 预算 20480 B
+  绿 chat-backgrounds.js gzip 后没越过预算  -> 实测 5937 B / 预算 8192 B
+  绿 chat-backgrounds.css 原始体积没越过预算  -> 实测 2163 B / 预算 4096 B
+  绿 chat-backgrounds.css gzip 后没越过预算  -> 实测 877 B / 预算 1536 B
+  绿 chat-tools.js 原始体积没越过预算  -> 实测 12938 B / 预算 20480 B
+  绿 chat-tools.js gzip 后没越过预算  -> 实测 4705 B / 预算 8192 B
+  绿 chat-tools.css 原始体积没越过预算  -> 实测 2784 B / 预算 6144 B
+  绿 chat-tools.css gzip 后没越过预算  -> 实测 1196 B / 预算 2048 B
+  绿 两款原创插画总量有界，按需加载  -> 3877520 B / 4500000 B；不加入首页预缓存
+  绿 首屏关键资源（HTML+JS+CSS）gzip 合计有数可报  -> 264873 B
+  绿 index.html 内联事件处理器没有变多  -> 实测 186 处 / 基线 196 处
+  绿 CSP 现状要么已启用、要么明确记为未启用  -> 未启用：内联处理器仍有 186 处，正式 CSP 要等这一步做完
+PASS: 26 条全绿

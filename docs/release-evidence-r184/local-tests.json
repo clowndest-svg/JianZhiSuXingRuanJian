@@ -1,0 +1,18 @@
+{
+  "legacy_backend": {
+    "passed": 623,
+    "failed": 0
+  },
+  "legacy_frontend": {
+    "passed": 355,
+    "failed": 0
+  },
+  "chat_media": 18,
+  "deploy_pairing": 5,
+  "chat_history_api": 8,
+  "chat_history_chromium_groups": 11,
+  "chat_ui_regression_groups": 34,
+  "themes_ui": "20 bubbles and 20 backgrounds passed; no page errors",
+  "frontend_budget": 26,
+  "physical_android_device_tested": false
+}

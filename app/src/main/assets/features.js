@@ -2414,7 +2414,8 @@ function closeThread() {
     loadMessages();
 }
 
-async function refreshThread() {
+async function refreshThread(force = false) {
+    if (window.QSChatTools?.detached && !force) return;
     if (!cm.thread) return;
     const uid = cm.thread.partner.id, scope = dmScope(), themeAtStart = cm.myTheme;
     try {
@@ -2429,10 +2430,12 @@ async function refreshThread() {
         }
         if (r.bubble_theme && cm.myTheme === themeAtStart) cm.myTheme = r.bubble_theme;
         cm.thread.partner = r.partner || cm.thread.partner;
+        if (window.QSChatTools) window.QSChatTools.reset();
         cm.bubbles = r.items || [];
         cm.thread.more = !!r.more;
         cm.thread.cursor = r.next_cursor || 0;
         paintThread();
+        if (window.QSChatTools) return;
         await postApi("/api/chat/read", { with_user: uid });
         // 读完要把未读徽标一起结掉，否则红点会一直挂着（上一版就是这么坏的）
         const conv = cm.convs.find(c => c.with && c.with.id === Number(uid));
@@ -2539,6 +2542,7 @@ function dmReleasePlayback(root) {
     });
 }
 function dmCleanup() {
+    if (window.QSChatTools) window.QSChatTools.cleanup();
     dmUi.generation++;
     dmUi.searchSeq++;
     dmCancelRecording(); dmMicRelease(); dmClearDraft();
@@ -2562,6 +2566,7 @@ function dmTrackThreadScroll(event) {
     const host = event.target;
     if (!host || host.id !== 'thread-bubbles') return;
     dmUi.stickBottom = host.scrollHeight - host.scrollTop - host.clientHeight < 120;
+    if (window.QSChatTools) window.QSChatTools.onScroll(host);
 }
 document.addEventListener('scroll', dmTrackThreadScroll, true);
 window.addEventListener('resize', dmViewportChanged);
@@ -2926,6 +2931,7 @@ function dmStartQuote(mid) {
 function dmJumpQuote(mid) {
     const node = document.querySelector('#thread-bubbles [data-dm-key="m' + Number(mid) + '"]');
     if (node) { node.scrollIntoView({ block: 'center', behavior: 'smooth' }); node.classList.add('dm-quote-flash'); setTimeout(() => node.classList.remove('dm-quote-flash'), 900); }
+    else if (window.QSChatTools) window.QSChatTools.jump(mid);
     else callNativeToast('这条消息不在当前加载范围里');
 }
 function dmSetDraft(d) {
@@ -3415,6 +3421,7 @@ function dmExclusivePlayback(active) {
 }
 function dmRenderBubbles() {
     const host = cmEl('thread-bubbles'); if (!host || !cm.thread) return;
+    if (window.QSChatTools) window.QSChatTools.bound();
     const me = state.user && state.user.id, uid = cm.thread.partner.id;
     const stick = dmUi.stickBottom !== false;
     const nearBottom = host.scrollHeight - host.scrollTop - host.clientHeight < 100;
@@ -3428,7 +3435,7 @@ function dmRenderBubbles() {
     let cursor = host.firstElementChild;
     for (const [key, m, state] of rows) {
         wanted.add(key);
-        const signature = m ? JSON.stringify([m.id, m.body, m.kind, m.recalled_at, m.duration, String(m.media_url || '').split('?')[0], cm.myTheme, m.asr_text, !!m.asr_pending, !!m.asr_failed, !!m.asr_empty, m.quote ? m.quote.id : 0, state, !!m.read_at, m.request_id || '']) : 'older';
+        const signature = m ? JSON.stringify([m.id, m.body, m.kind, m.recalled_at, m.duration, String(m.media_url || '').split('?')[0], cm.myTheme, m.asr_text, m.asr_hidden, m.edited_at, m.edit_version, !!m.asr_pending, !!m.asr_failed, !!m.asr_empty, m.quote ? m.quote.id : 0, state, !!m.read_at, m.request_id || '']) : 'older';
         let node = nodes.get(key);
         if (!node || node.dataset.signature !== signature) {
             const next = document.createElement('div'); next.dataset.dmKey = key; next.dataset.signature = signature; next.className = 'dm-message';
@@ -3445,6 +3452,7 @@ function dmRenderBubbles() {
     dmUi.stickBottom = host.scrollHeight - host.scrollTop - host.clientHeight < 120;
     if (window.QSBubbles) window.QSBubbles.watch(host);
     if (window.QSWallpapers) window.QSWallpapers.apply(host);
+    if (window.QSChatTools) window.QSChatTools.watch(host);
 }
 
 function cmBubbleHTML(m, me, st) {
@@ -3480,10 +3488,11 @@ function cmBubbleHTML(m, me, st) {
             + escapeHtml(m.quote.name || '') + '</b> ' + escapeHtml(m.quote.text || '') + '</button>' : '')
         + dmBubbleInner(m, kind, pending)
         + ((kind === "audio" && !pending && !m.recalled_at) ? dmAsrHTML(m) : "")
-        + ((kind === "audio" && !pending && !m.recalled_at && !m.asr_text && !m.asr_pending && !m.asr_failed && !m.asr_empty)
+        + ((kind === "audio" && !pending && !m.recalled_at && (!m.asr_text || m.asr_hidden) && !m.asr_pending && !m.asr_failed && !m.asr_empty)
             ? '<button type="button" class="dm-asr-btn" onclick="dmTranscribe(' + mid + ')">转文字</button>' : "")
         + (dressed ? '<span class="dm-bubble-meta">' : "")
         + "<time>" + escapeHtml(pending || failed ? "" : cmAgo(m.created_at)) + "</time>"
+        + (m.edited_at ? '<span class="dm-edited">已编辑</span>' : "")
         + (status ? '<span class="dm-status ' + statusCls + '">' + status
             + (failed ? '<button type="button" class="dm-retry" onclick="dmRetrySend(\''
                 + escapeHtml(m.request_id || "") + '\')">重试</button>' : "") + "</span>" : "")
@@ -3525,7 +3534,8 @@ function qsShowMenu(anchor, mid, x, y) {
     menu.innerHTML = (isAudio ? '<button type="button" onclick="dmTranscribe(' + Number(mid) + ')">转文字</button>' : '')
         + (m.recalled_at ? '' : '<button type="button" onclick="dmStartQuote(' + Number(mid) + ')">引用</button>')
         + '<button type="button" onclick="qsCopyBubble(' + Number(mid) + ')">复制</button>'
-        + (canRecall ? '<button type="button" onclick="recallDM(' + Number(mid) + ')">撤回</button>' : "");
+        + (canRecall ? '<button type="button" onclick="recallDM(' + Number(mid) + ')">撤回</button>' : "")
+        + (window.QSChatTools ? window.QSChatTools.menu(m,mine) : "");
     document.body.appendChild(menu);
     const r = anchor.getBoundingClientRect();
     const px = x == null ? (r.left + r.width / 2) : x;
@@ -3545,6 +3555,7 @@ function qsWithin(stamp, seconds) {
     return isFinite(t) && (Date.now() - t) <= seconds * 1000;
 }
 async function dmTranscribe(mid) {
+    if (window.QSChatTools) return window.QSChatTools.transcribe(mid);
     qsHideMenu();
     let m = qsFindBubble(Number(mid));
     const scope = dmScope();
@@ -3575,6 +3586,7 @@ async function dmTranscribe(mid) {
     }
 }
 function dmAsrHTML(m) {
+    if (window.QSChatTools) return window.QSChatTools.asrHTML(m);
     if (m.asr_pending) return '<p class="dm-asr pending" role="status">正在转文字…</p>';
     if (m.asr_text) return '<p class="dm-asr">' + escapeHtml(m.asr_text) + '</p>';
     if (m.asr_failed) return '<p class="dm-asr failed">转文字失败，长按重试</p>';
@@ -3617,6 +3629,7 @@ async function pickBubbleTheme(t) {
 }
 
 async function loadOlderMessages() {
+    if (window.QSChatTools) return window.QSChatTools.older();
     if (!cm.thread || !cm.thread.cursor) return;
     dmUi.stickBottom = false;
     const uid = cm.thread.partner.id, scope = dmScope();
@@ -3663,6 +3676,7 @@ async function dmRetrySend(rid) {
 }
 
 async function sendDM() {
+    if (window.QSChatTools?.detached) await window.QSChatTools.latest();
     if (dmUi.draft) { await dmSendDraft(); return; }
     if (dmUi.record) { await dmSendAudio(); return; }
     const input = cmEl('dm-input'), text = (input?.value || '').trim();
@@ -3700,7 +3714,7 @@ function dmAck(rid, message, scope) {
     delete cm.failed[rid];
     if (message) {
         if (cm.thread && (qsSameId(message.from_id, cm.thread.partner.id) || qsSameId(message.to_id, cm.thread.partner.id))) {
-            if (!cm.bubbles.some(b => qsSameId(b.id, message.id))) cm.bubbles.push(message);
+            if (!window.QSChatTools?.incoming(message.id) && !cm.bubbles.some(b => qsSameId(b.id, message.id))) cm.bubbles.push(message);
         }
         const preview = ({ image: '［图片］', video: '［视频］', audio: '［语音］', sticker: '［表情］' })[message.kind] || message.body;
         bumpConversation(qsSameId(message.from_id, state.user?.id) ? message.to_id : message.from_id, preview, qsSameId(message.from_id, state.user?.id) ? 'me' : 'them');
@@ -4230,13 +4244,14 @@ function handleWsEvent(ev) {
     let data = null;
     try { data = JSON.parse(ev.data); } catch (e) { return; }
     if (!data) return;
+    if (window.QSChatTools?.event(data)) return;
     const me = state.user && state.user.id;
     if (data.t === "msg" && data.message) {
         const m = data.message;
         if (cm.thread && (m.from_id === cm.thread.partner.id || m.to_id === cm.thread.partner.id)) {
-            if (!cm.bubbles.some(b => qsSameId(b.id, m.id))) cm.bubbles.push(m);
+            if (!window.QSChatTools?.incoming(m.id) && !cm.bubbles.some(b => qsSameId(b.id, m.id))) cm.bubbles.push(m);
             paintThread();
-            if (m.from_id === cm.thread.partner.id) wsSend({ t: "read", with: cm.thread.partner.id });
+            if (!window.QSChatTools && m.from_id === cm.thread.partner.id) wsSend({ t: "read", with: cm.thread.partner.id });
         } else if (m.from_id !== me) {
             callNativeToast("有人私信你：" + String(m.body || "").slice(0, 20));
         }
@@ -4248,7 +4263,9 @@ function handleWsEvent(ev) {
         cmText("cm-ws-state", "这条没发出去：" + (data.detail || "服务端拒了"));
     } else if (data.t === "read") {
         if (cm.thread && data.by === cm.thread.partner.id) {
-            cm.bubbles = cm.bubbles.map(b => Object.assign({}, b, { read_at: b.read_at || new Date().toISOString() }));
+            cm.bubbles = cm.bubbles.map(b => qsSameId(b.from_id,me) && (!Array.isArray(data.message_ids) || data.message_ids.map(Number).includes(Number(b.id)))
+                ? Object.assign({}, b, { read_at: b.read_at || data.read_at || new Date().toISOString() }) : b);
+            paintThread();
         }
     } else if (data.t === "recall") {
         // 对方撤回了：气泡要就地变成"对方撤回了一条消息"，不能等他重进会话才变

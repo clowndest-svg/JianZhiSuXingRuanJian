@@ -49,7 +49,7 @@ def main():
             raise SystemExit("APK does not include assets/app.js")
         apk_build = build_code(archive.read(js_name), "APK app.js")
         for name in ('app.js','features.js','companion.js','sw.js','index.html','style.css','features.css',
-                     'bubble-themes.js','bubble-themes.css','bubble-ai.png','bubble-moon.png','chat-backgrounds.js','chat-backgrounds.css'):
+                     'bubble-themes.js','bubble-themes.css','bubble-ai.png','bubble-moon.png','chat-backgrounds.js','chat-backgrounds.css','chat-tools.js','chat-tools.css'):
             local = Path(args.web_app_js).parent / name
             if archive.read('assets/'+name) != local.read_bytes():
                 raise SystemExit('APK and served H5 differ: '+name)

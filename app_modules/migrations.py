@@ -15,7 +15,7 @@ import os
 import sqlite3
 
 # 生产库当前应该处在的结构版本。加一条 MIGRATIONS 就 +1。
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 # (版本, 名称, 所有者, 说明)。名称要和 server.py 里那段动作对得上，
 # 不然半年后没人知道第 7 版到底改了什么。
@@ -32,6 +32,7 @@ MIGRATIONS = (
     (10, "users.临时口令恢复列", "app", "reset_expires_at / reset_consumed：后台重置口令改为限时单次"),
     (11, "记录发生时间列", "app", "food_logs/workout_logs 的 occurred_at / timezone_offset_minutes"),
     (12, "schema_version", "app", "结构版本登记表本身"),
+    (13, "私信编辑与个人可见性", "app", "messages.edited_at/edit_version；message_preferences 删除和转写可见状态"),
 )
 
 # 后台仓库自己拥有的表：主应用既不建也不改，只在此登记，避免出现"两张表谁都在写"。
