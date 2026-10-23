@@ -5267,6 +5267,7 @@ def _message_dict(row):
             "edit_version": int(row["edit_version"] or 0) if "edit_version" in names else 0,
             "asr_hidden": bool(row["asr_hidden"]) if "asr_hidden" in names else False,
             "created_at": row["created_at"],
+            "created_at_iso": chat_history.canonical_time(row["created_at"]),
             "read_at": row["read_at"], "request_id": row["request_id"]}
 
 
@@ -5615,24 +5616,7 @@ def chat_send(req: DmSendReq, user: dict = Depends(get_current_user)):
 def chat_conversations(user: dict = Depends(get_current_user)):
     conn = get_db()
     try:
-        rows = conn.execute("SELECT * FROM conversations WHERE a_id=? OR b_id=? "
-                            "ORDER BY last_at DESC LIMIT 100", (user["id"], user["id"])).fetchall()
-        out = []
-        for r in rows:
-            other = int(r["b_id"]) if int(r["a_id"]) == int(user["id"]) else int(r["a_id"])
-            unread = int(conn.execute("SELECT COUNT(*) FROM messages WHERE conv_key=? AND to_id=?"
-                                      " AND read_at IS NULL AND NOT EXISTS (SELECT 1 FROM message_preferences p WHERE p.message_id=messages.id AND p.user_id=messages.to_id AND p.deleted=1)", (r["conv_key"], user["id"])).fetchone()[0])
-            brief = _user_brief(conn, other) or {}
-            visible = conn.execute("SELECT m.* FROM messages m WHERE m.conv_key=? AND NOT EXISTS "
-                "(SELECT 1 FROM message_preferences p WHERE p.user_id=? AND p.message_id=m.id AND p.deleted=1) ORDER BY m.id DESC LIMIT 1", (r["conv_key"], user["id"])).fetchone()
-            if not visible: continue
-            preview = {"image":"［图片］","video":"［视频］","audio":"［语音］","sticker":"［表情］"}.get(visible["kind"],visible["body"][:60])
-            out.append({"with": brief, "key": r["conv_key"], "last_body": "（已撤回）" if visible["recalled_at"] else preview,
-                        "last_at": visible["created_at"], "last_from": int(visible["from_id"]),
-                        "unread": unread, "online": _presence_online(other),
-                        "blocked": bool(conn.execute("SELECT 1 FROM user_blocks WHERE blocker=? AND blocked=?",
-                                                     (user["id"], other)).fetchone())})
-        return {"code": 0, "items": out}
+        return {"code": 0, "items": chat_history.conversations(globals(), conn, int(user["id"]))}
     finally:
         conn.close()
 

@@ -1,7 +1,55 @@
 """Private history controls; SQL visibility is per viewer, edits remain attributed."""
 import json,secrets
+from datetime import datetime,timezone,timedelta
 from fastapi import Depends,HTTPException
 from pydantic import BaseModel,Field,ConfigDict
+
+# Preserve the legacy field. Interpret naive values in the server process zone
+# (verified Asia/Taipei in production), then publish an explicit app-time offset.
+CHAT_ZONE=timezone(timedelta(hours=8))
+def canonical_time(stamp):
+    try:
+        raw=str(stamp or '')
+        if len(raw)<19 or raw[10] not in ' T':return ''
+        value=datetime.fromisoformat(raw.replace('Z','+00:00'))
+        if value.tzinfo is None:value=value.astimezone()
+        return value.astimezone(CHAT_ZONE).isoformat(timespec='seconds')
+    except (ValueError,TypeError):return ''
+
+def conversations(api,conn,uid):
+    # Two bounded SQL statements, independent of the number of conversations.
+    data=conn.execute('''WITH recent AS (
+        SELECT c.*,CASE WHEN a_id=? THEN b_id ELSE a_id END AS peer,
+        (SELECT m.id FROM messages m WHERE m.conv_key=c.conv_key AND NOT EXISTS
+          (SELECT 1 FROM message_preferences p WHERE p.user_id=? AND p.message_id=m.id AND p.deleted=1)
+          ORDER BY m.id DESC LIMIT 1) AS visible_id
+        FROM conversations c WHERE a_id=? OR b_id=? ORDER BY last_at DESC LIMIT 100)
+        SELECT c.conv_key,c.peer,m.body,m.kind,m.recalled_at,m.created_at,m.from_id,
+        u.id,u.public_id,u.username,u.nickname,p.avatar_url,b.blocked AS blocked
+        FROM recent c JOIN messages m ON m.id=c.visible_id
+        LEFT JOIN users u ON u.id=c.peer LEFT JOIN profiles p ON p.user_id=c.peer
+        LEFT JOIN user_blocks b ON b.blocker=? AND b.blocked=c.peer
+        ORDER BY m.created_at DESC,m.id DESC''',(uid,uid,uid,uid,uid)).fetchall()
+    if not data:return []
+    keys=[r['conv_key'] for r in data]
+    unread_counts={r['conv_key']:r['n'] for r in conn.execute('''SELECT m.conv_key,COUNT(*) AS n
+        FROM messages m WHERE m.to_id=? AND m.read_at IS NULL AND NOT EXISTS
+        (SELECT 1 FROM message_preferences p WHERE p.user_id=? AND p.message_id=m.id AND p.deleted=1)
+        AND m.conv_key IN ('''+','.join('?' for _ in keys)+') GROUP BY m.conv_key',(uid,uid,*keys))}
+    peers=[int(r['peer']) for r in data]
+    ok,online=api['_redis_cmd'](['MGET',*[api['chat'].presence_key(i) for i in peers]])
+    if not ok or not isinstance(online,list) or len(online)!=len(peers):
+        now=api['now_ish']();online=[now-api['_presence_mem'].get(i,0)<45 for i in peers]
+    out=[]
+    for r,is_online in zip(data,online):
+        brief=({'id':int(r['id']),'public_id':r['public_id'] or '',
+                'name':(r['nickname'] or r['username'] or '').strip(),
+                'avatar':api['signed_photo'](r['avatar_url']) if r['avatar_url'] else ''} if r['id'] else {})
+        preview={'image':'［图片］','video':'［视频］','audio':'［语音］','sticker':'［表情］'}.get(r['kind'],r['body'][:60])
+        out.append({'with':brief,'key':r['conv_key'],'last_body':'（已撤回）' if r['recalled_at'] else preview,
+                    'last_at':r['created_at'],'last_from':int(r['from_id']),
+                    'unread':int(unread_counts.get(r['conv_key'],0)),'online':bool(is_online),'blocked':bool(r['blocked'])})
+    return out
 class Edit(BaseModel):
     model_config=ConfigDict(extra='forbid')
     message_id:int=Field(gt=0)

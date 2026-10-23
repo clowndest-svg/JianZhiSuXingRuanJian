@@ -2418,9 +2418,11 @@ async function refreshThread(force = false) {
     if (window.QSChatTools?.detached && !force) return;
     if (!cm.thread) return;
     const uid = cm.thread.partner.id, scope = dmScope(), themeAtStart = cm.myTheme;
+    const request = dmUi.historyRequest = (dmUi.historyRequest || 0) + 1, windowVersion = window.QSChatTools?.windowVersion, startedAt = Math.max(0,...cm.bubbles.map(m=>Number(m.id)));
+    const current = () => dmScopeAlive(scope) && request === dmUi.historyRequest && windowVersion === window.QSChatTools?.windowVersion;
     try {
         const r = await getJson("/api/chat/messages?with_user=" + uid + "&limit=30");
-        if (!dmScopeAlive(scope) || !dmIsVisible()) return;
+        if (!current() || !dmIsVisible()) return;
         // A pre-community local session may not have an id cached. The server
         // knows the token owner, so hydrate it before assigning message sides.
         const meId = Number(r.me_id);
@@ -2431,7 +2433,7 @@ async function refreshThread(force = false) {
         if (r.bubble_theme && cm.myTheme === themeAtStart) cm.myTheme = r.bubble_theme;
         cm.thread.partner = r.partner || cm.thread.partner;
         if (window.QSChatTools) window.QSChatTools.reset();
-        cm.bubbles = r.items || [];
+        cm.bubbles = window.QSChatTools ? window.QSChatTools.mergeSnapshot(r.items || [],startedAt) : r.items || [];
         cm.thread.more = !!r.more;
         cm.thread.cursor = r.next_cursor || 0;
         paintThread();
@@ -2443,6 +2445,8 @@ async function refreshThread(force = false) {
         if (cm.stats) cm.stats.dm_unread = 0;
         paintNavBadge();
     } catch (e) {
+        if (!current()) return;
+        if (cm.bubbles.length) { callNativeToast("记录刷新失败，已保留当前消息"); return; }
         const host = cmEl("thread-bubbles");
         if (host) host.innerHTML = '<p class="cm-state">记录没读到：' + escapeHtml(e.message || "网络不通") + "</p>";
     }
@@ -3426,20 +3430,20 @@ function dmRenderBubbles() {
     const stick = dmUi.stickBottom !== false;
     const nearBottom = host.scrollHeight - host.scrollTop - host.clientHeight < 100;
     const previousHeight = host.scrollHeight;
-    const rows = cm.bubbles.map(m => ['m' + m.id, m, '']);
+    const rows = window.QSChatTools ? window.QSChatTools.rows(cm.bubbles) : cm.bubbles.map(m => ['m' + m.id, m, '']);
     Object.values(cm.pending).filter(p => qsSameId(p.msg.to_id, uid)).forEach(p => rows.push(['p' + p.rid, p.msg, 'pending']));
     Object.values(cm.failed).filter(p => qsSameId(p.msg.to_id, uid)).forEach(p => rows.push(['f' + p.rid, p.msg, 'failed']));
     const nodes = new Map(Array.from(host.children).map(n => [n.dataset.dmKey, n]));
     const wanted = new Set();
     if (cm.thread.more) rows.unshift(['older', null, '']);
     let cursor = host.firstElementChild;
-    for (const [key, m, state] of rows) {
+    for (const [key, m, state, label] of rows) {
         wanted.add(key);
-        const signature = m ? JSON.stringify([m.id, m.body, m.kind, m.recalled_at, m.duration, String(m.media_url || '').split('?')[0], cm.myTheme, m.asr_text, m.asr_hidden, m.edited_at, m.edit_version, !!m.asr_pending, !!m.asr_failed, !!m.asr_empty, m.quote ? m.quote.id : 0, state, !!m.read_at, m.request_id || '']) : 'older';
+        const signature = m ? JSON.stringify([m.id, m.body, m.kind, m.recalled_at, m.duration, String(m.media_url || '').split('?')[0], cm.myTheme, m.asr_text, m.asr_hidden, m.edited_at, m.edit_version, !!m.asr_pending, !!m.asr_failed, !!m.asr_empty, m.quote ? m.quote.id : 0, state, !!m.read_at, m.request_id || '', m.created_at, m.created_at_iso]) : label || 'older';
         let node = nodes.get(key);
         if (!node || node.dataset.signature !== signature) {
-            const next = document.createElement('div'); next.dataset.dmKey = key; next.dataset.signature = signature; next.className = 'dm-message';
-            next.innerHTML = m ? cmBubbleHTML(m, me, state) : '<button type="button" class="td-btn td-btn-quiet" onclick="loadOlderMessages()">看更早的消息</button>';
+            const next = document.createElement('div'); next.dataset.dmKey = key; next.dataset.signature = signature; next.className = 'dm-message' + (state === 'date' ? ' dm-date-row' : '');
+            next.innerHTML = m ? cmBubbleHTML(m, me, state) : state === 'date' ? window.QSChatTools.dateHTML(label) : '<button type="button" class="td-btn td-btn-quiet" onclick="loadOlderMessages()">看更早的消息</button>';
             if (node) { dmReleasePlayback(node); if (cursor === node) cursor = next; node.replaceWith(next); }
             node = next;
         }
@@ -3473,7 +3477,7 @@ function cmBubbleHTML(m, me, st) {
     const status = pending ? (isMedia && !m.media_url ? "上传中" : "发送中")
         : failed ? "没发出去" : mine ? (m.read_at ? "已读" : "已发送") : "";
     const statusCls = failed ? "dm-status-fail" : pending ? "dm-status-wait" : "dm-status-ok";
-    const dressed = mine && kind !== "sticker" && window.QSBubbles && window.QSBubbles.has(cm.myTheme);
+    const dressed = !!window.QSChatTools || (mine && kind !== "sticker" && window.QSBubbles && window.QSBubbles.has(cm.myTheme));
     const bubble = '<div class="cm-bubble ' + (mine ? "me" : "them")
         + (kind === "sticker" ? " sticker" : "") + (isMedia ? " media" : "")
         + (kind === "text" && String(m.body || "").length > 100 ? " skin-long" : "")
@@ -3491,7 +3495,7 @@ function cmBubbleHTML(m, me, st) {
         + ((kind === "audio" && !pending && !m.recalled_at && (!m.asr_text || m.asr_hidden) && !m.asr_pending && !m.asr_failed && !m.asr_empty)
             ? '<button type="button" class="dm-asr-btn" onclick="dmTranscribe(' + mid + ')">转文字</button>' : "")
         + (dressed ? '<span class="dm-bubble-meta">' : "")
-        + "<time>" + escapeHtml(pending || failed ? "" : cmAgo(m.created_at)) + "</time>"
+        + (window.QSChatTools ? ((!pending && !failed) ? window.QSChatTools.timeHTML(m) : "") : "<time>" + escapeHtml(pending || failed ? "" : cmAgo(m.created_at)) + "</time>")
         + (m.edited_at ? '<span class="dm-edited">已编辑</span>' : "")
         + (status ? '<span class="dm-status ' + statusCls + '">' + status
             + (failed ? '<button type="button" class="dm-retry" onclick="dmRetrySend(\''
@@ -3529,9 +3533,9 @@ function qsShowMenu(anchor, mid, x, y) {
     menu.id = "bubble-menu";
     menu.className = "bubble-menu";
     menu.dataset.dialogOwner = "page-layer";
-    const canRecall = mine && !m.recalled_at && qsWithin(m.created_at, 300);
+    const canRecall = mine && !m.recalled_at && qsWithin(m.created_at_iso || m.created_at, 300);
     const isAudio = (m.kind || 'text') === 'audio' && !m.recalled_at;
-    menu.innerHTML = (isAudio ? '<button type="button" onclick="dmTranscribe(' + Number(mid) + ')">转文字</button>' : '')
+    menu.innerHTML = (window.QSChatTools ? window.QSChatTools.menuTime(m) : '') + (isAudio ? '<button type="button" onclick="dmTranscribe(' + Number(mid) + ')">转文字</button>' : '')
         + (m.recalled_at ? '' : '<button type="button" onclick="dmStartQuote(' + Number(mid) + ')">引用</button>')
         + '<button type="button" onclick="qsCopyBubble(' + Number(mid) + ')">复制</button>'
         + (canRecall ? '<button type="button" onclick="recallDM(' + Number(mid) + ')">撤回</button>' : "")
@@ -4255,7 +4259,7 @@ function handleWsEvent(ev) {
         } else if (m.from_id !== me) {
             callNativeToast("有人私信你：" + String(m.body || "").slice(0, 20));
         }
-        loadMessages();
+        if (window.QSChatTools) window.QSChatTools.scheduleRefresh(); else loadMessages();
     } else if (data.t === "ack") {
         dmAck(data.request_id || (data.message && data.message.request_id), data.message);
     } else if (data.t === "error") {

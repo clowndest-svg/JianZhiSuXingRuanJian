@@ -3,10 +3,26 @@
 'use strict';
 const MAX=120,pending=new Map(),hidden=new Set(),asrHidden=new Set(),newIds=new Set();
 let detached=false,news=0,loading=false,epoch=0,observer,readTimer,readBusy=false,hostRef;
+let refreshTimer,refreshDirty=false;
 const visible=new Set();
 const esc=s=>escapeHtml(String(s??''));
 const current=id=>qsFindBubble(Number(id));
 const alive=s=>dmScopeAlive(s)&&dmIsVisible();
+const clock=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+function time(m){
+ let raw=String(m?.created_at_iso||m?.created_at||'').trim();
+ if(raw.length<19)return {label:'',iso:'',ms:NaN};
+ if(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw))raw=raw.replace(' ','T')+'+08:00';
+ const ms=raw?Date.parse(raw):NaN;if(!Number.isFinite(ms))return {label:'',iso:'',ms:NaN};
+ return {label:clock.format(new Date(ms)),iso:new Date(ms).toISOString(),ms};
+}
+function rows(messages){const result=[];let previous;for(const m of messages){const t=time(m);if(t.label&&(!previous||t.label.slice(0,10)!==previous.label.slice(0,10)||t.ms-previous.ms>=300000||t.ms<previous.ms))result.push(['t'+m.id,null,'date',t.label]);result.push(['m'+m.id,m,'']);if(t.label)previous=t;}return result;}
+function dateHTML(label){return '<time class="dm-date-separator" datetime="'+esc(label.replace(' ','T')+'+08:00')+'">'+esc(label)+'</time>';}
+function timeHTML(m){const t=time(m);return t.label?'<time class="dm-exact-time" datetime="'+esc(t.iso)+'">'+esc(t.label)+'</time>':'';}
+function menuTime(m){const t=time(m);return t.label?'<p class="dm-menu-time">发送于 '+esc(t.label)+'</p>':'';}
+function mergeSnapshot(snapshot,startedAt){const last=Math.max(startedAt,0,...snapshot.map(m=>Number(m.id))),existing=new Map(cm.bubbles.map(m=>[Number(m.id),m]));const result=snapshot.map(m=>{const old=existing.get(Number(m.id));if(!old)return m;return {...m,...(Number(old.edit_version||0)>Number(m.edit_version||0)?{body:old.body,edited_at:old.edited_at,edit_version:old.edit_version}:{}),...(old.recalled_at?{recalled_at:old.recalled_at}:{}),read_at:old.read_at||m.read_at};});return result.concat(cm.bubbles.filter(m=>Number(m.id)>last)).sort((a,b)=>a.id-b.id);}
+function scheduleRefresh(){refreshDirty=true;if(refreshTimer||document.hidden)return;const token=state.token;refreshTimer=setTimeout(()=>{refreshTimer=null;if(token!==state.token||document.hidden)return;refreshDirty=false;loadMessages();},500);}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&refreshDirty)scheduleRefresh();});
 function bound(){cm.bubbles=cm.bubbles.filter(m=>!hidden.has(Number(m.id)));if(cm.bubbles.length>MAX)cm.bubbles=cm.bubbles.slice(-MAX);for(const m of cm.bubbles){const id=Number(m.id),p=pending.get(id);if(p&&!p.cancelled)m.asr_pending=true;if(asrHidden.has(id)){m.asr_text='';m.asr_hidden=true;m.asr_pending=false;}}}
 function badge(){
  let b=document.getElementById('dm-latest');
@@ -20,7 +36,7 @@ async function latest(){epoch++;loading=false;readBusy=false;reset();dmUi.stickB
 function anchor(host){const top=host.getBoundingClientRect().top;const n=Array.from(host.querySelectorAll('[data-dm-key^="m"]')).find(n=>n.getBoundingClientRect().bottom>top+8);return n?{key:n.dataset.dmKey,y:n.getBoundingClientRect().top}:null;}
 async function older(){
  if(loading||!cm.thread?.more||!cm.thread.cursor)return;
- const s=dmScope(),host=document.getElementById('thread-bubbles'),a=host&&anchor(host),version=epoch;loading=true;dmUi.stickBottom=false;
+ const s=dmScope(),host=document.getElementById('thread-bubbles'),a=host&&anchor(host),version=++epoch;loading=true;readBusy=false;dmUi.stickBottom=false;
  try{
   const r=await getJson('/api/chat/messages?with_user='+s.threadId+'&limit=30&cursor='+cm.thread.cursor);
   if(!alive(s)||version!==epoch)return;
@@ -59,14 +75,14 @@ function watch(host){
 }
 function rescan(){if(!dmIsVisible()||!hostRef)return;hostRef.querySelectorAll('[data-dm-key^="m"]').forEach(n=>visible.add(Number(n.dataset.dmKey.slice(1))));scheduleRead();}
 window.addEventListener('focus',rescan);document.addEventListener('visibilitychange',rescan);document.addEventListener('close',rescan,true);
-function cleanup(){epoch++;observer?.disconnect();clearTimeout(readTimer);visible.clear();hostRef=null;loading=false;readBusy=false;reset();hidden.clear();asrHidden.clear();document.getElementById('dm-latest')?.remove();for(const p of pending.values())p.cancelled=true;pending.clear();}
+function cleanup(){epoch++;observer?.disconnect();clearTimeout(readTimer);clearTimeout(refreshTimer);refreshTimer=null;refreshDirty=false;visible.clear();hostRef=null;loading=false;readBusy=false;reset();hidden.clear();asrHidden.clear();document.getElementById('dm-latest')?.remove();for(const p of pending.values())p.cancelled=true;pending.clear();}
 function event(data){
  if(data.t==='message_edited'){
   const m=current(data.message?.id);if(m&&Number(data.message.edit_version)>=Number(m.edit_version||0)){const {asr_pending,asr_failed}=m;Object.assign(m,data.message,{asr_pending,asr_failed});paintThread();}return true;
  }
  if(data.t==='message_hidden'){
   const ids=new Set((data.message_ids||[]).map(Number));for(const id of ids)hidden.add(id);cm.bubbles=cm.bubbles.filter(m=>!ids.has(Number(m.id)));if(ids.has(Number(dmUi.quote?.id)))dmUi.quote=null;
-  if(cm.thread)paintThread();loadMessages();return true;
+  if(cm.thread)paintThread();scheduleRefresh();return true;
  }
  if(data.t==='asr_hidden'){const id=Number(data.message_id),p=pending.get(id);if(p&&p.rid!==data.request_id)return true;asrHidden.add(id);const m=current(id);if(m){m.asr_hidden=true;m.asr_text='';m.asr_pending=false;paintThread();}if(p)p.cancelled=true;return true;}
  return false;
@@ -110,5 +126,5 @@ function search(){
 async function jump(id,s=dmScope(),dialog){
  try{const r=await getJson('/api/chat/context?message_id='+Number(id));if(!alive(s))return;epoch++;loading=false;readBusy=false;detached=!!r.has_newer;news=0;cm.bubbles=r.items;cm.thread.more=r.more;cm.thread.cursor=r.next_cursor;dmUi.stickBottom=false;dialog?.close();paintThread();const n=hostRef?.querySelector('[data-dm-key="m'+Number(id)+'"]');n?.scrollIntoView({block:'center'});n?.classList.add('dm-history-highlight');setTimeout(()=>n?.classList.remove('dm-history-highlight'),2200);badge();}catch(e){if(alive(s))callNativeToast('这条消息已删除或无法定位');}
 }
-window.QSChatTools={bound,watch,onScroll,older,incoming,reset,latest,cleanup,event,menu,edit,remove,asrHTML,transcribe,cancelAsr,search,jump,get detached(){return detached;}};
+window.QSChatTools={time,rows,dateHTML,timeHTML,menuTime,mergeSnapshot,scheduleRefresh,bound,watch,onScroll,older,incoming,reset,latest,cleanup,event,menu,edit,remove,asrHTML,transcribe,cancelAsr,search,jump,get detached(){return detached;},get windowVersion(){return epoch;}};
 })();

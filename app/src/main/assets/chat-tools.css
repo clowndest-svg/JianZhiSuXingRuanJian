@@ -21,3 +21,12 @@
 .cm-bubble.me[data-skin]>.dm-bubble-meta{border-radius:5px;background:#ffffffab;padding:0 3px;right:0;bottom:-17px;font-size:9px}
 .cm-bubble.them{box-shadow:0 1px 4px #4257470c}.cm-bubble.them time{font-size:10px}
 @media(prefers-reduced-motion:no-preference){.dm-history-highlight{transition:background .25s}.chat-search-result:hover{background:#eff7f3}}
+.dm-date-row{display:flex;justify-content:center;flex:none;padding:8px 0 3px;pointer-events:none}
+.dm-date-separator{display:block;padding:4px 10px;border-radius:9px;background:#ffffffb8;color:#61716c;font-size:11px;line-height:18px;font-variant-numeric:tabular-nums;letter-spacing:.15px;box-shadow:0 1px 3px #263e3510;white-space:nowrap}
+.cm-bubble .dm-exact-time{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip-path:inset(50%)!important;white-space:nowrap!important;border:0!important}
+.dm-menu-time{flex:1 0 100%;margin:0;padding:8px 12px 5px;color:#77847e;font-size:10px;border-bottom:1px solid #edf1ee;white-space:nowrap}
+.cm-bubble{position:relative}.cm-bubble.me:not([data-skin]){margin-bottom:18px}
+.cm-bubble>.dm-bubble-meta{position:absolute;right:0;bottom:-17px;display:flex;align-items:center;gap:5px;white-space:nowrap;color:#61716c;font-size:10px;line-height:14px}
+.cm-bubble.them>.dm-bubble-meta{left:0;right:auto}
+.cm-bubble>.dm-bubble-meta .dm-status{display:inline;margin:0;font-size:10px;line-height:14px}
+.cm-bubble>.dm-bubble-meta .dm-status-ok,.cm-bubble>.dm-bubble-meta .dm-status-wait{color:#61716c}

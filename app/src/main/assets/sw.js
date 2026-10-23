@@ -1,5 +1,5 @@
 // 缓存名挂构建号，构建号只认 build.gradle：手抄一次的后果是升级后还在发上一版壳
-const BUILD=69;
+const BUILD=70;
 const CACHE='qingsu-shell-b'+BUILD;
 const SHELL=['/','/app.js','/style.css','/features.js','/features.css','/bubble-themes.js','/bubble-themes.css','/chat-backgrounds.js','/chat-backgrounds.css','/chat-tools.js','/chat-tools.css','/companion.js','/exercise_poses.json','/manifest.webmanifest','/app-icon.png','/guidance.json','/stickers.json',
  ...['smile','laugh','cry','cheer','water','veg','run','fit','shy','sleep','love','cool','angry','sweat','drool','party','win','beg'].map(id=>'/stickers/'+id+'.svg')];

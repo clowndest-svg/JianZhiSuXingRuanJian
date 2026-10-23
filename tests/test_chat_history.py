@@ -1,5 +1,6 @@
 """Authorization, viewer isolation, cursor windows and cancellation races on real SQLite/API."""
 import json,unittest,time,threading,sys,importlib.util
+from unittest.mock import patch
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 spec=importlib.util.spec_from_file_location('history_fixture',Path(__file__).with_name('test_bubble_themes.py'))
@@ -79,6 +80,30 @@ class ChatHistory(unittest.TestCase):
     def test_schema_and_public_modules(self):
         self.assertEqual(self.s.migrations.SCHEMA_VERSION,13)
         for name in ['chat-tools.js','chat-tools.css']:self.assertEqual(self.c.get('/'+name).status_code,200)
+    def test_server_time_explicit_offset_and_legacy_unchanged(self):
+        with patch.object(self.s,'_now',return_value='2026-10-24 00:00:01'):m=self.send('server timestamp')
+        from datetime import datetime
+        self.assertEqual(m['created_at'],'2026-10-24 00:00:01');self.assertEqual(m['created_at_iso'],datetime.fromisoformat(m['created_at']).astimezone(chat_history.CHAT_ZONE).isoformat(timespec='seconds'))
+        self.assertEqual(chat_history.canonical_time('2026-10-23T16:00:03Z'),'2026-10-24T00:00:03+08:00')
+        self.assertEqual(chat_history.canonical_time('not a time'),'')
+        self.assertEqual(chat_history.canonical_time('2026-10-24'),'')
+    def test_conversation_list_uses_two_queries_and_one_presence_batch(self):
+        c=self.s.get_db();peers=[];stamp='2026-10-24 01:02:03'
+        for i in range(30):
+            peer=c.execute('INSERT INTO users(username,password_hash,created_at) VALUES (?,?,?)',('batchpeer'+str(i),'not-a-login-hash',stamp)).lastrowid;peers.append(peer);ck=self.s.chat.conv_key(self.a,peer)
+            c.execute('INSERT INTO conversations(conv_key,a_id,b_id,created_at,last_at) VALUES (?,?,?,?,?)',(ck,min(self.a,peer),max(self.a,peer),stamp,stamp))
+            c.execute('INSERT INTO messages(conv_key,from_id,to_id,body,created_at) VALUES (?,?,?,?,?)',(ck,peer,self.a,'visible-'+str(i),stamp))
+            hidden=c.execute('INSERT INTO messages(conv_key,from_id,to_id,body,created_at) VALUES (?,?,?,?,?)',(ck,peer,self.a,'must stay hidden',stamp)).lastrowid
+            c.execute('INSERT INTO message_preferences(user_id,message_id,deleted) VALUES (?,?,1)',(self.a,hidden))
+        c.execute('INSERT INTO user_blocks(blocker,blocked,created_at) VALUES (?,?,?)',(self.a,peers[-1],stamp));c.commit();sql=[];calls=[]
+        c.set_trace_callback(lambda s:sql.append(s) if s.lstrip().upper().startswith(('SELECT','WITH')) else None)
+        def redis(args):calls.append(args);return True,['1' if k==self.s.chat.presence_key(peers[-1]) else None for k in args[1:]]
+        with patch.object(self.s,'_redis_cmd',side_effect=redis):out=chat_history.conversations(vars(self.s),c,self.a)
+        c.close();self.assertEqual(len(sql),2);self.assertEqual(len(calls),1);self.assertEqual(calls[0][0],'MGET')
+        rows={r['with'].get('id'):r for r in out}
+        for i,peer in enumerate(peers):self.assertEqual(rows[peer]['last_body'],'visible-'+str(i));self.assertEqual(rows[peer]['unread'],1)
+        self.assertTrue(rows[peers[-1]]['online']);self.assertTrue(rows[peers[-1]]['blocked']);self.assertFalse(rows[peers[0]]['online'])
+        print('30 conversations: 2 SQL statements, 1 Redis MGET; per-viewer previews/unread/block flags preserved')
     def test_outsider_and_atomic_delete_and_nontext_edit(self):
         r=self.c.post('/api/register',headers={'X-App-Build':'99'},json={'username':'historyoutsider','password':'Theme!12345','age':30,'height':170,'weight_jin':160,'target_weight_jin':140});self.assertEqual(r.status_code,200,r.text)
         stranger={'Authorization':'Bearer '+r.json()['token'],'X-App-Build':'99'};m=self.send('authorization boundary')
