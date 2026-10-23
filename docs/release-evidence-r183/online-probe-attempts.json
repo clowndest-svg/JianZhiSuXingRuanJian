@@ -1,0 +1,1 @@
+{"first_attempt":{"result":"navigation load wait exceeded 30 seconds before feature checks","synthetic_accounts_cleaned":2},"retry":"wait for DOMContentLoaded and actual core module availability; feature assertions unchanged"}

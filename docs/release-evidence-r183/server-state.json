@@ -1,0 +1,30 @@
+{
+  "checked_at": "2026-10-23T13:51:07.320937+00:00",
+  "release": {
+    "release": "r39960300921",
+    "source_revision": "07b5ab7677421f9c5f935c8f7d3f52b534b71555",
+    "backup": "/opt/qingsu/backups/release-20261023-214557"
+  },
+  "backup_exists": true,
+  "users": 2,
+  "foreign_key_violations": 0,
+  "integrity": "ok",
+  "units": {
+    "qingsu": "active",
+    "qingsu-ops": "active"
+  },
+  "qa_config_absent": true,
+  "backup_restore": {
+    "database_restored_to": "isolated in-memory SQLite",
+    "database_integrity": "ok",
+    "foreign_key_violations": 0,
+    "restored_users": 2,
+    "previous_android_build": 66,
+    "previous_apk_sha256_matches_backup_manifest": true,
+    "production_files_modified": false
+  },
+  "admin_pairing": {
+    "paired": true,
+    "schema": 12
+  }
+}

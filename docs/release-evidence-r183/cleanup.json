@@ -1,0 +1,9 @@
+{
+  "production_synthetic_accounts_removed": 4,
+  "successful_probe_accounts_removed": 2,
+  "remaining_real_users": 2,
+  "foreign_key_violations": 0,
+  "qa_config_absent": true,
+  "local_fixture_outputs": "retained in _audit_sandbox; prior recursive cleanup was rejected by automatic approval review, no repeated deletion attempted",
+  "release_backup_retained": "/opt/qingsu/backups/release-20261023-214557"
+}

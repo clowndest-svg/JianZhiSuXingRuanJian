@@ -1,0 +1,13 @@
+{
+  "source": "07b5ab7677421f9c5f935c8f7d3f52b534b71555",
+  "checked_at": "2026-10-23T13:50:31.188Z",
+  "checks": [
+    "public HTTPS actual short messages remain under 49px tall",
+    "all 20 presets available; selected forest applies to actual conversation",
+    "public HTTPS image upload stays local with no image upload requests and survives browser restart",
+    "delete restores default background"
+  ],
+  "remaining_users": 2,
+  "foreign_key_violations": 0,
+  "cleaned": 2
+}
