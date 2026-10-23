@@ -6,6 +6,7 @@ import re
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -33,6 +34,9 @@ class Contracts(unittest.TestCase):
         cls.addClassCleanup(cls.temp.cleanup)
         for key in ("DB", "UPLOAD", "KEY"):
             os.environ["QINGSU_" + key + "_DIR"] = str(folder / key)
+        # 这条判据要的是"第二次必须被限住"。本机有真 Redis 时，默认命名空间
+        # （qingsu-prod）里的计数会跨轮次留着，别的套件跑过同一把键就会让它假绿。
+        os.environ["QINGSU_CACHE_NAMESPACE"] = "qingsu-r173-%d-%d" % (os.getpid(), int(time.time()))
         os.environ["QINGSU_WEB_DIR"] = str(ROOT / "app/src/main/assets")
         spec = importlib.util.spec_from_file_location("contract_server", ROOT / "server.py")
         cls.m = importlib.util.module_from_spec(spec)
@@ -178,8 +182,36 @@ class Contracts(unittest.TestCase):
         thumb = self.c.get(card["image_thumbs"][0])
         self.assertEqual(thumb.status_code, 200)
         self.assertEqual(thumb.headers["content-type"], "image/jpeg")
-        self.assertIn("max-age=86400", thumb.headers.get("cache-control", ""))
+        # 缩略图给的是"明显短于签名有效期"的短缓存，不是当年的 86400 秒：
+        # 缓存比签名活得久，浏览器就握着一份过期还能看的副本。
+        cache = thumb.headers.get("cache-control", "")
+        self.assertIn("max-age=%d" % self.m.COMMUNITY_THUMB_MAX_AGE, cache, cache)
+        self.assertLess(self.m.COMMUNITY_THUMB_MAX_AGE, 900,
+                        "缩略图缓存不该长过签名链接本身的 900 秒")
         self.assertLess(len(thumb.content), 1200 * 1200)
+
+    def test_private_media_is_never_cacheable(self):
+        """同一张图：缩略图允许短缓存，原图必须 no-store。
+
+        钉在同一个上传上是有意的——两条路读的是同一个文件，
+        只有"哪条链接"能区分缓存策略，所以这条能证明分层真的按链接生效。
+        """
+        user = self.register("nostoreuser", email="nostore@example.com")
+        h = {"Authorization": "Bearer " + user["token"], "X-App-Build": "57"}
+        out = io.BytesIO()
+        Image.new("RGB", (900, 900), (200, 40, 40)).save(out, format="JPEG", quality=90)
+        up = self.c.post("/api/community/media", headers=h,
+                         files={"file": ("own.jpg", out.getvalue(), "image/jpeg")})
+        self.assertEqual(up.status_code, 200, up.text)
+        name = up.json()["name"]
+        original = self.c.get(self.m.signed_photo("/uploads/" + name))
+        self.assertEqual(original.status_code, 200, original.text)
+        self.assertIn("no-store", original.headers.get("cache-control", ""),
+                      "原图被允许缓存：撤销分享之后浏览器还会自己复用一份")
+        thumb = self.c.get(self.m.signed_photo("/uploads/" + name) + "&thumb=1")
+        self.assertEqual(thumb.status_code, 200, thumb.text)
+        self.assertNotIn("no-store", thumb.headers.get("cache-control", ""),
+                         "缩略图退成 no-store，瀑布流每屏都要重新下载")
 
 
 if __name__ == "__main__":

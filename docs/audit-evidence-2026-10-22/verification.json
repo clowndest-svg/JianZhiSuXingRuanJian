@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-22",
+  "main_head": "56743ff",
+  "admin_head": "e320b49",
+  "local_checks": {
+    "main_integration": {"tests": 64, "seconds": 107.387, "result": "OK"},
+    "admin_integration": {"tests": 39, "seconds": 104.005, "result": "OK"},
+    "frontend_integration": {"result": "PASS", "groups": 4},
+    "frontend_legacy": {"checks": 355, "passed": 355, "failed": 0},
+    "performance": {
+      "users": 100, "days_per_user": 365, "seeded_rows": 109500,
+      "concurrency": 20, "requests": 400, "elapsed_s": 4.82,
+      "p50_ms": 204.3, "p95_ms": 467.0, "5xx": 0, "sqlite_lock_errors": 0,
+      "boundary": "Local short sample only. Existing runner counts 5xx but does not fully assert all business results. Not a production capacity certification."
+    }
+  },
+  "public_readonly": {
+    "base": "https://124.220.54.64",
+    "health_status": 200,
+    "release": "r39734173380",
+    "source_revision": "c31ecdd94d5176bdbbd7e0b128a1a73095aa06d9",
+    "reported_status": "ok",
+    "version_status": 200,
+    "version_name": "2.2.17",
+    "version_code": 62,
+    "manifest_min_version_code": 62,
+    "effective_min_build": 0,
+    "build_override": true,
+    "redis_reported": true,
+    "turn_config_reported": true,
+    "asr_config_reported": true,
+    "recovery_status_http": 200,
+    "mail_reported": "up",
+    "mail_boundary": "Recovery status reflects configured channel; no email sent or delivered as part of this audit.",
+    "ops_anonymous_status": 401,
+    "admin_html_status": 200,
+    "apk_boundary": "Version manifest was read. APK bytes and signature were not re-downloaded or re-verified."
+  },
+  "boundaries": [
+    "All mutation probes use disposable local databases and synthetic accounts.",
+    "No production writes, notifications, emails, deployment, Git commit or Git push.",
+    "Public in-app browser navigation timed out; no fresh complete browser visual acceptance.",
+    "No current Android device, iOS PWA, lockscreen, real carrier TURN or long-running load test.",
+    "Production Directus field policies and root service settings were not inspected over authenticated access. Findings about them are repository configuration findings.",
+    "Historical release screenshots were used only as design context, not as fresh validation."
+  ]
+}

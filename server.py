@@ -6,7 +6,7 @@ import math
 import uuid
 import logging
 from app_modules.features import share_settings, public_projection, DEFAULT_SCOPE
-from app_modules import mailer, geo, geoip, community, chat, audio, stickers, asr
+from app_modules import mailer, geo, geoip, community, chat, audio, stickers, asr, migrations
 import io
 import mimetypes
 import os
@@ -303,6 +303,8 @@ def migrate_db():
         # 后台的"封号"要有落点。用时间戳而不是布尔值：除了"封没封"还得答得出
         # "什么时候封的、为什么"，以后要加"到期自动解封"也复用同一列。
         ("banned_at", "TEXT"),
+        ("reset_expires_at", "INTEGER NOT NULL DEFAULT 0"),
+        ("reset_consumed", "INTEGER NOT NULL DEFAULT 0"),
         ("ban_reason", "TEXT NOT NULL DEFAULT ''"),
     ])
     _ensure_columns(c, "profiles", [
@@ -396,6 +398,8 @@ def migrate_db():
         FOREIGN KEY(user_id) REFERENCES users(id)
     )
     """)
+    for table in ("food_logs", "workout_logs"):
+        _ensure_columns(c, table, [("occurred_at", "TEXT"), ("timezone_offset_minutes", "INTEGER")])
     c.execute("CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL)")
     c.execute("INSERT OR IGNORE INTO sessions SELECT token_hash,id,? FROM users WHERE token_hash IS NOT NULL AND token_hash != ''", (int(time.time())+2592000,))
     c.execute("UPDATE users SET token_hash=NULL, token=NULL")
@@ -409,6 +413,7 @@ def migrate_db():
     c.execute("CREATE TABLE IF NOT EXISTS record_changes (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT NOT NULL, record_id INTEGER NOT NULL, previous_json TEXT NOT NULL, operation TEXT NOT NULL, created_at TEXT NOT NULL)")
     _ensure_columns(c,"food_logs",[("source","TEXT DEFAULT 'legacy_estimate'"),("estimate_reason","TEXT")])
     _community_schema(c)
+    migrations.record(c, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     conn.commit()
     conn.close()
 
@@ -588,7 +593,41 @@ def _community_schema(c):
 
 
 
-migrate_db()
+def guard_schema_version():
+    """QINGSU_SKIP_MIGRATE=1 时 import 不动结构，但必须答得出"库够不够新"。
+
+    只核对不改：库比代码旧就拒绝启动。让进程带着旧结构上线，第一条业务请求
+    才会以"某个列不存在"的样子炸出来，那时已经分不清是发布顺序错还是库被谁动过。
+    """
+    conn = get_db()
+    try:
+        applied = migrations.read(conn)
+    finally:
+        conn.close()
+    if applied is None:
+        raise RuntimeError("结构版本未知：库还没登记过 schema_version，"
+                           "先跑 scripts/migrate.py 再启动服务")
+    if applied < migrations.SCHEMA_VERSION:
+        raise RuntimeError("结构版本 %d 低于代码要求的 %d：先升级主服务再启动"
+                           % (applied, migrations.SCHEMA_VERSION))
+    return applied
+
+
+def schema_version_report():
+    """健康接口里的结构版本读数：读不出就说"不知道"，不报 0。"""
+    conn = get_db()
+    try:
+        return migrations.read(conn)
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
+if migrations.migration_allowed():
+    migrate_db()
+else:
+    guard_schema_version()
 
 
 def new_token():
@@ -943,7 +982,7 @@ def account_banned_response(request, exc: AccountBanned):
     return JSONResponse({"detail": exc.detail, "code": "account_banned"}, status_code=403)
 
 
-def get_current_user(authorization: Optional[str] = Header(None)):
+def get_current_user(authorization: Optional[str] = Header(None), request: Request = None):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="请先登录")
     token_hash = hash_token(authorization[7:].strip())
@@ -956,6 +995,11 @@ def get_current_user(authorization: Optional[str] = Header(None)):
     # 为后台多查一次就等于全站每次请求多一次锁竞争。
     if row["banned_at"]:
         raise AccountBanned(row["ban_reason"])
+    if row["reset_expires_at"]:
+        if row["reset_expires_at"] <= int(time.time()):
+            raise HTTPException(401, "临时登录已过期，请重新申请重置密码")
+        if request is None or request.url.path not in ("/api/account/recovery-password", "/api/logout"):
+            raise HTTPException(403, "请先完成新密码设置")
     user=dict(row); user["_session_hash"]=token_hash
     return user
 
@@ -1029,7 +1073,13 @@ VALID_GOAL_TYPES = {
     "male_v_taper", "male_lean", "male_muscular", "male_steady",
 }
 
-class FoodLogReq(ValidatedModel):
+class OccurrenceReq(ValidatedModel):
+    log_date: Optional[date] = None
+    occurred_at: Optional[datetime] = None
+    timezone_offset_minutes: Optional[int] = Field(default=None, ge=-840, le=720)
+
+
+class FoodLogReq(OccurrenceReq):
     slot: str
     food_name: str
     cal: Optional[int] = None
@@ -1039,7 +1089,7 @@ class WeightLogReq(ValidatedModel):
     weight_jin: float
     waist_cm: Optional[float] = None
 
-class WorkoutLogReq(ValidatedModel):
+class WorkoutLogReq(OccurrenceReq):
     duration_minutes: int = 20
     cal_burned: float = 220.0
     plan_name: str = "塑形训练"
@@ -1231,6 +1281,11 @@ def login(req: LoginReq, request: Request):
         conn.close()
         raise AccountBanned(user["ban_reason"])
 
+    if user["reset_expires_at"]:
+        c.execute("UPDATE users SET reset_consumed=1 WHERE id=? AND reset_consumed=0 AND reset_expires_at>?", (user["id"], int(time.time())))
+        if c.rowcount != 1:
+            conn.close()
+            raise HTTPException(400, "临时口令已使用或过期，请重新申请重置密码")
     token = new_token()
     c.execute("DELETE FROM sessions WHERE expires_at<=?", (int(time.time()),))
     c.execute("INSERT INTO sessions VALUES (?,?,?)", (hash_token(token),user["id"],int(time.time())+2592000))
@@ -1254,6 +1309,7 @@ def login(req: LoginReq, request: Request):
     return {
         "code": 0,
         "msg": "登录成功！",
+        "password_change_required": bool(user["reset_expires_at"]),
         "token": token,
         "username": user["username"],
         "nickname": user["nickname"],
@@ -1361,7 +1417,10 @@ def update_profile(req: ProfileUpdateReq, user: dict = Depends(get_current_user)
         # 档案里改体重=今天称了一次重：顶栏读的是"最新称重记录"，只改档案表会继续显示旧数字。
         # 判据必须是"最新记录 ≠ 刚保存的体重"，不能是"档案值变了没"——
         # 这条补写逻辑上线前留下的分叉（档案 138、记录还停在 140）用后者永远修不好。
-        if weight_jin is not None:
+        # 但只有请求真的带了 weight_jin 才算"用户这次改了体重"：合并后的 weight_jin
+        # 在只存训练场景/目标身材时也是非空的，拿它当凭据会把档案里那个更旧的数
+        # 补写成今天的一次称重，正好盖掉 r177 那条真读数（B04：只存场景不许动体重）。
+        if req.weight_jin is not None:
             latest = c.execute("SELECT weight_jin FROM weight_logs WHERE user_id=? "
                                "ORDER BY log_date DESC, id DESC LIMIT 1", (user["id"],)).fetchone()
             try:
@@ -1562,7 +1621,7 @@ def change_password(req: PasswordChangeReq, user: dict = Depends(get_current_use
         if not row or not verify_pw(req.old_password, row):
             raise HTTPException(status_code=400, detail="原密码不对")
         salt, hashed = make_pw(req.new_password)
-        conn.execute("UPDATE users SET password_hash=?, pw_salt=? WHERE id=?",
+        conn.execute("UPDATE users SET password_hash=?, pw_salt=?,reset_expires_at=0,reset_consumed=0 WHERE id=?",
                      (hashed, salt, user["id"]))
         # 只留当前这个会话，其余全部撤销：否则"改了密码"防不住已经偷走的令牌
         dropped = _revoke_sessions(conn, user["id"], user.get("_session_hash"))
@@ -1676,7 +1735,7 @@ def reset_password(req: ResetReq):
         if not row:
             raise HTTPException(status_code=400, detail="这个邮箱没有绑定账号")
         salt, hashed = make_pw(req.new_password)
-        conn.execute("UPDATE users SET password_hash=?, pw_salt=? WHERE id=?",
+        conn.execute("UPDATE users SET password_hash=?, pw_salt=?,reset_expires_at=0,reset_consumed=0 WHERE id=?",
                      (hashed, salt, row["user_id"]))
         # 重置是"口令可能已经泄露"的场景：一个会话都不留
         dropped = _revoke_sessions(conn, row["user_id"])
@@ -2054,6 +2113,8 @@ from app_modules.nutrition import FOOD_KB_ITEMS, parse_food_nutrition
 
 @app.post("/api/food/log")
 def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
+    from app_modules.record_time import record_day
+    day = record_day(req, user)
     conn = get_db()
     c = conn.cursor()
     snapshot_metrics(c,user["id"])
@@ -2064,7 +2125,7 @@ def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
             conn.close()
             return {"code":0,"duplicate":True,"msg":"这笔记录已保存，无需重复提交"}
 
-    today = date.today().isoformat()
+    today = day
     now_time = datetime.now().strftime("%H:%M")
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -2092,8 +2153,11 @@ def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
     INSERT INTO food_logs (user_id, log_date, slot, food_name, cal, protein_g, carbs_g, fat_g, time_str, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (user["id"], today, req.slot, name, est_cal, protein_g, carbs_g, fat_g, now_time, created_at))
+    record_id = c.lastrowid
+    c.execute("UPDATE food_logs SET occurred_at=?,timezone_offset_minutes=? WHERE id=?",
+              (req.occurred_at.isoformat() if req.occurred_at else None, req.timezone_offset_minutes, record_id))
 
-    c.execute("UPDATE food_logs SET source=?,estimate_reason=? WHERE id=?",(how_parsed,reason,c.lastrowid))
+    c.execute("UPDATE food_logs SET source=?,estimate_reason=? WHERE id=?",(how_parsed,reason,record_id))
     c.execute("DELETE FROM daily_reviews WHERE user_id=? AND log_date=?",(user["id"],today))
     conn.commit()
     conn.close()
@@ -2109,6 +2173,47 @@ def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
         "source": how_parsed,
         "reason": reason
     }
+
+
+# 「最近常用餐食」的数据源：只从本人历史里长出来，不是全站热门菜。
+# 只读、不写库；带鉴权，参数越界直接报错（与 /api/records 同一口径，读接口不设额外限流）。
+RECENT_MEAL_SCAN_CAP = 300
+
+
+@app.get("/api/food/recent")
+def recent_meals(limit: int = 12, user: dict = Depends(get_current_user)):
+    """按出现次数排序的本人常点餐食，每条带最近一次那份估算与它的来源。"""
+    if not 1 <= limit <= 20:
+        raise HTTPException(status_code=400, detail="常用餐食条数要在 1~20 之间")
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT food_name, slot, cal, log_date, source, estimate_reason, occurred_at "
+            "FROM food_logs WHERE user_id=? ORDER BY log_date DESC, id DESC LIMIT ?",
+            (user["id"], RECENT_MEAL_SCAN_CAP)).fetchall()
+    finally:
+        conn.close()
+    agg = {}
+    for r in rows:
+        name = (r["food_name"] or "").strip()
+        if not name:
+            continue
+        key = name
+        hit = agg.get(key)
+        if hit is None:
+            # 遍历顺序是"新→旧"，第一次见到的就是最近那一笔
+            agg[key] = {"food_name": name, "times": 1, "last_cal": r["cal"], "last_slot": r["slot"],
+                        "last_log_date": r["log_date"], "last_source": r["source"],
+                        "last_estimate_reason": r["estimate_reason"] or ""}
+        else:
+            hit["times"] += 1
+    items = sorted(agg.values(), key=lambda x: (-x["times"], x["last_log_date"] or "", x["food_name"]))
+    scanned = len(rows)
+    return {"code": 0, "items": items[:limit], "scanned": scanned,
+            "scoped": "self",
+            "note": ("只扫了最近 %d 笔本人餐食记录" % scanned) if scanned >= RECENT_MEAL_SCAN_CAP
+                    else "已读完本人全部餐食记录"}
+
 
 # ==================== Real Weight Logging ====================
 
@@ -2140,6 +2245,8 @@ def log_weight(req: WeightLogReq, user: dict = Depends(get_current_user)):
 
 @app.post("/api/workout/complete")
 def log_workout(req: WorkoutLogReq, user: dict = Depends(get_current_user)):
+    from app_modules.record_time import record_day
+    day = record_day(req, user)
     conn = get_db()
     c = conn.cursor()
     snapshot_metrics(c,user["id"])
@@ -2150,13 +2257,16 @@ def log_workout(req: WorkoutLogReq, user: dict = Depends(get_current_user)):
             conn.close()
             return {"code":0,"duplicate":True,"msg":"这笔记录已保存，无需重复提交"}
 
-    today = date.today().isoformat()
+    today = day
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     c.execute("""
     INSERT INTO workout_logs (user_id, log_date, duration_minutes, cal_burned, plan_name, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
     """, (user["id"], today, req.duration_minutes, req.cal_burned, req.plan_name, now))
+    record_id = c.lastrowid
+    c.execute("UPDATE workout_logs SET occurred_at=?,timezone_offset_minutes=? WHERE id=?",
+              (req.occurred_at.isoformat() if req.occurred_at else None, req.timezone_offset_minutes, record_id))
     # 练了就是运动日：当天额度自动抬到 workout_cal，不用用户再手动切
     c.execute("INSERT INTO daily_modes VALUES (?,?,'workout') ON CONFLICT(user_id,log_date) DO UPDATE SET mode='workout'", (user["id"],today))
 
@@ -2746,6 +2856,14 @@ def ai_status(user: dict = Depends(get_current_user)):
     """引擎健康面：本机模型、服务器模型、Redis 各自通不通，前端据此决定用谁。"""
     ok = llm_chat("ping", max_tokens=4) is not None
     r_ok = redis_up()
+    # 在线模型这一格原来直接拿 online_status()["ok"] 当"up"，而那个 ok 的含义是
+    # **配置在**——模型挂了很久也照样显示 up（B06 点名的错）。现在按"有没有跑通过的证据"判：
+    #   up       最近一次调用成功，且此后没有更新的失败；
+    #   down     最近一次调用失败，或压根没配置；
+    #   untested 配置在，但一次都没真跑过——这一格以前被冒充成 up。
+    online = online_status()
+    last_ok, last_fail = online.get("last_success_at"), online.get("last_failure_at")
+    online_word = online_state(online)
     return {"code": 0,
             "server_model": "up" if ok else "down",
             "model_name": "qwen2.5-0.5b-instruct-q8_0",
@@ -2753,9 +2871,17 @@ def ai_status(user: dict = Depends(get_current_user)):
             "redis_why": "" if r_ok else (_redis_last_err[0] or "冷却中或从未连上"),
             "kb_backend": "private-sqlite",
             # 在线模型接没接、没接是因为什么，前端和排障都要看得见（绝不回密钥）
-            "online_model": online_status()["ok"] and "up" or "down",
-            "online_why": online_status()["why"],
-            "online_name": online_status()["model"]}
+            # 三件事分开给：配置在 ≠ 能跑 ≠ 上次成功是什么时候。
+            "online_model": online_word,
+            "online_configured": bool(online["ok"]),
+            "online_why": online["why"],
+            "online_name": online["model"],
+            "online_last_success_at": last_ok,
+            "online_last_success_model": online.get("last_success_model"),
+            "online_last_elapsed_ms": online.get("last_elapsed_ms"),
+            "online_last_failure_at": last_fail,
+            "online_last_failure_kind": online.get("last_failure_kind"),
+            "online_note": "online_model 只认跑通过的证据：untested 表示配置在但从没成功过"}
 
 
 @app.get("/api/ai/context")
@@ -2852,7 +2978,7 @@ _llm_block_until = [0.0]
 _llm_last_error = [""]      # 最近一次调用失败的原因，界面要能说得出
 
 
-from app_modules.online_ai import online_status, online_chat
+from app_modules.online_ai import online_status, online_chat, online_state
 
 
 def llm_ready():
@@ -3622,6 +3748,10 @@ def _load_or_create_key(name):
 def media_key():
     return _load_or_create_key("media-signing.key")
 
+# 签名链接的有效期是 900 秒，社区缩略图的缓存必须明显短于它：
+# 缓存活得比链接久，就等于浏览器手里有一张"过期还能看"的副本。
+COMMUNITY_THUMB_MAX_AGE = 300
+
 def signed_photo(url,share_user=None):
     name=os.path.basename(url.split("?",1)[0]); expiry=int(time.time())+900
     payload=f"{name}:{expiry}";audience=''
@@ -3651,7 +3781,18 @@ def private_photo(name: str, expires: int=0, signature: str="",audience:int=0, t
     path=os.path.join(UPLOAD_DIR,name)
     if not os.path.isfile(path):raise HTTPException(status_code=404,detail="照片不存在")
     mime = "audio/ogg" if name.endswith(".audio.ogg") else (mimetypes.guess_type(name)[0] or "application/octet-stream")
-    cache = "private, max-age=86400" if mime.startswith(("image/", "video/", "audio/")) else "private, max-age=3600"
+    # 缓存要按"撤销到底靠什么生效"分层，不是一刀切 no-store（方案 A14）：
+    #  · 身材照（带 audience）：分享设置一改就该立刻看不见，所以 no-store；
+    #  · 社区缩略图：这张图能不能拿到，本来就只由那条 15 分钟的签名决定，
+    #    路由不回查帖子状态——对这种链接 no-store 只买到重复下载，买不到撤销能力。
+    #    给它一个短 max-age，且必须明显短于签名有效期，别让缓存活过链接本身。
+    #  · 私信媒体与原图：仍然 no-store，收件人换设备/被撤回时不该被缓存兜住。
+    if audience:
+        cache = "private, no-store"
+    elif thumb and mime.startswith("image/"):
+        cache = "private, max-age=%d" % COMMUNITY_THUMB_MAX_AGE
+    else:
+        cache = "private, no-store"
     if thumb and mime.startswith("image/"):
         small = _ensure_thumb(name, path)
         if small:
@@ -3732,6 +3873,10 @@ def health():
     info["status"] = "ok"
     info["site_base"] = SITE_BASE
     info["min_build"] = min_build_required()
+    # 结构版本要给后台看得见：它靠这个判断"主服务够不够新"，
+    # 否则后台两文件先发到旧主服务上，只会以"某个列不存在"的形状炸出来。
+    info["schema_version"] = schema_version_report()
+    info["schema_required"] = migrations.SCHEMA_VERSION
     # 门是不是被人工刹住，必须一眼看得见：抬门抬不动时最怕的就是"以为生效了"
     info["build_override"] = os.path.exists(min_build_file())
     info["gate"] = {"blocked": gate_stats["blocked"], "builds": dict(gate_stats["builds"])}
@@ -3767,6 +3912,28 @@ class RecordChangeReq(ValidatedModel):
     cal_burned: Optional[float]=None
     plan_name: Optional[str]=None
 
+def _day_totals(conn, user_id, log_date):
+    """某一天的真实统计。没记录返回 0 并带 counts，界面据此区分"真的是 0"和"没记"。"""
+    f = conn.execute("SELECT COALESCE(SUM(cal),0) AS s, COUNT(*) AS n FROM food_logs "
+                     "WHERE user_id=? AND log_date=?", (user_id, log_date)).fetchone()
+    w = conn.execute("SELECT COALESCE(SUM(cal_burned),0) AS s, COUNT(*) AS n FROM workout_logs "
+                     "WHERE user_id=? AND log_date=?", (user_id, log_date)).fetchone()
+    wl = conn.execute("SELECT weight_jin FROM weight_logs WHERE user_id=? AND log_date=? "
+                      "ORDER BY id DESC LIMIT 1", (user_id, log_date)).fetchone()
+    return {"log_date": log_date,
+            "consumed_cal": int(round(float(f["s"] or 0))), "food_count": int(f["n"] or 0),
+            "burned_cal": int(round(float(w["s"] or 0))), "workout_count": int(w["n"] or 0),
+            "weight_jin": (None if wl is None else float(wl["weight_jin"]))}
+
+
+def _record_label(kind, row):
+    if kind == "food":
+        return "%s · %s" % (row["slot"] or "餐食", row["food_name"] or "")
+    if kind == "weight":
+        return "空腹体重 %s 斤" % row["weight_jin"]
+    return "%s（%s 分钟）" % (row["plan_name"] or "训练", row["duration_minutes"])
+
+
 def change_record(kind, record_id, req, user, deleting=False):
     tables={"food":"food_logs","weight":"weight_logs","workout":"workout_logs"}
     fields={"food":("food_name","slot","cal"),"weight":("weight_jin","waist_cm"),"workout":("duration_minutes","cal_burned","plan_name")}
@@ -3776,6 +3943,9 @@ def change_record(kind, record_id, req, user, deleting=False):
         table=tables[kind]
         row=conn.execute(f"SELECT * FROM {table} WHERE id=? AND user_id=?",(record_id,user["id"])).fetchone()
         if not row:raise HTTPException(status_code=404,detail="记录不存在")
+        affected_date=row["log_date"]
+        affected_label=_record_label(kind,row)
+        before=_day_totals(conn,user["id"],affected_date)
         snapshot_metrics(conn,user["id"])
         conn.execute("INSERT INTO record_changes(user_id,kind,record_id,previous_json,operation,created_at) VALUES (?,?,?,?,?,?)",(user["id"],kind,record_id,json.dumps(dict(row),ensure_ascii=False),"delete" if deleting else "update",datetime.now().isoformat()))
         if deleting:conn.execute(f"DELETE FROM {table} WHERE id=? AND user_id=?",(record_id,user["id"]))
@@ -3792,9 +3962,15 @@ def change_record(kind, record_id, req, user, deleting=False):
             if latest:conn.execute("UPDATE profiles SET weight_jin=? WHERE user_id=?",(latest[0],user["id"]))
         conn.execute("DELETE FROM daily_reviews WHERE user_id=? AND log_date=?",(user["id"],row["log_date"]))
         conn.commit()
+        after=_day_totals(conn,user["id"],affected_date)
     except Exception:conn.rollback();raise
     finally:conn.close()
-    return {"code":0,"msg":"记录已删除" if deleting else "记录已更新"}
+    return {"code":0,"msg":"记录已删除" if deleting else "记录已更新",
+            "kind":kind,"record_id":record_id,"operation":"delete" if deleting else "update",
+            "affected_date":affected_date,"affected_label":affected_label,
+            "is_today":affected_date==date.today().isoformat(),
+            "review_reset":True,
+            "day_before":before,"day_after":after}
 
 @app.post("/api/records/{kind}/{record_id}/update")
 def update_record(kind:str,record_id:int,req:RecordChangeReq,user:dict=Depends(get_current_user)):
@@ -3804,10 +3980,35 @@ def update_record(kind:str,record_id:int,req:RecordChangeReq,user:dict=Depends(g
 def delete_record(kind:str,record_id:int,user:dict=Depends(get_current_user)):
     return change_record(kind,record_id,None,user,True)
 
+
+@app.get("/api/records/changes")
+def record_change_history(offset: int = 0, limit: int = 30,
+                          user: dict = Depends(get_current_user)):
+    """历史修正与删除的流水：删掉的那笔改回了什么、之前是什么值，都要能读回来。"""
+    if offset < 0 or not 1 <= limit <= 100:
+        raise HTTPException(status_code=400, detail="无效的分页或条数")
+    conn = get_db()
+    try:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT id,kind,record_id,operation,previous_json,created_at FROM record_changes "
+            "WHERE user_id=? ORDER BY id DESC LIMIT ? OFFSET ?", (user["id"], limit, offset))]
+    finally:
+        conn.close()
+    for r in rows:
+        try:
+            r["previous"] = json.loads(r.pop("previous_json") or "{}")
+        except (TypeError, ValueError):
+            r["previous"] = None
+        if isinstance(r["previous"], dict):
+            r["previous"].pop("user_id", None)
+    return {"rows": rows, "offset": offset, "limit": limit}
+
 from app_modules.features import install as install_features
 install_features(app,globals())
 from app_modules.companion import install as install_companion
 install_companion(app, globals())
+from app_modules.weekly_review import install as install_weekly_review
+install_weekly_review(app, globals())
 from app_modules.webpush import install as install_webpush
 install_webpush(app, globals())
 
@@ -3980,33 +4181,13 @@ def _author_of_post(conn, post_id):
     return row["user_id"] if row else None
 
 
+def _post_cards(conn, rows, me):
+    from app_modules.post_cards import project
+    return project(conn, rows, me, signed_photo)
+
+
 def _post_card(conn, row, me):
-    pid = int(row["id"])
-    liked = bool(conn.execute("SELECT 1 FROM post_likes WHERE post_id = ? AND user_id = ?",
-                              (pid, me["id"])).fetchone()) if me else False
-    followed = bool(conn.execute("SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?",
-                                 (me["id"], row["user_id"])).fetchone()) if me else False
-    names = community.read_images(row["images"])
-    return {"id": pid,
-            "title": row["title"] or "",
-            "body": row["body"],
-            "images": [signed_photo("/uploads/" + n) for n in names],
-            # 列表只拉缩略图：原图 200~600KB，两列瀑布流一屏就是 1MB+。
-            "image_thumbs": [signed_photo("/uploads/" + n) + "&thumb=1" for n in names],
-            "author": _user_brief(conn, row["user_id"]),
-            "region": row["region"] or "",
-            "created_at": row["created_at"],
-            "edited_at": row["edited_at"],
-            "like_count": int(row["like_count"]),
-            "comment_count": int(row["comment_count"]),
-            "liked_by_me": liked,
-            "favorited_by_me": bool(conn.execute(
-                "SELECT 1 FROM post_favorites WHERE post_id=? AND user_id=?",
-                (pid, me["id"])).fetchone()) if me else False,
-            "favorite_count": int(conn.execute(
-                "SELECT COUNT(*) FROM post_favorites WHERE post_id=?", (pid,)).fetchone()[0]),
-            "followed_by_me": followed,
-            "mine": bool(me and int(row["user_id"]) == int(me["id"]))}
+    return _post_cards(conn, [row], me)[0]
 
 
 def _require_member(conn):
@@ -4329,7 +4510,7 @@ def my_favorites(cursor: int = 0, limit: int = community.DEFAULT_PAGE,
         rows = conn.execute(sql, args).fetchall()
         more = len(rows) > size
         rows = rows[:size]
-        items = [_post_card(conn, r, user) for r in rows]
+        items = _post_cards(conn, rows, user)
         return {"code": 0, "items": items, "more": more,
                 "next_cursor": (items[-1]["id"] if more and items else 0)}
     finally:
@@ -4370,7 +4551,7 @@ def community_feed(tab: str = "latest", cursor: int = 0, limit: int = community.
         sql += " ORDER BY id DESC LIMIT ?"
         args.append(size + 1)
         rows = conn.execute(sql, args).fetchall()
-        cards = [_post_card(conn, r, user) for r in rows[:size]]
+        cards = _post_cards(conn, rows[:size], user)
         return {"code": 0, "items": cards,
                 "next_cursor": cards[-1]["id"] if len(rows) > size else 0,
                 "more": len(rows) > size}
@@ -4704,7 +4885,7 @@ def user_home(ident: str, user: dict = Depends(get_current_user)):
                                           (user["id"], uid)).fetchone()),
             "blocked_by_me": bool(conn.execute("SELECT 1 FROM user_blocks WHERE blocker=? AND blocked=?",
                                                (user["id"], uid)).fetchone())},
-            "items": [_post_card(conn, r, user) for r in rows]}
+            "items": _post_cards(conn, rows, user)}
     finally:
         conn.close()
 
@@ -4757,7 +4938,7 @@ def community_posts_of(user_id: int = 0, sort: str = "recent", offset: int = 0,
                                  (target,)).fetchone()[0])
         rows = conn.execute("SELECT * FROM posts WHERE user_id=? AND status='open' ORDER BY %s LIMIT ? OFFSET ?"
                             % order, (target, size + 1, start)).fetchall()
-        cards = [_post_card(conn, r, user) for r in rows[:size]]
+        cards = _post_cards(conn, rows[:size], user)
         return {"code": 0, "items": cards, "total": total, "offset": start,
                 "next_offset": start + size if len(rows) > size else 0, "more": len(rows) > size}
     finally:
@@ -4781,7 +4962,7 @@ def community_search(q: str = "", limit: int = 12, user: dict = Depends(get_curr
             "SELECT * FROM posts WHERE status='open' AND body LIKE ? ORDER BY id DESC LIMIT ?",
             ("%" + term + "%", size)).fetchall()
         return {"code": 0, "items": [_user_brief(conn, r["id"], True) for r in rows],
-                "posts": [_post_card(conn, r, user) for r in posts]}
+                "posts": _post_cards(conn, posts, user)}
     finally:
         conn.close()
 
@@ -5066,7 +5247,7 @@ def chat_ticket(request: Request, user: dict = Depends(get_current_user)):
     except ValueError:
         build = 0
     nonce = secrets.token_urlsafe(8)
-    token = chat.mint_ticket(ws_secret(), user["id"], build, nonce)
+    token = chat.mint_ticket(ws_secret(), user["id"], build, nonce, session_hash=user["_session_hash"])
     _presence_touch(user["id"])
     return {"code": 0, "ticket": token, "expires_in": chat.TICKET_TTL, "ws_path": "/ws/chat"}
 
@@ -5731,7 +5912,7 @@ async def chat_socket(ws: WebSocket, ticket: str = ""):
     try:
         # 票据是 30 秒一次性，HTTP 侧发票时已经过封号判定，但"先拿到票、随后被封"这
         # 30 秒内还能连上来；这里顺手在同一次查询里把封号一起看了，不多跑一次 DB。
-        alive = conn.execute("SELECT banned_at FROM users WHERE id=?", (uid,)).fetchone()
+        alive = conn.execute("SELECT u.banned_at FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.id=? AND s.token_hash=? AND s.expires_at>?", (uid, payload.get("s", ""), int(time.time()))).fetchone()
     finally:
         conn.close()
     if not alive or alive["banned_at"]:
@@ -5746,7 +5927,21 @@ async def chat_socket(ws: WebSocket, ticket: str = ""):
     await ws.send_json({"t": "ready", "server_time": int(time.time()), "online": _ws_stats["peaks"]})
     try:
         while True:
-            data = await ws.receive_json()
+            try:
+                data = await asyncio.wait_for(ws.receive_json(), timeout=15)
+            except asyncio.TimeoutError:
+                data = {"t": "ping"}
+            conn = get_db()
+            try:
+                authorized = conn.execute("SELECT u.banned_at FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.id=? AND s.token_hash=? AND s.expires_at>?", (uid, payload.get("s", ""), int(time.time()))).fetchone()
+            finally:
+                conn.close()
+            if not authorized or authorized["banned_at"]:
+                await ws.close(code=4403 if authorized else 4401)
+                break
+            if not isinstance(data, dict):
+                await ws.close(code=4400)
+                break
             kind = data.get("t")
             if kind == "ping":
                 _presence_touch(uid)
@@ -5869,3 +6064,28 @@ def my_feedback(user: dict = Depends(get_current_user)):
     finally:
         conn.close()
 
+
+
+class RecoveryPasswordReq(ValidatedModel):
+    new_password: str
+
+
+@app.post("/api/account/recovery-password")
+def finish_recovery_password(req: RecoveryPasswordReq, user: dict = Depends(get_current_user)):
+    if not user["reset_expires_at"]:
+        raise HTTPException(409, "当前会话不需要完成临时密码恢复")
+    problem = password_problem(req.new_password)
+    if problem:
+        raise HTTPException(400, problem)
+    conn = get_db()
+    try:
+        salt, password_hash = make_pw(req.new_password)
+        conn.execute("BEGIN IMMEDIATE")
+        changed = conn.execute("UPDATE users SET pw_salt=?,password_hash=?,reset_expires_at=0,reset_consumed=0 WHERE id=? AND reset_expires_at>? AND reset_consumed=1", (salt, password_hash, user["id"], int(time.time()))).rowcount
+        if changed != 1:
+            raise HTTPException(409, "恢复请求已变更，请重新登录")
+        _revoke_sessions(conn, user["id"], user["_session_hash"])
+        conn.commit()
+    finally:
+        conn.close()
+    return {"code": 0, "msg": "新密码已设置，请继续使用"}

@@ -56,3 +56,25 @@ console.log('PASS: late responses and failed writes cannot cross account changes
 feature('state.user={username:"draft-owner"};setDrafts([{id:"never-sent",path:"/api/food/log",unsubmitted:true,body:{food_name:"原文",request_id:"never-sent"}}]);');
 f.mkEl('draft-edit-0').value='修改后的餐食';feature('editUnsubmittedDraft(0)');assert.equal(feature('readDrafts()[0].body.food_name'),'修改后的餐食');
 console.log('PASS: never-submitted drafts remain editable without duplicating uncertain cloud writes');
+
+// Replaying an uncertain write must preserve the occurrence day and request id.
+const offline=makeCtx();loadJs(offline.context,true);const off=x=>vm.runInContext(x,offline.context);
+off('state.user={username:"cross-day"};state.token="t";');
+offline.sandbox.__fetchHandler=async()=>{throw new TypeError('Failed to fetch');};
+await assert.rejects(off('postApi("/api/workout/complete",{duration_minutes:20})'));
+const stored=JSON.parse(off('JSON.stringify(readDrafts()[0])'));
+assert.ok(stored.body.log_date);assert.ok(stored.body.occurred_at);
+assert.equal(typeof stored.body.timezone_offset_minutes,'number');
+offline.sandbox.__fetchHandler=async()=>ok({code:0});
+await off('syncOfflineDrafts()');
+const replay=offline.log.fetches.findLast(([url])=>url.endsWith('/api/workout/complete'));
+assert.equal(JSON.parse(replay[1].body).log_date,stored.body.log_date);
+assert.equal(JSON.parse(replay[1].body).request_id,stored.id);
+off('setDrafts([{id:"legacy",path:"/api/food/log",body:{food_name:"old",request_id:"legacy"}}]);');
+const beforeLegacy=offline.log.fetches.length;
+await off('syncOfflineDrafts()');
+assert.equal(offline.log.fetches.length,beforeLegacy,'undated legacy draft must not be silently submitted');
+offline.mkEl('draft-date-0').value='2026-01-02';off('confirmDraftDate(0)');
+assert.equal(off('readDrafts()[0].body.log_date'),'2026-01-02');
+assert.equal(off('readDrafts()[0].body.request_id'),'legacy');
+console.log('PASS: offline occurrence metadata survives replay; undated legacy drafts require confirmation');

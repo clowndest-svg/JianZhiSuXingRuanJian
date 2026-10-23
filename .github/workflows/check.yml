@@ -57,6 +57,16 @@ jobs:
     runs-on: ubuntu-latest
     needs: android
     timeout-minutes: 30
+    services:
+      redis:
+        image: redis:7.2.7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -85,31 +95,58 @@ jobs:
       - run: mkdir -p _audit_sandbox
       - run: python tests/test_integration.py
       - run: python tests/test_ai_contract.py
+      # B06：配置在 / 真跑通过 / 最后一次成功时间必须分开答，且状态里不许带提示词
+      - run: python tests/test_optimization_ai_status.py
+      # B07：周报三维 + 2~3 条带依据的反馈；缺记日不许当 0 摄入
+      - run: python tests/test_optimization_weekly.py
       - run: python tests/test_update_copy.py
       - run: python tests/test_companion.py
       - run: python tests/test_chat_media.py
       - run: python tests/test_r173_contracts.py
+      # 发布入口那道版本配对门：后台先于主服务上线必须被拦住，而不是等运营点炸
+      - run: python tests/test_deploy_pairing.py
       - run: python tests/test_calls.py
       - run: python tests/test_native_media_contract.py
       # 并发与冗余计数：起真 Uvicorn 打同一批请求，判据只看落库结果
       - run: python tests/test_consistency.py
-      # 多进程共享限流：CI 没有 Redis，这条会明确跳过而不是假装通过
-      - run: python tests/test_multiprocess.py
+      # 多进程共享限流：CI 起了 Redis 服务，所以这里"连不上 Redis"就是红而不是跳过
+      - name: Verify cross-process rate limiting
+        env:
+          QINGSU_REQUIRE_REDIS: '1'
+          QINGSU_REDIS_URL: redis://127.0.0.1:6379/0
+        run: python tests/test_multiprocess.py
       - run: python tests/legacy-backend.py
+      - run: python tests/admin-pagination-server.py
+      - run: python tests/test_long_tasks.py
+      - run: python tests/test_monitor_alerts.py
+      - run: python tests/test_backup_verify.py
       - run: node --check app/src/main/assets/app.js
       - run: node --check app/src/main/assets/features.js
       - run: node --check app/src/main/assets/sw.js
       - run: node --check app/src/main/assets/companion.js
       - run: node tests/legacy-frontend.mjs
       - run: node tests/frontend-integration.mjs
+      - run: node tests/pwa-cache-contract.mjs
+      - run: node tests/frontend-budget.mjs
+      - run: node tests/request-contract.mjs
+      # 私信四态 / 单条重试复用 request_id / 重连补拉 / 通话失败分型
+      - run: node tests/dm-state-call.mjs
+      # B01：首屏三组的顺序、点击、状态机与"未知不画成 0"
+      - run: node tests/home-first-screen.mjs
       - name: Install browser test runtime
+        # 版本必须钉住：这台机器上验过的就是 1.64.1，浮动安装会让"今天绿的判据"
+        # 变成"明天因为浏览器换版而红"，排查时看不出是产品坏还是工具换版。
         run: |
-          npm install --prefix "$RUNNER_TEMP/chat-ui" playwright
+          npm install --prefix "$RUNNER_TEMP/chat-ui" playwright@1.64.1
           "$RUNNER_TEMP/chat-ui/node_modules/.bin/playwright" install --with-deps chromium
       - name: Verify chat with real Chromium and isolated API
         env:
           NODE_PATH: ${{ runner.temp }}/chat-ui/node_modules
-        run: node tests/chat-ui.mjs
+        run: |
+          node tests/chat-ui.mjs
+          node tests/recovery-ui.mjs
+          node tests/offline-day-ui.mjs
+          node tests/a11y-dialog-contract.mjs
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

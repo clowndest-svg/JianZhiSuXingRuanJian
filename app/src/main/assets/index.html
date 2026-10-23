@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
     <title>轻塑 · 智能减脂塑形严管伴侣</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="features.css">
@@ -94,6 +94,24 @@
         <!-- ================= TAB 1: 监控大屏 ================= -->
         <section id="panel-dashboard" class="view-panel active">
 
+            <!-- B01 首屏只答“今天该做什么”：三件事都能直接点，状态由真实记录算出 -->
+            <div class="card home-today" id="home-today">
+                <div class="card-title"><span class="title-left">📌 今天要做的三件事</span><span class="home-hint">点一下就到</span></div>
+                <div class="home-acts">
+                    <button type="button" class="home-act" id="home-do-meal"><span class="ha-ico">🍽️</span><span class="ha-body"><b>记餐食</b><span class="ha-state" id="home-state-meal">状态读取中</span></span><span class="ha-go">›</span></button>
+                    <button type="button" class="home-act" id="home-do-weight"><span class="ha-ico">⚖️</span><span class="ha-body"><b>称体重</b><span class="ha-state" id="home-state-weight">状态读取中</span></span><span class="ha-go">›</span></button>
+                    <button type="button" class="home-act" id="home-do-workout"><span class="ha-ico">🏋️</span><span class="ha-body"><b>练一次</b><span class="ha-state" id="home-state-workout">状态读取中</span></span><span class="ha-go">›</span></button>
+                </div>
+            </div>
+            <div class="card home-sync" id="home-sync">
+                <div class="home-sync-row"><span>本机待同步</span><b id="home-sync-draft">未知</b></div>
+                <div class="home-sync-row"><span>上次同步成功</span><b id="home-sync-at">未知</b></div>
+            </div>
+            <div class="card home-next" id="home-next">
+                <div class="home-next-lab">下一步</div>
+                <div class="home-next-text" id="home-next-text">正在按今天的记录算…</div>
+            </div>
+
             <!-- 📆 每日状态：连续记录、周期第几天、预计达标、身材记录是否到期 -->
             <div class="daily-strip">
                 <div class="daily-cell"><span class="dc-val" id="streak-days">0 天</span><span class="dc-lab">连续记录</span></div>
@@ -122,18 +140,6 @@
                     <button class="btn-web-action" onclick="copyUserPublicUrl()">📋 复制</button>
                     <button class="btn-web-action" style="background: #10B981;" onclick="openUserPublicUrl()">🌐 打开</button>
                 </div>
-            </div>
-
-            <!-- 📱 手机客户端快速下载 & 扫码弹窗卡片 -->
-            <div class="web-download-card" id="main-download-prompt-card" onclick="openDownloadModal()" role="button" tabindex="0">
-                <div class="download-card-icon">📱</div>
-                <div style="flex: 1;">
-                    <div style="font-size: 12.5px; font-weight: 800; color: #065F46;">轻塑 Android 手机客户端 <span id="apk-ver-top">版本待读取</span></div>
-                    <div style="font-size: 10.5px; color: #047857; margin-top: 1px;">支持扫码秒装 & 点击直链下载 · 饭点门禁与真数据云同步</div>
-                </div>
-                <button class="btn-download-pill" onclick="event.stopPropagation(); openDownloadModal();">
-                    📥 扫码 / 下载
-                </button>
             </div>
 
             <!-- 🚨 连续超标强力警报横幅 (满足用户需求：连续几天超标自动警报) -->
@@ -233,6 +239,21 @@
                     <button class="btn-primary" style="width: auto; padding: 8px 14px; flex-shrink: 0;" onclick="logNaturalMeal()">记一笔</button>
                 </div>
 
+                <!-- 省步骤入口（B03）：复制上一餐只是草稿，不会直接入账 -->
+                <div class="meal-quick-row" role="group" aria-label="快速带出一餐">
+                    <button type="button" class="meal-quick-btn" id="copy-last-today">复制今天上一餐</button>
+                    <button type="button" class="meal-quick-btn" id="copy-last-ever">复制最近一餐</button>
+                    <button type="button" class="meal-quick-btn quiet" id="recent-meal-reload">刷新常用</button>
+                </div>
+
+                <!-- 最近常用餐食：只由本人历史生成，点一下带出菜名与上次那份估算 -->
+                <div class="recent-meal-list" id="recent-meal-list" aria-label="最近常用餐食">
+                    <div class="rm-empty">常用餐食还没读取 —— 登录后自动带出你自己常记的那几样。</div>
+                </div>
+
+                <!-- 修正/删除的影响说明落在这里，不能只弹一句"已删除" -->
+                <p class="record-impact" id="record-impact-note" role="status" aria-live="polite" style="display: none;"></p>
+
                 <!-- 动态自适应调整提示 -->
                 <div class="adaptive-recipe-callout" id="adaptive-recipe-banner">
                     ✨ <strong>智能食谱自适应联动：</strong>若某餐吃超或未按食谱走，系统将自动重算并调整后续餐次与明日食谱，保障热量缺口不反弹！
@@ -281,11 +302,29 @@
                 <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px;" id="weight-status-text">登录后按你自己的打卡记录计算差值</p>
             </div>
 
-            <!-- 进餐顺序黄金法则 -->
-            <div class="callout">
-                <strong>💡 进餐顺序黄金法则（抑制脂肪合成）：</strong><br>
-                <span>① 先喝水或清汤 ➔ ② 吃一半高纤绿叶菜 ➔ ③ 吃肉蛋鱼虾优质蛋白 ➔ ④ 最后吃复合慢碳主食</span>
-            </div>
+            <!-- 📱 手机客户端下载：B01 起不占首屏，折叠到记录之后 -->
+            <details class="home-fold" id="home-download-fold">
+                <summary>📱 需要安卓客户端？扫码或直链下载</summary>
+                <div class="web-download-card" id="main-download-prompt-card" onclick="openDownloadModal()" role="button" tabindex="0">
+                    <div class="download-card-icon">📱</div>
+                    <div style="flex: 1;">
+                        <div style="font-size: 12.5px; font-weight: 800; color: #065F46;">轻塑 Android 手机客户端 <span id="apk-ver-top">版本待读取</span></div>
+                        <div style="font-size: 10.5px; color: #047857; margin-top: 1px;">支持扫码秒装 & 点击直链下载 · 饭点门禁与真数据云同步</div>
+                    </div>
+                    <button class="btn-download-pill" onclick="event.stopPropagation(); openDownloadModal();">
+                        📥 扫码 / 下载
+                    </button>
+                </div>
+            </details>
+
+            <!-- 进餐顺序黄金法则：属于长说明，默认折叠 -->
+            <details class="home-fold">
+                <summary>💡 进餐顺序黄金法则</summary>
+                <div class="callout">
+                    <strong>💡 进餐顺序黄金法则（抑制脂肪合成）：</strong><br>
+                    <span>① 先喝水或清汤 ➔ ② 吃一半高纤绿叶菜 ➔ ③ 吃肉蛋鱼虾优质蛋白 ➔ ④ 最后吃复合慢碳主食</span>
+                </div>
+            </details>
 
             <!-- 周期身材照进化与规划进阶快捷卡片 -->
             <div class="card" style="background: linear-gradient(135deg, #ECFDF5 0%, #FFFFFF 100%); border-color: var(--primary-border); display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; cursor: pointer;" onclick="switchTab('body')" role="button" tabindex="0">
@@ -1180,6 +1219,9 @@
                     <button type="button" class="td-row" onclick="openReminderSettings()"><span class="td-glyph">⏰</span>
                         <span class="td-row-main"><span class="td-row-title">每日提醒</span>
                         <span class="td-row-hint">打开时提醒，同日只提一次</span></span><span class="td-chevron"></span></button>
+                    <button type="button" class="td-row" id="tools-permission-row"><span class="td-glyph">🛡️</span>
+                        <span class="td-row-main"><span class="td-row-title">权限中心</span>
+                        <span class="td-row-hint">麦克风、定位、通知、使用情况到底读到了什么</span></span><span class="td-chevron"></span></button>
                 </nav>
             </div>
         </section>
@@ -1203,107 +1245,151 @@
         <div class="modal-card" role="dialog" aria-modal="true" aria-label="定制个人身材与训练档案" tabindex="-1">
             <div class="modal-header">
                 <h2>⚙️ 定制个人身材与训练档案</h2>
-                <button class="modal-close-btn" onclick="closeProfileModal()">✕</button>
+                <button class="modal-close-btn" aria-label="关闭档案弹窗" onclick="closeProfileModal()">✕</button>
             </div>
             <div class="modal-body">
-                <!-- 性别与年龄 -->
-                <div class="form-row-2 form-group">
-                    <div>
-                        <label class="form-label" for="prof-gender">生理性别</label>
-                        <select id="prof-gender" class="input-control" onchange="onProfileGenderChanged(this.value)">
-                            <option value="female">👩 女 (女性代谢算法)</option>
-                            <option value="male">👨 男 (男性代谢算法)</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="form-label" for="prof-age">年龄 (岁)</label>
+                <p class="prof-split-note">档案拆成四组，一组一组改。每组下面都有「保存这一组」，点下去先把<b>改了哪几项、从什么变成什么</b>列出来，你确认了才写进云端；没动的那组不会被顺手带上。</p>
+
+                <!-- ============ 1. 基础资料 ============ -->
+                <section class="prof-group" id="prof-group-basic" aria-labelledby="prof-group-basic-title">
+                    <h3 class="prof-group-title" id="prof-group-basic-title">1 · 基础资料</h3>
+                    <p class="prof-group-hint">这几项直接决定每日热量额度，只改这一组就只写这一组。</p>
+
+                    <!-- 性别与年龄 -->
+                    <div class="form-row-2 form-group">
+                        <div>
+                            <label class="form-label" for="prof-gender">生理性别</label>
+                            <select id="prof-gender" class="input-control" onchange="onProfileGenderChanged(this.value)">
+                                <option value="female">👩 女 (女性代谢算法)</option>
+                                <option value="male">👨 男 (男性代谢算法)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label" for="prof-age">年龄 (岁)</label>
 <input type="number" id="prof-age" placeholder="年龄（岁）" class="input-control">
-                    </div>
-                </div>
-
-                <!-- 身高与当前体重 -->
-                <div class="form-row-2 form-group">
-                    <div>
-                        <label class="form-label" for="prof-height">身高 (cm)</label>
-<input type="number" id="prof-height" placeholder="身高（cm）" class="input-control">
-                    </div>
-                    <div>
-                        <label class="form-label" for="prof-weight-jin">当前体重 (斤)</label>
-<input type="number" step="0.1" id="prof-weight-jin" placeholder="体重（斤）" class="input-control" oninput="syncTargetWeightPlaceholder()">
-                    </div>
-                </div>
-
-                <!-- 目标体重 -->
-                <div class="form-group">
-                    <label class="form-label" for="prof-target-jin">目标体重 (斤)</label>
-<input type="number" step="0.1" id="prof-target-jin" placeholder="目标（斤）" class="input-control">
-                </div>
-
-                <!-- 管理目标类型 (根据性别动态渲染男女身材形态卡片，带生动图示) -->
-                <div class="form-group">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                        <div class="form-label" style="margin-bottom: 0;">挑选目标身材形态</div>
-                        <div class="gender-mini-tabs">
-                            <button type="button" class="gender-mini-btn active" id="modal-tab-female" onclick="onProfileGenderChanged('female')">👩 女性款 (4款)</button>
-                            <button type="button" class="gender-mini-btn" id="modal-tab-male" onclick="onProfileGenderChanged('male')">👨 男性款 (4款)</button>
                         </div>
                     </div>
-                    <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">点击挑选理想体型：它决定训练重点和饮食方向；下面的场景决定在哪儿练、用什么器械。</div>
-                    
-                    <div class="body-shape-selector-grid" id="modal-body-shapes-grid">
-                        <!-- JS 根据当前性别动态渲染 4 款专属身材卡片 -->
-                    </div>
-                </div>
 
-                <!-- 就餐模式选择 (满足用户需求：上班没时间做菜只能点外卖) -->
-                <div class="form-group">
-                    <div class="form-label">平时就餐生活方式</div>
-                    <input type="hidden" id="prof-dining-mode" value="takeout">
-                    <div class="choice-list" id="prof-dining-cards" role="radiogroup" aria-label="平时就餐生活方式">
-                        <button type="button" class="choice-card" data-value="cook" role="radio" aria-checked="false" onclick="pickDiningOption('cook')">
-                            <span class="choice-emoji">🍳</span>
-                            <span class="choice-body"><b>自己做菜备餐</b><small>精细控油控盐</small></span>
-                        </button>
-                        <button type="button" class="choice-card active" data-value="takeout" role="radio" aria-checked="true" onclick="pickDiningOption('takeout')">
-                            <span class="choice-emoji">🛵</span>
-                            <span class="choice-body"><b>上班族纯外卖</b><small>靠外卖智能控卡吃瘦</small></span>
-                        </button>
-                        <button type="button" class="choice-card" data-value="hybrid" role="radio" aria-checked="false" onclick="pickDiningOption('hybrid')">
-                            <span class="choice-emoji">🍱</span>
-                            <span class="choice-body"><b>混合模式</b><small>中午外卖 + 早晚自制</small></span>
-                        </button>
+                    <!-- 身高与当前体重 -->
+                    <div class="form-row-2 form-group">
+                        <div>
+                            <label class="form-label" for="prof-height">身高 (cm)</label>
+<input type="number" id="prof-height" placeholder="身高（cm）" class="input-control">
+                        </div>
+                        <div>
+                            <label class="form-label" for="prof-weight-jin">当前体重 (斤)</label>
+<input type="number" step="0.1" id="prof-weight-jin" placeholder="体重（斤）" class="input-control" oninput="syncTargetWeightPlaceholder()">
+                        </div>
                     </div>
-                </div>
 
-                <!-- 训练计划场景选择 -->
-                <div class="form-group">
-                    <div class="form-label">形体训练计划场景</div>
-                    <div class="field-hint">目标身材决定热量缺口、宏量比例和训练重点；场景只决定在哪儿练、用什么器械，不改变热量目标。</div>
-                    <div class="plan-combo-preview" id="prof-plan-preview"><div class="plan-combo-line">选好身材和场景后，这里显示组合结果</div></div>
-                    <input type="hidden" id="prof-scene" value="home">
-                    <div class="choice-list" id="prof-scene-cards" role="radiogroup" aria-label="形体训练计划场景">
-                        <button type="button" class="choice-card active" data-value="home" role="radio" aria-checked="true" onclick="pickProfileScene('home')">
-                            <span class="choice-emoji">🏠</span>
-                            <span class="choice-body"><b>居家自重</b><small>无器械 · 瑜伽垫 + 椅子</small></span>
-                        </button>
-                        <button type="button" class="choice-card" data-value="band" role="radio" aria-checked="false" onclick="pickProfileScene('band')">
-                            <span class="choice-emoji">🎗️</span>
-                            <span class="choice-body"><b>弹力带 / 轻器械</b><small>一根弹力带 · 椅子或门锚</small></span>
-                        </button>
-                        <button type="button" class="choice-card" data-value="cardio" role="radio" aria-checked="false" onclick="pickProfileScene('cardio')">
-                            <span class="choice-emoji">🏃</span>
-                            <span class="choice-body"><b>户外刷脂</b><small>零器械 · 平坦路线 + 计时</small></span>
-                        </button>
-                        <button type="button" class="choice-card" data-value="gym" role="radio" aria-checked="false" onclick="pickProfileScene('gym')">
-                            <span class="choice-emoji">🏋️</span>
-                            <span class="choice-body"><b>健身房器械</b><small>固定器械 + 哑铃 / 杠铃</small></span>
-                        </button>
+                    <div class="prof-group-foot">
+                        <button type="button" class="btn-secondary prof-save-btn" id="prof-save-basic">保存这一组（基础资料）</button>
                     </div>
-                </div>
+                </section>
 
-                <button class="btn-primary" style="margin-top: 14px;" onclick="saveCustomProfile()">
-                    💾 立即保存并更新代谢 / 食谱 / 训练计划
-                </button>
+                <!-- ============ 2. 目标 ============ -->
+                <section class="prof-group" id="prof-group-goal" aria-labelledby="prof-group-goal-title">
+                    <h3 class="prof-group-title" id="prof-group-goal-title">2 · 目标</h3>
+                    <p class="prof-group-hint">目标体重与目标身材。身材形态决定热量缺口、宏量比例和训练重点。</p>
+
+                    <!-- 目标体重 -->
+                    <div class="form-group">
+                        <label class="form-label" for="prof-target-jin">目标体重 (斤)</label>
+<input type="number" step="0.1" id="prof-target-jin" placeholder="目标（斤）" class="input-control">
+                    </div>
+
+                    <!-- 管理目标类型 (根据性别动态渲染男女身材形态卡片，带生动图示) -->
+                    <div class="form-group">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <div class="form-label" style="margin-bottom: 0;">挑选目标身材形态</div>
+                            <div class="gender-mini-tabs">
+                                <button type="button" class="gender-mini-btn active" id="modal-tab-female" onclick="onProfileGenderChanged('female')">👩 女性款 (4款)</button>
+                                <button type="button" class="gender-mini-btn" id="modal-tab-male" onclick="onProfileGenderChanged('male')">👨 男性款 (4款)</button>
+                            </div>
+                        </div>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">点击挑选理想体型：它决定训练重点和饮食方向；下面的场景决定在哪儿练、用什么器械。</div>
+
+                        <div class="body-shape-selector-grid" id="modal-body-shapes-grid">
+                            <!-- JS 根据当前性别动态渲染 4 款专属身材卡片 -->
+                        </div>
+                    </div>
+
+                    <div class="prof-group-foot">
+                        <button type="button" class="btn-secondary prof-save-btn" id="prof-save-goal">保存这一组（目标）</button>
+                    </div>
+                </section>
+
+                <!-- ============ 3. 训练场景 ============ -->
+                <section class="prof-group" id="prof-group-scene" aria-labelledby="prof-group-scene-title">
+                    <h3 class="prof-group-title" id="prof-group-scene-title">3 · 训练场景</h3>
+                    <div class="form-group">
+                        <div class="field-hint">目标身材决定热量缺口、宏量比例和训练重点；场景只决定在哪儿练、用什么器械，不改变热量目标。<b>这一组只写 scene 一个字段，不会碰体重、目标或饮食偏好。</b></div>
+                        <div class="plan-combo-preview" id="prof-plan-preview"><div class="plan-combo-line">选好身材和场景后，这里显示组合结果</div></div>
+                        <input type="hidden" id="prof-scene" value="home">
+                        <div class="choice-list" id="prof-scene-cards" role="radiogroup" aria-label="形体训练计划场景">
+                            <button type="button" class="choice-card active" data-value="home" role="radio" aria-checked="true" onclick="pickProfileScene('home')">
+                                <span class="choice-emoji">🏠</span>
+                                <span class="choice-body"><b>居家自重</b><small>无器械 · 瑜伽垫 + 椅子</small></span>
+                            </button>
+                            <button type="button" class="choice-card" data-value="band" role="radio" aria-checked="false" onclick="pickProfileScene('band')">
+                                <span class="choice-emoji">🎗️</span>
+                                <span class="choice-body"><b>弹力带 / 轻器械</b><small>一根弹力带 · 椅子或门锚</small></span>
+                            </button>
+                            <button type="button" class="choice-card" data-value="cardio" role="radio" aria-checked="false" onclick="pickProfileScene('cardio')">
+                                <span class="choice-emoji">🏃</span>
+                                <span class="choice-body"><b>户外刷脂</b><small>零器械 · 平坦路线 + 计时</small></span>
+                            </button>
+                            <button type="button" class="choice-card" data-value="gym" role="radio" aria-checked="false" onclick="pickProfileScene('gym')">
+                                <span class="choice-emoji">🏋️</span>
+                                <span class="choice-body"><b>健身房器械</b><small>固定器械 + 哑铃 / 杠铃</small></span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="prof-group-foot">
+                        <button type="button" class="btn-secondary prof-save-btn" id="prof-save-scene">保存这一组（训练场景）</button>
+                    </div>
+                </section>
+
+                <!-- ============ 4. 饮食偏好 ============ -->
+                <section class="prof-group" id="prof-group-dining" aria-labelledby="prof-group-dining-title">
+                    <h3 class="prof-group-title" id="prof-group-dining-title">4 · 饮食偏好</h3>
+                    <!-- 就餐模式选择 (满足用户需求：上班没时间做菜只能点外卖) -->
+                    <div class="form-group">
+                        <div class="form-label">平时就餐生活方式</div>
+                        <p class="prof-group-hint">只改外卖/自做的推荐口径，不会改动热量额度以外的任何字段。</p>
+                        <input type="hidden" id="prof-dining-mode" value="takeout">
+                        <div class="choice-list" id="prof-dining-cards" role="radiogroup" aria-label="平时就餐生活方式">
+                            <button type="button" class="choice-card" data-value="cook" role="radio" aria-checked="false" onclick="pickDiningOption('cook')">
+                                <span class="choice-emoji">🍳</span>
+                                <span class="choice-body"><b>自己做菜备餐</b><small>精细控油控盐</small></span>
+                            </button>
+                            <button type="button" class="choice-card active" data-value="takeout" role="radio" aria-checked="true" onclick="pickDiningOption('takeout')">
+                                <span class="choice-emoji">🛵</span>
+                                <span class="choice-body"><b>上班族纯外卖</b><small>靠外卖智能控卡吃瘦</small></span>
+                            </button>
+                            <button type="button" class="choice-card" data-value="hybrid" role="radio" aria-checked="false" onclick="pickDiningOption('hybrid')">
+                                <span class="choice-emoji">🍱</span>
+                                <span class="choice-body"><b>混合模式</b><small>中午外卖 + 早晚自制</small></span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="prof-group-foot">
+                        <button type="button" class="btn-secondary prof-save-btn" id="prof-save-dining">保存这一组（饮食偏好）</button>
+                    </div>
+                </section>
+
+                <!-- 底部操作条：粘在卡片下沿，长表单滚到底之前也一直点得到 -->
+                <div class="modal-foot">
+                    <!-- 保存前摘要：改了哪几项、从什么变成什么，先看这一屏再确认 -->
+                    <div class="prof-summary" id="profile-change-summary" role="status" aria-live="polite" hidden></div>
+                    <div class="prof-summary-acts" id="profile-summary-acts" hidden>
+                        <button type="button" class="btn-secondary" id="profile-summary-cancel">先不保存</button>
+                        <button type="button" class="btn-primary" id="profile-summary-confirm">确认按上面这几项保存</button>
+                    </div>
+                    <button class="btn-primary" onclick="saveCustomProfile()">
+                        💾 一次保存全部字段并更新代谢 / 食谱 / 训练计划
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -1314,7 +1400,7 @@
         <div class="modal-card" style="border: 2px solid var(--danger);" role="dialog" aria-modal="true" aria-label="外卖严重超标警报" tabindex="-1">
             <div class="modal-header" style="background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%); color: #FFFFFF;">
                 <h2 style="color: #FFFFFF;">🚨 外卖严重超标警报！</h2>
-                <button class="modal-close-btn" style="background: rgba(255,255,255,0.2); color: #FFF;" onclick="closeInterceptModal()">✕</button>
+                <button class="modal-close-btn" style="background: rgba(255,255,255,0.2); color: #FFF;" aria-label="关闭超标警报" onclick="closeInterceptModal()">✕</button>
             </div>
             <div class="modal-body">
                 <div style="text-align: center; margin-bottom: 12px;">
@@ -1344,7 +1430,7 @@
                     <div style="font-size: 11.5px; color: var(--primary-dark); margin-top: 2px;" id="modal-sub-benefit">—</div>
                 </div>
 
-                <div style="display: flex; flex-direction: column; gap: 8px;">
+                <div class="modal-foot" style="display: flex; flex-direction: column; gap: 8px;">
                     <button class="btn-primary" onclick="acceptSubstitute()">
                         ✅ 采纳低卡平替！立刻改单 (省下大几百卡)
                     </button>
@@ -1365,7 +1451,7 @@
         <div class="modal-card auth-card" role="dialog" aria-modal="true" aria-label="用户登录与多账号管理" tabindex="-1">
             <div class="modal-header">
                 <h2 id="auth-modal-title">登录 / 注册</h2>
-                <button class="modal-close-btn" onclick="closeAuthModal()">✕</button>
+                <button class="modal-close-btn" aria-label="关闭登录弹窗" onclick="closeAuthModal()">✕</button>
             </div>
             <div class="modal-body">
                 <!-- 登录 / 注册 切换条 -->
@@ -1487,7 +1573,7 @@
                         <div style="font-size: 10.5px; opacity: 0.9; margin-top: 1px;"><span id="apk-ver-line">版本待读取</span> · 打卡数据全部存腾讯云，本文件不写假数</div>
                     </div>
                 </div>
-                <button class="modal-close-btn" style="background: rgba(255,255,255,0.2); color: #FFF;" onclick="closeDownloadModal()">✕</button>
+                <button class="modal-close-btn" style="background: rgba(255,255,255,0.2); color: #FFF;" aria-label="关闭下载弹窗" onclick="closeDownloadModal()">✕</button>
             </div>
             <div class="modal-body" style="text-align: center; padding: 18px 16px;">
                 
@@ -1546,7 +1632,7 @@
         </button>
     </nav>
 
-    <dialog class="tool-dialog" id="report-dialog" aria-labelledby="report-title">
+    <dialog class="tool-dialog" id="report-dialog" role="dialog" aria-modal="true" aria-labelledby="report-title">
         <header><h2 id="report-title">举报这条内容</h2>
             <button type="button" class="td-close" onclick="document.getElementById('report-dialog').close()" aria-label="关闭">✕</button></header>
         <div class="td-body">
@@ -1588,7 +1674,7 @@
                         <span class="exd-target-muscle" id="ex-detail-target-muscle"></span>
                     </div>
                 </div>
-                <button type="button" class="exd-close" onclick="closeExerciseDetail()" aria-label="关闭">×</button>
+                <button type="button" class="exd-close" onclick="closeExerciseDetail()" aria-label="关闭动作演示">×</button>
             </div>
 
             <!-- 画布独占这一块。以前视口上叠了三处 absolute 浮层（视角提示、相位徽标、

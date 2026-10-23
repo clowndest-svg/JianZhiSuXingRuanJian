@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 62;
+const APP_BUILD = 63;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -149,6 +149,9 @@ let state = {
     selectedPlan: "A",
     selectedMealSlot: "lunch",
     mealDiary: [],
+    // 「最近常用餐食」只放本人的历史，账号一换必须清空（INITIAL_STATE 深拷贝就是干这个的）
+    recentMeals: [],
+    recentMealsNote: "",
     weightHistory: [],
     deficitHistory: [],
     dashboardLoaded: false,
@@ -375,6 +378,7 @@ window.addEventListener("DOMContentLoaded", () => {
     if (typeof renderTakeoutAdvisor === 'function') renderTakeoutAdvisor();
     switchShapeGender(state.profile.gender || "female", false);
     initViewMode();
+    bindProfileSectionActions();
     // 开 App 先查通知权限；外卖真实使用情况读一次
     loadExercisePoses();
     initWebWorkbench();
@@ -430,6 +434,7 @@ async function initAuthAndData() {
         }
         state.token = savedToken;
         state.user = saved;
+        if(saved.password_change_required){openRecoveryPasswordDialog();return;}
         updateUserUI(displayName(state.user));
         // 来电不要求用户先打开消息页：恢复会话后就把实时连接拉起来。
         if (typeof connectChat === "function") connectChat();
@@ -492,39 +497,154 @@ function escapeHtml(s) {
     }[ch]));
 }
 
+// ==========================================
+// 体重单位换算只有这一处真值（B03）。
+// 库里与云端一律存"斤"，kg 只是展示与输入口径；展示层再写一次 /2 或输入处
+// 再写一次 *2，就会在某次改动后出现顶栏、图表、周报各说一套。
+// ==========================================
+const JIN_PER_KG = 2;
+
+function jinToKg(jin) {
+    const v = Number(jin);
+    return Number.isFinite(v) ? v / JIN_PER_KG : null;
+}
+
+function kgToJin(kg) {
+    const v = Number(kg);
+    return Number.isFinite(v) ? v * JIN_PER_KG : null;
+}
+
+/** 画成 kg（一位小数）。没有读数就返回"无读数"，绝不拿 0.0 kg 冒充量过。 */
+function formatKg(jin, fallback) {
+    const v = jinToKg(jin);
+    if (v === null || v === 0) return fallback === undefined ? "无读数" : fallback;
+    return v.toFixed(1) + " kg";
+}
+
+/** 画成斤。同样不允许用 0 冒充"量过了"。 */
+function formatJin(jin, fallback) {
+    const v = Number(jin);
+    if (!Number.isFinite(v) || v === 0) return fallback === undefined ? "无读数" : fallback;
+    return (Math.round(v * 10) / 10) + " 斤";
+}
+
+/** 只给 kg 的数值串（不带单位），给那些单位写在模板外面的文案用，免得又手写一次 /2。 */
+function kgOf(jin, fallback) {
+    const v = jinToKg(jin);
+    if (v === null || v === 0) return fallback === undefined ? "无读数" : fallback;
+    return v.toFixed(1);
+}
+
+/** 当前体重输入格用哪个单位；认不出来一律按斤，不猜。 */
+function weightUnitChoice() {
+    const el = document.getElementById("weight-unit");
+    return (el && String(el.value) === "kg") ? "kg" : "jin";
+}
+
+/** 把用户按所选单位填的数换成云端口径（斤）。填了 kg 就 *2，只在这里做一次。 */
+function inputWeightToJin(raw, unit) {
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v <= 0) return null;
+    return (unit === "kg") ? kgToJin(v) : v;
+}
+
+// ==========================================
+// 统一请求底座（B02）：GET/POST/PATCH/DELETE/上传共用同一套超时、取消、
+// 401/403/409 处理和错误形状（err.status / err.code / err.message）。
+// 账号代次只有一个真值：sessionGeneration，别在这里再造第二套。
+// ==========================================
+const REQUEST_TIMEOUT_MS = { read: 15000, write: 30000, upload: 120000 };
+
+function requestError(status, code, message) {
+    const e = new Error(message);
+    e.status = status;
+    e.code = code;
+    return e;
+}
+
+// 同一 tag 只保留最新一发在途请求：后发的取消先发的。
+// 这是为了旧响应晚到时不覆盖新结果；取消只是丢弃，绝不自动重试。
+const inflightByTag = new Map();
+
+async function requestBase(path, options) {
+    const o = options || {};
+    const generation = sessionGeneration;
+    const isForm = typeof FormData !== "undefined" && o.body instanceof FormData;
+    const timeout = o.timeout || (o.method === "GET" || !o.method ? REQUEST_TIMEOUT_MS.read
+        : isForm ? REQUEST_TIMEOUT_MS.upload : REQUEST_TIMEOUT_MS.write);
+    const init = { method: o.method || "GET", headers: Object.assign({}, o.headers) };
+    if (o.auth !== false) init.headers["Authorization"] = "Bearer " + state.token;
+    if (isForm) {
+        init.body = o.body;
+    } else if (o.body !== undefined && o.body !== null) {
+        init.headers["Content-Type"] = "application/json";
+        init.body = JSON.stringify(o.body);
+    }
+    let slot = null;
+    if (o.tag) {
+        slot = { ctl: null, superseded: false };
+        const prev = inflightByTag.get(o.tag);
+        inflightByTag.set(o.tag, slot);
+        if (prev) {
+            prev.superseded = true;
+            if (prev.ctl) try { prev.ctl.abort(); } catch (e) {}
+        }
+    }
+    // 旧 WebView 可能没有 AbortController：与 fetchWithTimeout 同一口径，
+    // 没有就宁可不超时，也不要在拿不到取消能力时误报失败。
+    let ctl = null, timer = null, timedOut = false;
+    if (typeof AbortController !== "undefined") {
+        ctl = new AbortController();
+        init.signal = ctl.signal;
+        if (slot) slot.ctl = ctl;
+        timer = setTimeout(() => { timedOut = true; try { ctl.abort(); } catch (e) {} }, timeout);
+    }
+    let res, data = null;
+    try {
+        res = await fetch(API_BASE + path, init);
+        try { data = await res.json(); } catch (e) { data = null; }
+    } catch (e) {
+        if (timer !== null) clearTimeout(timer);
+        if (slot && inflightByTag.get(o.tag) === slot) inflightByTag.delete(o.tag);
+        // 被后发的同 tag 请求取消：由对方把 slot.superseded 置真，这里只认领。
+        if (slot && slot.superseded) { const ce = requestError(0, "cancelled", "这个请求已被更新的一次刷新取代（未确认结果）"); ce.name = "AbortError"; throw ce; }
+        if (timedOut) { const te = requestError(0, "timeout", "请求超时（" + Math.round(timeout / 1000) + " 秒），请检查网络"); te.name = "AbortError"; throw te; }
+        // 网络类错误保持无状态可辨形状（status=0），features.js 的离线草稿判定依赖它。
+        e.status = 0;
+        e.code = e.code || "network";
+        throw e;
+    }
+    if (timer !== null) clearTimeout(timer);
+    if (slot && inflightByTag.get(o.tag) === slot) inflightByTag.delete(o.tag);
+    // 晚到的响应一律按代次丢弃：宁可报 409，也不许写进新账号的界面。
+    if (generation !== sessionGeneration) throw requestError(409, "stale_session", "账号已切换，忽略旧请求");
+    if (slot && slot.superseded) throw requestError(0, "cancelled", "这个请求已被更新的一次刷新取代（未确认结果）");
+    const code = (data && data.code) || "";
+    if (!res.ok) {
+        if (res.status === 401 && o.auth !== false && state.token) {
+            localStorage.removeItem(TOKEN_KEY);
+            state.token = "";
+            openAuthModal();
+        }
+        // 强更门与封号同为 403，靠机器码分路，不许并成一个"报错"
+        if (res.status === 403) {
+            if (code === "update_required") showUpdateWall(data);
+            else if (code === "account_banned") handleAccountBanned(data && data.detail);
+        }
+        throw requestError(res.status, code || (res.status === 401 ? "unauthorized" : res.status === 409 ? "conflict" : ""),
+            (data && data.detail) ? data.detail : "HTTP " + res.status);
+    }
+    return data || {};
+}
+
 // 统一的写请求出口：非 2xx 一律抛错。调用方不得把"没落库"播报成成功。
-/** GET 版请求：与 postApi 同一套鉴权与错误口径，别另起炉灶。 */
-async function getJson(path) {
-    const generation=sessionGeneration;
-    const r = await fetch(`${API_BASE}` + path, {
-        headers: { "Authorization": `Bearer ${state.token}` }
-    });
-    const j = await r.json().catch(() => ({}));
-    if(generation!==sessionGeneration){const e=new Error('账号已切换，忽略旧请求');e.status=409;throw e;}
-    if (!r.ok) throw new Error(j && j.detail ? j.detail : ("HTTP " + r.status));
-    return j;
+/** GET 版请求：走底座（15 秒超时 + 代次检查），可选 {tag} 取消同一路旧请求。 */
+async function getJson(path, opts) {
+    return requestBase(path, Object.assign({ method: "GET" }, opts || {}));
 }
 
 async function rawPostApi(path, body, opts) {
-    const generation=sessionGeneration;
-    const init = Object.assign({ method: "POST", headers: {} }, opts || {});
-    init.headers["Authorization"] = `Bearer ${state.token}`;
-    if (body instanceof FormData) {
-        init.body = body;
-    } else {
-        init.headers["Content-Type"] = "application/json";
-        init.body = JSON.stringify(body);
-    }
-    const res = await fetchWithTimeout(`${API_BASE}${path}`, init, 30000);
-    let data = null;
-    try { data = await res.json(); } catch (e) { data = null; }
-    if(generation!==sessionGeneration){const e=new Error('账号已切换，忽略旧请求');e.status=409;throw e;}
-    if (!res.ok) {
-        const err = new Error((data && data.detail) ? data.detail : `HTTP ${res.status}`);
-        err.status = res.status;
-        throw err;
-    }
-    return data || {};
+    return requestBase(path, Object.assign({ method: "POST", body: body }, opts || {}));
 }
 
 // Preserve request IDs across uncertain network retries; merge simultaneous clicks.
@@ -537,7 +657,7 @@ function postApi(path, body, opts) {
     const RECORD_PATHS = ["/api/food/log", "/api/workout/complete",
                           "/api/community/posts", "/api/chat/send"];
     const isRecord = RECORD_PATHS.some(p => path === p || path.startsWith(p + "/"));
-    const signature = JSON.stringify(body instanceof FormData ? {} : Object.fromEntries(Object.entries(body || {}).filter(([key])=>key!=="request_id")));
+    const signature = JSON.stringify(body instanceof FormData ? {} : Object.fromEntries(Object.entries(body || {}).filter(([key])=>!["request_id","occurred_at","timezone_offset_minutes"].includes(key))));
     const key = sessionGeneration + ":" + path + ":" + signature;
     if (pendingWrites.has(key)) return pendingWrites.get(key);
     if (isRecord) {
@@ -558,7 +678,11 @@ function queueProfileUpdate(body) {
 }
 
 // 被封号时把话说清楚：只报"网络不通"或让人停在空白页，等于把服务端的决定藏起来了。
+let lastBanNoticeAt = 0;
 function handleAccountBanned(detail) {
+    // 同一发 403 会被 fetch 封装层和请求底座各送进来一次，几秒内只播一遍
+    if (Date.now() - lastBanNoticeAt < 5000) return;
+    lastBanNoticeAt = Date.now();
     localStorage.removeItem(TOKEN_KEY);
     callNativeToast("⚠️ " + (detail || "该账号已被停用"));
     openAuthModal();
@@ -628,9 +752,9 @@ function updateUserUI(username) {
 function applyDashboardData(data) {
     if (!data || !data.metrics) return;
     state.dashboardLoaded = true;
+    state.todayDate = data.today || state.todayDate;
     state.publicUrl = data.public_url || state.publicUrl;
     if(state.user)updateUserUI(displayName(state.user));
-    // 今天练没练、清单勾了哪些、当前是休息日还是运动日，都以服务端为准
     state.workoutDoneToday = !!data.today_workout_done;
     state.dayMode = data.day_mode || "rest";
     state.checklistState = data.checklist || {};
@@ -638,7 +762,6 @@ function applyDashboardData(data) {
     state.streakDays = data.streak_days || 0;
     state.etaDays = data.eta_days || null;
     state.photoDue = !!data.photo_due;
-    // 疑似旧默认身体数据：提示核对，不改数、不猜数
     state.bodySuspect = !!data.body_suspect;
     const bsCard = document.getElementById("body-suspect-card");
     if (bsCard) bsCard.style.display = state.bodySuspect ? "block" : "none";
@@ -655,8 +778,7 @@ function applyDashboardData(data) {
         fatG: data.metrics.fat_g,
         summaryText: `${data.profile.height}cm · ${data.current_weight_jin == null ? '体重待记录' : data.current_weight_jin + '斤'} · ${getGoalName(data.profile.goal_type)}`
     };
-    // 服务器返回的是存储形状（下划线），UI 读的是驼峰；以前直接赋值导致
-    // 目标体重显示 undefined、差值算成 NaN、身材卡片退回女性第一款。
+    // 服务端是下划线键、UI 读驼峰，直赋会把目标体重与差值算成 undefined/NaN。
     const sp = data.profile || {};
     state.profile = {
         gender: sp.gender,
@@ -726,6 +848,10 @@ async function syncRemoteDashboard() {
         if (!res.ok) throw new Error("HTTP " + res.status);
         applyDashboardData(data);
         renderHabitMatrix();
+        homeMarkSync();
+        renderHomeToday();
+        // 常用餐食跟着今天的账一起刷：记完一笔就该看见它进列表（B03）
+        if (typeof loadRecentMeals === "function") loadRecentMeals();
     } catch (e) {
         console.error("Failed to sync remote dashboard", e);
         if(typeof restoreOfflineDashboard === "function") restoreOfflineDashboard(e);
@@ -748,6 +874,7 @@ async function syncRemoteCharts() {
             state.deficitHistory = data.deficit_history;
             state.realMacros = data.macros_today;
             renderCharts();
+            renderHomeToday();
         }
     } catch (e) {
         console.error("Failed to sync remote charts", e);
@@ -771,6 +898,20 @@ function getGoalName(type) {
         male_muscular: "饱满力量硬核", male_steady: "啤酒肚专项击退"
     };
     return map[type] || "减脂塑形";
+}
+
+// 草稿/同步时间读不到时写“未知”，不许拿 0 冒充。
+function homeStore(k){const u=state.user&&state.user.username;if(!u)return;try{return localStorage.getItem(k+u)}catch(e){return}}
+function homeDrafts(){const r=homeStore("QINGSU_DRAFTS_");if(r===undefined)return null;if(r===null)return 0;try{const a=JSON.parse(r);return Array.isArray(a)?a.length:0}catch(e){return null}}
+function homeMarkSync(){try{const d=new Date();localStorage.setItem("QINGSU_SYNC_AT_"+state.user.username,d.toLocaleDateString()+" "+d.toTimeString().slice(0,5))}catch(e){}}
+function homeNext(f){return !f.loaded?"还没同步：先刷新":!f.meals?"先记今天吃的第一餐":f.weight!==true?"再称一次今早体重":f.workout!==true?"今天还差一次训练：去练 20 分钟":"今天记全了，去看看这周的完成度"}
+function homeGo(w){if(w==="workout"){switchTab("workout");return}const e=document.getElementById(w==="meal"?"input-meal-text":"input-weight");if(!e)return;if(e.scrollIntoView)e.scrollIntoView({block:"center",behavior:"smooth"});if(e.focus)e.focus()}
+function renderHomeToday(){
+    const g=id=>document.getElementById(id),m=(state.mealDiary||[]).length,W=(state.weightHistory||[]).slice(-1)[0],w=W&&W.full_date?W.full_date===state.todayDate:null,t=state.dashboardLoaded?!!state.workoutDoneToday:null,D="今天已记";
+    [["meal",m?D+" "+m+" 餐":"还没记 · 点这里",m>0],["weight",w?D:"还没称 · 点这里",w===true],["workout",t?D:"还没练 · 点这里",t===true]].forEach(r=>{const s=g("home-state-"+r[0]);if(s)s.innerText=r[1];const b=g("home-do-"+r[0]);if(b){b.classList.toggle("done",r[2]);b.onclick=()=>homeGo(r[0])}});
+    const c=homeDrafts(),de=g("home-sync-draft");if(de)de.innerText=c===null?"未知":c?c+" 笔待同步":"都已同步";
+    const ae=g("home-sync-at");if(ae)ae.innerText=homeStore("QINGSU_SYNC_AT_")||"未知";
+    const ne=g("home-next-text");if(ne)ne.innerText=homeNext({loaded:state.dashboardLoaded,meals:m,weight:w,workout:t});
 }
 
 // ==========================================
@@ -801,7 +942,6 @@ function renderDashboard() {
     const kpiFat = document.getElementById("kpi-target-fat");
     if (kpiFat) kpiFat.innerText = `${c.fatG} g`;
 
-    // 动态热量表盘
     const remainEl = document.getElementById("remain-cal-display");
     if (remainEl) remainEl.innerText = state.remainingCal;
 
@@ -813,7 +953,7 @@ function renderDashboard() {
 
     const netDeficitEl = document.getElementById("net-deficit-val");
     if (netDeficitEl) {
-        // 没记任何一笔时不假称有缺口：净缺口 = 维持代谢 + 训练消耗 - 真实摄入
+        // 没记录就不假称有缺口
         if (!state.dashboardLoaded || (state.todayConsumed === 0 && state.todayBurned === 0)) {
             netDeficitEl.innerText = "— kcal (今日暂无真实记录)";
             netDeficitEl.style.color = "var(--text-light)";
@@ -824,7 +964,6 @@ function renderDashboard() {
         }
     }
 
-    // 表盘进度环
     const circle = document.getElementById("gauge-circle");
     if (circle) {
         const maxCal = state.mode === "workout" ? c.workoutCal : c.restCal;
@@ -834,7 +973,6 @@ function renderDashboard() {
         circle.style.stroke = state.remainingCal < 0 ? "var(--danger)" : "var(--primary)";
     }
 
-    // 外卖安全门禁状态
     const gateStatus = document.getElementById("takeout-gate-status");
     if (gateStatus) {
         if (state.remainingCal <= 0) {
@@ -846,7 +984,6 @@ function renderDashboard() {
         }
     }
 
-    // 体重与目标
     const curWeightSummary = document.getElementById("current-weight-summary");
     if (curWeightSummary) curWeightSummary.innerText = `当前 ${state.currentWeightJin} 斤 / 目标 ${p.targetWeightJin} 斤`;
 
@@ -862,6 +999,7 @@ function renderDashboard() {
                 : `已达到目标体重（当前比目标低 ${Math.abs(gap)} 斤）。`;
         }
     }
+    renderHomeToday();
 }
 
 // 把界面上原本写死的统计全部绑到云端真实数据；没有记录就显示 0，不预先记功
@@ -897,8 +1035,8 @@ function renderRealStats(d) {
 
     const start = d.start_weight_jin, cur = d.current_weight_jin;
     const tgt = Number((d.profile || {}).target_weight_jin);
-    setText("chart-start-wt", start ? `${(start / 2).toFixed(1)} kg` : "—");
-    setText("chart-target-wt", tgt ? `${(tgt / 2).toFixed(1)} kg` : "未设置");
+    setText("chart-start-wt", formatKg(start, "—"));
+    setText("chart-target-wt", formatKg(tgt, "未设置"));
     setText("chart-deficit-target-label", `目标 ${m.deficit || 0} kcal`);
     const trend = document.getElementById("chart-trend-tag");
     if (trend) {
@@ -1011,13 +1149,57 @@ async function editMealRecord(id) {
     if(value===null)return;
     const cal=Number(value);
     if(!Number.isFinite(cal)||cal<0||cal>10000){callNativeToast("请填写0–10000之间的热量");return;}
-    try{await postApi(`/api/records/food/${id}/update`,{cal});await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);wbRows=null;}
+    try{const r=await postApi(`/api/records/food/${id}/update`,{cal});showRecordImpact(r,"已修正");
+        await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);wbRows=null;}
     catch(e){reportWriteFailure(e,"餐食修正");}
 }
 async function deleteMealRecord(id) {
     if(!window.confirm("删除这笔餐食记录？相关统计会重新计算。"))return;
-    try{await postApi(`/api/records/food/${id}/delete`,{});await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);wbRows=null;}
+    try{const r=await postApi(`/api/records/food/${id}/delete`,{});showRecordImpact(r,"已删除");
+        await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);wbRows=null;}
     catch(e){reportWriteFailure(e,"餐食删除");}
+}
+
+// ==========================================
+// 修正/删除之后要说清"影响了哪一天、那天现在算成什么"（B03）。
+// 只弹一句"已删除"等于什么都没交代：用户不知道改的是哪天的账，
+// 也不知道那天的完整日确认已经被作废。
+// ==========================================
+function recordImpactText(res, verb) {
+    if (!res || !res.affected_date) {
+        return { full: verb + "了，但服务端没回影响范围：哪一天的账变了请自己核对，页面数字以刷新后为准。",
+                 short: verb + "了（影响范围未回传）" };
+    }
+    const b = res.day_before || {}, a = res.day_after || {};
+    const parts = [];
+    if (Number(b.consumed_cal) !== Number(a.consumed_cal)) {
+        parts.push(`摄入 ${Number(b.consumed_cal) || 0} → ${Number(a.consumed_cal) || 0} kcal`);
+    }
+    if (Number(b.burned_cal) !== Number(a.burned_cal)) {
+        parts.push(`训练消耗 ${Number(b.burned_cal) || 0} → ${Number(a.burned_cal) || 0} kcal`);
+    }
+    if (String(b.weight_jin) !== String(a.weight_jin)) {
+        parts.push(`体重 ${formatJin(b.weight_jin, "无读数")} → ${a.weight_jin == null ? "那天没记录" : formatJin(a.weight_jin)}`);
+    }
+    if (!a.food_count && !a.workout_count && a.weight_jin == null) {
+        parts.push("这一天已经没有任何记录了");
+    }
+    const day = res.is_today ? `今天（${res.affected_date}）` : res.affected_date;
+    return {
+        full: `${verb}【${res.affected_label || "这条记录"}】，影响 ${day}：`
+            + (parts.length ? parts.join("；") : "当天合计没变")
+            + "。这天的「记全了吗」确认已作废，需要重新确认。",
+        short: `${verb} · ${day}：` + (parts.length ? parts.join("；") : "当天合计没变")
+    };
+}
+
+/** 把影响说明同时落到页面上（长文）和提示条上（短句）。 */
+function showRecordImpact(res, verb) {
+    const t = recordImpactText(res, verb);
+    const box = document.getElementById("record-impact-note");
+    if (box) { box.textContent = t.full; box.style.display = "block"; }
+    callNativeToast(t.short);
+    return t;
 }
 function renderMealDiary() {
     const box = document.getElementById("today-meal-diary-list");
@@ -1093,21 +1275,21 @@ function renderWaterCups() {
     box.innerHTML = html;
 }
 
-// 真实空腹体重记录
+// 真实空腹体重记录。单位换算只走 inputWeightToJin 这一处：
+// 填 kg 也存成斤，云端永远只有一个单位（B03）。
 async function saveWeight() {
     const input = document.getElementById("input-weight");
-    const val = parseFloat(input.value);
-    const unit = document.getElementById("weight-unit").value;
+    const unit = weightUnitChoice();
+    const wtJin = inputWeightToJin(parseFloat(input.value), unit);
 
-    if (!val || val <= 0) {
+    if (wtJin === null) {
         callNativeToast("请输入有效的体重数值");
         return;
     }
 
-    const wtJin = unit === "kg" ? val * 2 : val;
     try {
         const data = await postApi("/api/weight/log", { weight_jin: wtJin });
-        callNativeToast(data.msg || "体重打卡成功！");
+        callNativeToast(data.msg || `体重打卡成功！已按 ${formatJin(wtJin)} 存档`);
         callNativeVibrate(100);
         input.value = "";
         await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
@@ -1218,7 +1400,7 @@ function renderCyclePhotos() {
             if (phBaseTxt) phBaseTxt.style.display = "block";
         }
     }
-    if (metaBase) metaBase.innerText = `基准: ${(cd.baseWeightJin / 2).toFixed(1)}kg / ${cd.baseWaistCm}cm`;
+    if (metaBase) metaBase.innerText = `基准: ${kgOf(cd.baseWeightJin, "无读数")}kg / ${cd.baseWaistCm}cm`;
 
     const imgCur = document.getElementById("img-cur-photo");
     const phCurIcon = document.getElementById("ph-cur-icon");
@@ -1238,7 +1420,7 @@ function renderCyclePhotos() {
             if (phCurTxt) phCurTxt.style.display = "block";
         }
     }
-    if (metaCur) metaCur.innerText = `本周: ${(cd.curWeightJin / 2).toFixed(1)}kg / ${cd.curWaistCm}cm`;
+    if (metaCur) metaCur.innerText = `本周: ${kgOf(cd.curWeightJin, "无读数")}kg / ${cd.curWaistCm}cm`;
 
     const titleDisp = document.getElementById("cycle-title-display");
     if (titleDisp) titleDisp.innerText = cd.cycleName || `📅 第 ${cd.currentCycle || 1} 周期 (进行中)`;
@@ -1905,9 +2087,10 @@ async function submitLogin() {
         });
         const data = await res.json();
         if (data.token) {
-            saveAuthSession(data.token, { username: data.username, nickname: data.nickname });
+            saveAuthSession(data.token, { username: data.username, nickname: data.nickname, password_change_required: !!data.password_change_required });
             state.publicUrl=data.public_url;
             closeAuthModal();
+            if(data.password_change_required){openRecoveryPasswordDialog();return;}
             callNativeToast(`🎉 欢迎回来，${escapeHtml(displayName(data))}！专属真实档案已同步！`);
             callNativeVibrate(100);
             await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
@@ -2966,7 +3149,276 @@ async function sendCheerSticker(kind) {
 
 
 
+// ==========================================
+// 档案拆分（B04）：八个字段按四组走，每组只提交自己那几个键。
+// 为什么必须按组提交：/api/profile/update 是全量语义，历史上一句话把
+// gender/age/height/weight/target/goal/dining/scene 八个都发一遍，
+// 于是"只想换个训练场景"会顺手把云端体重写回档案里那个旧值（还会补一条今天的称重）。
+// 现在 scene 那一组只发 {scene}，体重、目标、饮食偏好都不在请求体里。
+// ==========================================
+const PROFILE_GROUPS = {
+    basic: {
+        title: "基础资料",
+        keys: ["gender", "age", "height", "weight_jin"],
+        needsBody: true
+    },
+    goal: {
+        title: "目标",
+        keys: ["target_weight_jin", "goal_type"],
+        needsBody: true
+    },
+    scene: {
+        title: "训练场景",
+        keys: ["scene"],
+        needsBody: false
+    },
+    dining: {
+        title: "饮食偏好",
+        keys: ["dining_mode"],
+        needsBody: false
+    }
+};
+const DINING_CN = { cook: "自己做菜备餐", takeout: "上班族纯外卖", hybrid: "混合模式" };
+
+function profFieldVal(id) {
+    const el = document.getElementById(id);
+    return el ? String(el.value == null ? "" : el.value).trim() : "";
+}
+
+/** 从弹窗里读出当前草稿（键名就是云端的键名）。 */
+function readProfileDraft() {
+    const scene = profFieldVal("prof-scene");
+    const gender = profFieldVal("prof-gender") === "male" ? "male" : "female";
+    return {
+        gender,
+        age: profFieldVal("prof-age") === "" ? null : parseInt(profFieldVal("prof-age"), 10),
+        height: profFieldVal("prof-height") === "" ? null : parseFloat(profFieldVal("prof-height")),
+        weight_jin: profFieldVal("prof-weight-jin") === "" ? null : parseFloat(profFieldVal("prof-weight-jin")),
+        target_weight_jin: profFieldVal("prof-target-jin") === "" ? null : parseFloat(profFieldVal("prof-target-jin")),
+        goal_type: state.profile.goalType || null,
+        dining_mode: profFieldVal("prof-dining-mode") || "takeout",
+        scene: SCENE_META[scene] ? scene : "home"
+    };
+}
+
+/** 云端那一份的真值（档案弹窗外面也一直在改，这里必须以 state.profile 为准）。 */
+function readProfileStored() {
+    const p = state.profile || {};
+    return {
+        gender: p.gender || null,
+        age: p.age == null ? null : Number(p.age),
+        height: p.height == null ? null : Number(p.height),
+        // 顶栏显示的是"最近一次称重"（r177），基准就得用它，否则摘要会说不存在的变更
+        weight_jin: (Number(state.currentWeightJin) > 0 ? Number(state.currentWeightJin)
+            : (p.weightJin == null ? null : Number(p.weightJin))),
+        target_weight_jin: p.targetWeightJin == null ? null : Number(p.targetWeightJin),
+        goal_type: p.goalType || null,
+        dining_mode: p.diningMode || null,
+        scene: p.scene || null
+    };
+}
+
+const PROFILE_LABELS = {
+    gender: "生理性别", age: "年龄", height: "身高", weight_jin: "当前体重",
+    target_weight_jin: "目标体重", goal_type: "目标身材", dining_mode: "就餐方式", scene: "训练场景"
+};
+
+function profileValueText(key, v) {
+    if (v === null || v === undefined || v === "") return "没填";
+    switch (key) {
+        case "gender": return v === "male" ? "男" : "女";
+        case "age": return v + " 岁";
+        case "height": return v + " cm";
+        case "weight_jin": case "target_weight_jin": return formatJin(v);
+        case "goal_type": return getGoalName(v) + "（" + v + "）";
+        case "dining_mode": return DINING_CN[v] || v;
+        case "scene": return (SCENE_META[v] && SCENE_META[v].name) || v;
+        default: return String(v);
+    }
+}
+
+function profileSame(a, b) {
+    if (typeof a === "number" || typeof b === "number") {
+        const x = Number(a), y = Number(b);
+        if (Number.isFinite(x) && Number.isFinite(y)) return Math.abs(x - y) < 0.05;
+    }
+    return String(a == null ? "" : a) === String(b == null ? "" : b);
+}
+
+/** 本次变更：只看这组里的键，别的组一个字都不进摘要、也不进请求体。 */
+function profileChangesFor(groupKey) {
+    const group = PROFILE_GROUPS[groupKey];
+    if (!group) return [];
+    const draft = readProfileDraft(), stored = readProfileStored();
+    const out = [];
+    for (const key of group.keys) {
+        const to = draft[key], from = stored[key];
+        if (to === null || to === undefined) continue;
+        if (profileSame(from, to)) continue;
+        out.push({ key, label: PROFILE_LABELS[key] || key, from, to,
+            fromText: profileValueText(key, from), toText: profileValueText(key, to) });
+    }
+    return out;
+}
+
+/** 按组校验：这一组要填的没填 / 数字离谱，就当场说清是哪一项。 */
+function validateProfileGroup(groupKey) {
+    const group = PROFILE_GROUPS[groupKey];
+    if (!group) return ["这一组档案不认识"];
+    const draft = readProfileDraft();
+    const errs = [];
+    const num = (key, lo, hi, unit) => {
+        const v = draft[key];
+        if (v === null || !Number.isFinite(v)) errs.push(`「${PROFILE_LABELS[key]}」要填数字`);
+        else if (v < lo || v > hi) errs.push(`「${PROFILE_LABELS[key]}」得在 ${lo}~${hi} ${unit} 之间`);
+    };
+    if (group.keys.includes("age")) num("age", 10, 100, "岁");
+    if (group.keys.includes("height")) num("height", 80, 250, "cm");
+    if (group.keys.includes("weight_jin")) num("weight_jin", 40, 600, "斤");
+    if (group.keys.includes("target_weight_jin")) num("target_weight_jin", 40, 600, "斤");
+    if (group.keys.includes("goal_type")
+        && !(BODY_SHAPES_DATA.female[draft.goal_type] || BODY_SHAPES_DATA.male[draft.goal_type])) {
+        errs.push("目标身材不在可选范围内");
+    }
+    if (group.keys.includes("dining_mode") && !DINING_CN[draft.dining_mode]) errs.push("就餐方式取值不对");
+    if (group.keys.includes("scene") && !SCENE_META[draft.scene]) errs.push("训练场景取值不对");
+    if (group.needsBody) {
+        // 额度要四项一起才算得出来：这一组要写身体数据，就得保证那四项都在
+        ["age", "height", "weight_jin", "target_weight_jin"].forEach(k => {
+            const v = draft[k];
+            if (v === null || !Number.isFinite(v)) errs.push(`额度要「${PROFILE_LABELS[k]}」，请补上`);
+        });
+    }
+    return errs;
+}
+
+let pendingProfileSection = null;
+
+/** 把变更摘要摆到弹窗底部；没改动就直说没改动。 */
+function paintProfileSummary(changes, groupKey) {
+    const box = document.getElementById("profile-change-summary");
+    const acts = document.getElementById("profile-summary-acts");
+    const title = (PROFILE_GROUPS[groupKey] || {}).title || "全部字段";
+    if (!box) return;
+    if (!changes.length) {
+        box.hidden = false;
+        box.innerHTML = `<div class="prof-summary-head">【${escapeHtml(title)}】本次没有变更</div>`
+            + `<div class="prof-summary-line">填的值和云端那份一样，不用发起写入。</div>`;
+        if (acts) acts.hidden = true;
+        return;
+    }
+    box.hidden = false;
+    box.innerHTML = `<div class="prof-summary-head">【${escapeHtml(title)}】本次要保存 ${changes.length} 项`
+        + (groupKey ? "，先核对再确认" : "（一次保存全部字段这条路已直接发起写入）") + `</div>`
+        + changes.map(c => `<div class="prof-summary-line"><b>${escapeHtml(c.label)}</b>：`
+            + `${escapeHtml(c.fromText)} <span class="prof-summary-arrow">→</span> ${escapeHtml(c.toText)}</div>`).join("")
+        + `<div class="prof-summary-scope">${escapeHtml(groupKey
+            ? profileScopeSentence(groupKey)
+            : "这一趟把八个字段一起交，缺一项就按云端原值合并。")}</div>`;
+    // 「先不保存 / 确认」这两个按钮只属于逐组保存这条路：它要先看摘要再点确认。
+    // 一次保存全部字段那条路在摆完摘要后就直接写入了，不该再挂一个确认按钮让人以为还有闸。
+    if (acts) acts.hidden = !groupKey;
+}
+
+function otherProfileKeys(groupKey) {
+    const mine = (PROFILE_GROUPS[groupKey] || {}).keys || [];
+    const all = ["gender", "age", "height", "weight_jin", "target_weight_jin", "goal_type", "dining_mode", "scene"];
+    return all.filter(k => !mine.includes(k)).map(k => PROFILE_LABELS[k]);
+}
+
+function profileScopeSentence(groupKey) {
+    const mine = (PROFILE_GROUPS[groupKey] || {}).keys || [];
+    return "请求体里只会出现这 " + mine.length + " 项（"
+        + mine.map(k => PROFILE_LABELS[k]).join("、") + "）；其余 " + otherProfileKeys(groupKey).length
+        + " 项不动：" + otherProfileKeys(groupKey).join("、") + "。";
+}
+
+function cancelProfileSection() {
+    pendingProfileSection = null;
+    const box = document.getElementById("profile-change-summary");
+    const acts = document.getElementById("profile-summary-acts");
+    if (box) { box.hidden = true; box.innerHTML = ""; }
+    if (acts) acts.hidden = true;
+}
+
+function saveProfileSection(groupKey) {
+    const group = PROFILE_GROUPS[groupKey];
+    if (!group) { callNativeToast("这一组档案不认识"); return; }
+    if (!state.token) { openAuthModal(); return; }
+    const errs = validateProfileGroup(groupKey);
+    if (errs.length) { callNativeToast("【" + group.title + "】先改好：" + errs.join("；")); return; }
+    const changes = profileChangesFor(groupKey);
+    if (!changes.length) {
+        paintProfileSummary([], groupKey);
+        callNativeToast("【" + group.title + "】这次没有要保存的变更");
+        return;
+    }
+    // 保存前展示本次变更摘要 —— 这一步先摆屏，确认按钮才可用
+    pendingProfileSection = { groupKey, changes };
+    paintProfileSummary(changes, groupKey);
+    callNativeToast("【" + group.title + "】" + changes.length + " 项变更已列出，看完点「确认」才写入");
+}
+
+async function confirmProfileSection() {
+    if (!pendingProfileSection) { callNativeToast("没有待确认的档案变更"); return; }
+    const { groupKey, changes } = pendingProfileSection;
+    const draft = readProfileDraft();
+    const body = {};
+    for (const c of changes) body[c.key] = draft[c.key];
+    try {
+        await queueProfileUpdate(body);
+        pendingProfileSection = null;
+        applyProfileDraftToState(draft, Object.keys(body));
+        paintProfileSummary([], groupKey);
+        const acts = document.getElementById("profile-summary-acts");
+        if (acts) acts.hidden = true;
+        renderDashboard();
+        refreshPlanViews();
+        const scene = SCENE_META[state.profile.scene] || SCENE_META.home;
+        callNativeToast("✅ 已保存【" + PROFILE_GROUPS[groupKey].title + "】"
+            + changes.map(c => c.label).join("、") + "；当前计划："
+            + buildWorkoutPlan(state.profile.gender, state.profile.goalType, state.profile.scene).title
+            + " × " + scene.name);
+        callNativeVibrate(120);
+        await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
+    } catch (e) {
+        reportWriteFailure(e, PROFILE_GROUPS[groupKey].title + "档案");
+    }
+}
+
+// 档案四组的「保存这一组」与摘要条的「先不保存 / 确认」改用事件绑定（C11：
+// 内联 onclick 要一路往下减，正式 CSP 才有落地的可能）。按钮 id 就是
+// prof-save-<组名>，所以四组共用一次遍历，不写四遍。
+function bindProfileSectionActions() {
+    for (const groupKey of Object.keys(PROFILE_GROUPS)) {
+        const btn = document.getElementById("prof-save-" + groupKey);
+        if (btn) btn.addEventListener("click", () => saveProfileSection(groupKey));
+    }
+    const cancel = document.getElementById("profile-summary-cancel");
+    if (cancel) cancel.addEventListener("click", () => cancelProfileSection());
+    const confirm = document.getElementById("profile-summary-confirm");
+    if (confirm) confirm.addEventListener("click", () => confirmProfileSection());
+}
+
+/** 写成功后只回写这一组改过的键，别把整份档案当"已经保存了"。 */
+function applyProfileDraftToState(draft, keys) {
+    const map = { gender: "gender", age: "age", height: "height", weight_jin: "weightJin",
+        target_weight_jin: "targetWeightJin", goal_type: "goalType",
+        dining_mode: "diningMode", scene: "scene" };
+    for (const k of keys) {
+        const target = map[k];
+        if (target) state.profile[target] = draft[k];
+    }
+    if (keys.includes("weight_jin")) state.currentWeightJin = draft.weight_jin;
+    if (state.calculated && (keys.includes("height") || keys.includes("weight_jin"))
+        && Number.isFinite(Number(state.profile.height)) && Number.isFinite(Number(state.profile.weightJin))) {
+        state.calculated.summaryText = `${state.profile.height}cm · ${state.profile.weightJin}斤 · ${getGoalName(state.profile.goalType)}`;
+    }
+}
+
 function openProfileModal() {
+    // 上一次的待确认摘要不能跟着进下一次：否则换个组确认时写的还是旧草稿
+    cancelProfileSection();
     const p = state.profile;
     const g = p.gender || "female";
     const profGenderSelect = document.getElementById("prof-gender");
@@ -2995,6 +3447,7 @@ function openProfileModal() {
 }
 
 function closeProfileModal() {
+    cancelProfileSection();
     document.getElementById("profile-modal").classList.remove("show");
 }
 
@@ -3017,6 +3470,12 @@ async function saveCustomProfile() {
     const scene = (sceneEl && SCENE_META[sceneEl.value]) ? sceneEl.value : currentSceneKey();
     const diningMode = document.getElementById("prof-dining-mode") ? document.getElementById("prof-dining-mode").value : "takeout";
 
+    // 保存前先把本次变更摘要摆到屏上：一次全量保存也要说得清改了哪几项、从什么变成什么。
+    // 逐组保存（saveProfileSection）还多一道「确认」闸门；这条路是"一次保存全部字段"，
+    // 摘要在这一步已经落地，随后才发起写入。
+    const allChanges = ["basic", "goal", "scene", "dining"].flatMap(g => profileChangesFor(g));
+    paintProfileSummary(allChanges, null);
+
     try {
         await queueProfileUpdate({
             gender, age, height, weight_jin: weightJin,
@@ -3029,6 +3488,7 @@ async function saveCustomProfile() {
         state.profile.weightJin = weightJin;
         state.profile.targetWeightJin = targetWeightJin;
         state.profile.scene = scene;
+        state.profile.diningMode = diningMode;
         state.currentWeightJin = weightJin;
         if (state.calculated) {
             state.calculated.summaryText = `${height}cm · ${weightJin}斤 · ${getGoalName(state.profile.goalType)}`;
@@ -3044,19 +3504,15 @@ async function saveCustomProfile() {
     }
 }
 
+/** 身材形态与性别是"选一下就生效"的两个字段：只发这两个。
+ *  以前这里把八项全量重发，于是点一张身材卡会顺手把 weight_jin 按档案旧值写回，
+ *  服务端还按 r177 那条补一条今天的称重记录 —— 顶栏体重就这么被身材卡改掉了（B04）。 */
 async function saveProfileSilent() {
     if (!state.token) return;
     try {
-        const p = state.profile;
         await queueProfileUpdate({
-            gender: p.gender,
-            age: p.age,
-            height: p.height,
-            weight_jin: p.weightJin,
-            target_weight_jin: p.targetWeightJin,
-            goal_type: p.goalType,
-            dining_mode: p.diningMode,
-            scene: p.scene
+            gender: state.profile.gender,
+            goal_type: state.profile.goalType
         });
         await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);
     } catch(e) {
@@ -4742,14 +5198,14 @@ function closeDownloadModal() {
 }
 
 async function exportMyData() {
-    if (!state.token) { callNativeToast("请先登录再导出"); openAuthModal(); return; }
+    if (!state.token) { callNativeToast("请先登录再导出"); openAuthModal(); return false; }
     try {
         const res = await fetch(`${API_BASE}/api/export.csv`, {
             headers: { "Authorization": `Bearer ${state.token}` }
         });
         if (!res.ok) throw new Error("HTTP " + res.status);
         const text = await res.text();
-        if(inApp() && window.AndroidBridge.saveCsv){window.AndroidBridge.saveCsv(text);return;}
+        if(inApp() && window.AndroidBridge.saveCsv){window.AndroidBridge.saveCsv(text);return true;}
         const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -4758,8 +5214,10 @@ async function exportMyData() {
         a.click();
         setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
         callNativeToast("已导出全部流水（CSV，Excel 可直接打开）");
+        return true;
     } catch (e) {
         callNativeToast("导出失败：" + (e && e.message ? e.message : "网络不通"));
+        return false;
     }
 }
 
@@ -4793,22 +5251,62 @@ function onDirectDownloadClick(event) {
 // ============================================================
 // 无障碍：弹窗焦点约束、ESC 关闭、自定义按钮键盘激活
 // ============================================================
+// DIALOG_OVERLAY_IDS 是「index.html 里所有会盖住界面的浮层容器」的全集，不是随手挑的样本。
+// 漏一项的后果不抛错、不显形：那个容器打开时背景不 inert、焦点不归位、Esc 按了没反应，
+// 只有反向扫 HTML 才知道有没有漏项（见 tests/a11y-dialog-contract.mjs 的正向断言）。
+// 开合方式有三种，dialogIsOpen 把它们收敛成一个谓词：
+//   1) .modal-overlay 用 class="show"；2) 整页层用 hidden；3) 原生 <dialog> 用 open。
 const DIALOG_OVERLAY_IDS = ["profile-modal", "intercept-modal", "auth-modal",
-    "download-apk-modal", "ex-detail-modal"];
+    "download-apk-modal", "ex-detail-modal", "page-layer", "report-dialog"];
+const DIALOG_CLOSE_SELECTORS = ".modal-close-btn, .exd-close, .td-close, .pl-back";
 let dialogReturnFocus = null;
 
+function isNativeDialog(el) {
+    // 桩里的假元素没有 showModal，只有真 <dialog> 才有：原生对话框的模态行为
+    // （背景 inert、Tab 关在框里、Esc 关闭、关闭后焦点回原位）浏览器已经做完了，
+    // 我们只补自己那套 Esc/遮罩逻辑，别和它抢。
+    return !!el && el.tagName === "DIALOG" && typeof el.showModal === "function";
+}
+
+function dialogIsOpen(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (isNativeDialog(el)) return el.hasAttribute("open");
+    if (el.hasAttribute("hidden")) return false;
+    return el.classList.contains("show") || el.getAttribute("aria-modal") === "true";
+}
+
 function openDialogs() {
-    return DIALOG_OVERLAY_IDS.map(id => document.getElementById(id))
-        .filter(el => el && el.classList.contains("show"));
+    const list = [];
+    DIALOG_OVERLAY_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (dialogIsOpen(el)) list.push(el);
+    });
+    // features.js 运行时才造出来的对话框（toolDialog、通话层）没有固定 id，
+    // 但它们同样盖在界面上，一样要受遮罩与焦点约束。
+    // 只认 body 的直接子节点：弹窗内容面板 .modal-card 也写着 aria-modal="true"，
+    // 连它一起认的话，隐藏着的弹窗会被算成"一直开着"，全站背景永远 inert。
+    Array.prototype.forEach.call(
+        document.querySelectorAll('body > dialog[open], body > [role="dialog"][aria-modal="true"]'), el => {
+            if (list.indexOf(el) < 0 && dialogIsOpen(el)) list.push(el);
+        });
+    return list;
 }
 
 function topDialog() {
     const list = openDialogs();
-    return list.length ? list[list.length - 1] : null;
+    if (!list.length) return null;
+    // 原生 <dialog> 一 showModal 就进浏览器的 top layer，永远压在任何 fixed 遮罩上面，
+    // 所以「最上面那个」只能按渲染层判断，不能按清单顺序猜。
+    for (let i = list.length - 1; i >= 0; i--) {
+        if (isNativeDialog(list[i])) return list[i];
+    }
+    return list[list.length - 1];
 }
 
 function dialogPanel(overlay) {
-    return overlay ? overlay.querySelector(".modal-card") : null;
+    if (!overlay) return null;
+    // 五个覆盖层的内容在 .modal-card 里；整页层与原生对话框自己就是内容区。
+    return overlay.querySelector(".modal-card") || overlay;
 }
 
 function dialogFocusables(root) {
@@ -4819,11 +5317,19 @@ function dialogFocusables(root) {
         .filter(el => !el.hasAttribute("hidden") && el.type !== "hidden");
 }
 
+function isAnnouncementNode(node) {
+    // 提示条和 aria-live 区域是弹窗里唯一的反馈声：跟着一起 inert 就等于
+    // 「保存成功」念不出来，读屏用户只剩一个安静的界面。
+    if (!node || !node.getAttribute) return false;
+    return node.id === "web-toast-container" || !!node.getAttribute("aria-live")
+        || /(^|\s)(status|alert)(\s|$)/.test(node.getAttribute("role") || "");
+}
+
 function syncDialogInert() {
     const top = topDialog();
     // 弹窗开着的时候，背景内容既不该被读屏念到，也不该被 Tab 走到。
     Array.prototype.forEach.call(document.body.children, node => {
-        if (node.nodeType !== 1) return;
+        if (node.nodeType !== 1 || isAnnouncementNode(node)) return;
         const inDialog = !!top && (node === top || node.contains(top));
         if (top && !inDialog) {
             node.setAttribute("aria-hidden", "true");
@@ -4835,13 +5341,25 @@ function syncDialogInert() {
     });
 }
 
-function onDialogOpened(overlay) {
-    if (!dialogReturnFocus) dialogReturnFocus = document.activeElement;
-    syncDialogInert();
+function focusFirstInside(overlay) {
     const panel = dialogPanel(overlay);
+    if (!panel) return;
+    // 调用方（或原生对话框自己）已经把焦点放进框里了就别抢：
+    // 登录框抢焦会把光标从密码格拽回第一个输入框。
+    if (document.activeElement && panel.contains(document.activeElement)) return;
     const items = dialogFocusables(panel);
     const target = items.length ? items[0] : panel;
     if (target && target.focus) { try { target.focus({ preventScroll: true }); } catch (e) {} }
+}
+
+function onDialogOpened(overlay) {
+    if (!dialogReturnFocus) {
+        const active = document.activeElement;
+        // body 不算「触发它的控件」，记下来关闭后焦点等于原地消失。
+        if (active && active !== document.body) dialogReturnFocus = active;
+    }
+    syncDialogInert();
+    focusFirstInside(overlay);
 }
 
 function onDialogClosed() {
@@ -4852,23 +5370,29 @@ function onDialogClosed() {
     }
 }
 
+function bindDialogAccessibility(el) {
+    if (!el || el.dataset.a11yBound) return;
+    el.dataset.a11yBound = "1";
+    // class / hidden / open 三种开合方式都盯：漏了 hidden 就等于整页层永远不被约束。
+    new MutationObserver(() => {
+        if (dialogIsOpen(el)) onDialogOpened(el); else onDialogClosed();
+    }).observe(el, { attributes: true, attributeFilter: ["class", "hidden", "open"] });
+}
+
 function installDialogAccessibility() {
     if (!window.MutationObserver) return;
-    DIALOG_OVERLAY_IDS.forEach(id => {
-        const el = document.getElementById(id);
-        if (!el || el.dataset.a11yBound) return;
-        el.dataset.a11yBound = "1";
-        new MutationObserver(() => {
-            if (el.classList.contains("show")) onDialogOpened(el); else onDialogClosed();
-        }).observe(el, { attributes: true, attributeFilter: ["class"] });
-    });
+    DIALOG_OVERLAY_IDS.forEach(id => bindDialogAccessibility(document.getElementById(id)));
+    // 运行时才出现的对话框没有观察器，靠焦点移动补一次遮罩同步。
+    document.addEventListener("focusin", () => { if (topDialog()) syncDialogInert(); });
 }
 
 function closeTopDialog() {
     const top = topDialog();
     if (!top) return false;
-    const btn = top.querySelector(".modal-close-btn, .exd-close");
+    if (isNativeDialog(top)) { top.close(); return true; }
+    const btn = top.querySelector(DIALOG_CLOSE_SELECTORS);
     if (btn) { btn.click(); return true; }
+    // 整页层的显隐归 features.js 的页面栈，这里只撤 .show，别乱动 hidden。
     top.classList.remove("show");
     return true;
 }
@@ -4876,10 +5400,13 @@ function closeTopDialog() {
 document.addEventListener("keydown", e => {
     if (e.key === "Escape") { if (closeTopDialog()) e.preventDefault(); return; }
     if (e.key === "Tab") {
-        const panel = dialogPanel(topDialog());
+        const top = topDialog();
+        const panel = dialogPanel(top);
         if (!panel) return;
+        // 原生对话框的 Tab 环浏览器已经管好了，再套一层会把焦点弹回第一个元素。
+        if (isNativeDialog(top)) return;
         const items = dialogFocusables(panel);
-        if (!items.length) { e.preventDefault(); return; }
+        if (!items.length) { e.preventDefault(); panel.focus({ preventScroll: true }); return; }
         const first = items[0], last = items[items.length - 1];
         if (e.shiftKey && document.activeElement === first) {
             e.preventDefault(); last.focus();
@@ -4893,7 +5420,8 @@ document.addEventListener("keydown", e => {
     // <div role="button"> 必须和真按钮一样能被回车/空格激活
     const t = e.target;
     if ((e.key === "Enter" || e.key === " ") && t && t.getAttribute
-        && t.getAttribute("role") === "button" && !e.repeat) {
+        && t.getAttribute("role") === "button" && !e.repeat
+        && !/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || "")) {
         e.preventDefault();
         t.click();
     }
@@ -4923,9 +5451,7 @@ function describeDeficit(rows, targetDeficit) {
 window.addEventListener("load", installDialogAccessibility);
 installDialogAccessibility();
 
-// ============================================================
-// 今日记录完整性确认：后端 /api/day/complete 早就有，界面上一直没有入口
-// ============================================================
+// 完整日确认：后端接口早就有，界面上一直缺入口
 function renderDayComplete(data) {
     const btn = document.getElementById("day-complete-btn");
     const tag = document.getElementById("day-complete-state");

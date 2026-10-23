@@ -2,20 +2,33 @@ let localGuidanceRows=[];
 /* Account tools, explicit sharing, offline drafts and record correction. */
 const localDay = () => { const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 const draftKey = () => 'QINGSU_DRAFTS_'+(state.user ? state.user.username : 'guest');
+function occurrenceNow(){const now=new Date();return {log_date:localDay(),occurred_at:now.toISOString(),timezone_offset_minutes:now.getTimezoneOffset()};}
 let pendingMeal=null;
-logNaturalMeal=async function(){
-    const text=document.getElementById('input-meal-text').value.trim();if(!text){callNativeToast('请填写实际吃的餐食');return;}
-    if(!state.token){openAuthModal();return;}
-    const slot={breakfast:'早餐',lunch:'午餐',dinner:'晚餐',snack:'加餐'}[state.selectedMealSlot]||'餐食';
-    try{
-        const result=await postApi('/api/food/preview',{food_name:text});pendingMeal={food_name:text,slot,estimate:result.cal};
-        toolDialog('核对餐食与份量',`<div class="td-meal-head">
-              <div class="td-meal-name">${escapeHtml(text)}</div>
-              <div class="td-meal-why"><span class="td-chip">${Number(result.cal)} kcal</span>${escapeHtml(result.reason||'按名称估算，非称重结果')}</div>
+/* 记录省步骤（B03）：确认弹窗同时服务三条入口——现打原文、常用餐食、复制上一餐。
+   共同点：都是"草稿"，只有点了「确认并保存」才入账。 */
+const MEAL_SLOT_CN={breakfast:'早餐',lunch:'午餐',dinner:'晚餐',snack:'加餐'};
+const MEAL_SLOT_KEY={'早餐':'breakfast','午餐':'lunch','晚餐':'dinner','加餐':'snack'};
+/* 份量档：倍数是相对"这份餐原本的估算"，点完只是把数字填进那格，还能手改。 */
+const MEAL_PORTIONS=[[0.5,'半份'],[1,'正常一份'],[1.5,'加一半'],[2,'双份']];
+/* 这些来源是成分表/关键词算出来的，重记同一道菜让服务端再算一次就行，
+   不必把数字当"用户填的"发回去——发回去反而丢掉宏量与来源（服务端会记 direct）。 */
+const MEAL_REPARSE_SOURCES=['nutrition_kb','nutrition_kb_partial','nutrition_heuristic','legacy_estimate','direct_estimate'];
+
+function mealConfirmHtml(){
+    const p=pendingMeal;
+    return `<div class="td-meal-head">
+              <div class="td-meal-name">${escapeHtml(p.food_name)}</div>
+              <div class="td-meal-why"><span class="td-chip">${Number(p.estimate)} kcal</span><span class="td-chip">${escapeHtml(MEAL_SLOT_CN[p.slotKey]||p.slot)}</span>${escapeHtml(p.why||'按名称估算，非称重结果')}</div>
             </div>
+            ${p.origin?`<p class="td-note td-meal-origin">${escapeHtml(p.origin)}</p>`:''}
             <div class="td-group">
-              <label class="td-field-row"><span class="td-field-label">本餐热量（kcal，可修正）</span><input id="meal-confirm-cal" type="number" min="0" max="10000" value="${Number(result.cal)}" inputmode="numeric"></label>
+              <label class="td-field-row"><span class="td-field-label">本餐热量（kcal，可修正）</span><input id="meal-confirm-cal" type="number" min="0" max="10000" value="${Number(p.estimate)}" inputmode="numeric"></label>
             </div>
+            <div class="td-group-label">份量快捷选择</div>
+            <div class="td-portion-row" id="meal-portion-row" role="group" aria-label="份量快捷选择">
+              ${MEAL_PORTIONS.map(([f,n])=>`<button type="button" class="td-portion" id="meal-portion-${String(f).replace('.','_')}" data-factor="${f}" aria-pressed="false" onclick="pickMealPortion(${f})">${n}</button>`).join('')}
+            </div>
+            <p id="meal-portion-note" class="td-status" role="status">倍的是「${escapeHtml(p.basisLabel || ('那份 ' + Number(p.estimate) + ' kcal'))}」；选完还能在上面那格直接改数字。</p>
             <div class="td-actions td-ai-row"><button type="button" class="td-btn-quiet" id="meal-ai-btn" onclick="estimateMealByAi()">让服务器模型估一下</button></div>
             <p id="meal-ai-result" class="td-status" role="status"></p>
             <div class="td-group-label">按包装称重换算（选填）</div>
@@ -25,13 +38,136 @@ logNaturalMeal=async function(){
             </div>
             <p class="td-note">填了这两项就按重量换算覆盖上面那个数；手动热量只能算热量，推不出真实宏量。</p>
             <p id="meal-confirm-result" class="td-status" role="status"></p>
-            <div class="td-actions"><button type="button" class="td-btn-quiet" onclick="document.getElementById('account-tools-dialog').close()">先不记</button><button type="button" class="td-btn" onclick="confirmMealRecord()">确认并保存</button></div>`);
+            <div class="td-actions"><button type="button" class="td-btn-quiet" onclick="document.getElementById('account-tools-dialog').close()">先不记</button><button type="button" class="td-btn" onclick="confirmMealRecord()">确认并保存</button></div>`;
+}
+
+/** 开确认弹窗。pending 里没 occurrence 就当场取今天的发生时间。 */
+function openMealConfirm(pending){
+    pendingMeal=Object.assign({why:'按名称估算，非称重结果'},pending);
+    if(!pendingMeal.log_date)Object.assign(pendingMeal,occurrenceNow());
+    toolDialog('核对餐食与份量',mealConfirmHtml());
+    return pendingMeal;
+}
+
+/* 份量档只在"这一份有明确基准数字"时才折算；称重那两格填了就听称重的。 */
+function pickMealPortion(factor){
+    if(!pendingMeal)return;
+    const base=Number(pendingMeal.base_cal);
+    if(!Number.isFinite(base)){callNativeToast('这一份没有可折算的基准数字，直接在热量格里填就行');return;}
+    const cal=Math.max(0,Math.round(base*Number(factor)));
+    const box=document.getElementById('meal-confirm-cal');
+    if(box)box.value=String(cal);
+    pendingMeal.portion=Number(factor);
+    for(const [f] of MEAL_PORTIONS){
+        const chip=document.getElementById('meal-portion-'+String(f).replace('.','_'));
+        if(!chip)continue;
+        const on=Number(f)===Number(factor);
+        chip.classList.toggle('is-on',on);
+        chip.setAttribute('aria-pressed',on?'true':'false');
+    }
+    const note=document.getElementById('meal-portion-note');
+    if(note)note.textContent=`已按 ${factor}× 折算成 ${cal} kcal（基准 ${base} kcal）。数字就在上面那格，还能自己改。`;
+}
+
+logNaturalMeal=async function(){
+    const text=document.getElementById('input-meal-text').value.trim();if(!text){callNativeToast('请填写实际吃的餐食');return;}
+    if(!state.token){openAuthModal();return;}
+    const occurrence=occurrenceNow();
+    const slotKey=state.selectedMealSlot;
+    const slot=MEAL_SLOT_CN[slotKey]||'餐食';
+    try{
+        const result=await postApi('/api/food/preview',{food_name:text});
+        openMealConfirm({food_name:text,slot,slotKey,estimate:Number(result.cal),base_cal:Number(result.cal),
+            reparse:true,why:result.reason||'按名称估算，非称重结果',origin:'',...occurrence});
     }catch(e){
         // Preview is optional: preserve the user's original description as a draft.
-        if(!e.status){const rows=readDrafts();const id=Date.now()+'-'+Math.random().toString(36).slice(2);rows.push({id,path:'/api/food/log',unsubmitted:true,body:{food_name:text,slot,request_id:id}});setDrafts(rows);callNativeToast('无法联网估算，原始餐食已存本机草稿，联网后可同步');}
+        if(!e.status){const rows=readDrafts();const id=Date.now()+'-'+Math.random().toString(36).slice(2);rows.push({id,path:'/api/food/log',unsubmitted:true,body:{food_name:text,slot,request_id:id,...occurrence}});setDrafts(rows);callNativeToast('无法联网估算，原始餐食已存本机草稿，联网后可同步');}
         else callNativeToast(e.message);
     }
 };
+
+/* ---------- 最近常用餐食：只从本人历史长出来（B03） ---------- */
+async function loadRecentMeals(){
+    if(!state.token){state.recentMeals=[];renderRecentMeals();return state.recentMeals;}
+    try{
+        const d=await getJson('/api/food/recent?limit=12',{tag:'recent-meals'});
+        state.recentMeals=Array.isArray(d.items)?d.items:[];
+        state.recentMealsNote=d.scanned>=300?('只翻了你最近 '+d.scanned+' 笔餐食'):(d.note||'');
+    }catch(e){
+        // 读不到就明说读不到，绝不拿别人的热门菜或凭印象编一份"你常吃的"
+        state.recentMeals=[];state.recentMealsNote='常用餐食没读到：'+((e&&e.message)||'网络不通');
+    }
+    renderRecentMeals();
+    return state.recentMeals;
+}
+
+function renderRecentMeals(){
+    const box=document.getElementById('recent-meal-list');
+    if(!box)return;
+    const rows=state.recentMeals||[];
+    if(!rows.length){
+        box.innerHTML=`<div class="rm-empty">${escapeHtml(state.recentMealsNote||'还没有可复用的餐食')}${state.recentMealsNote&&state.recentMealsNote.indexOf('还没')<0?'':' —— 记满一笔之后这里会长出你自己的常用菜'}</div>`;
+        return;
+    }
+    box.innerHTML=`<div class="rm-lead">你自己常记的（不是全站热门）· ${escapeHtml(state.recentMealsNote||'按你记的次数排')}</div>`
+        +rows.map((m,i)=>`<button type="button" class="rm-chip" id="recent-meal-${i}" data-name="${escapeHtml(m.food_name)}" aria-label="把 ${escapeHtml(m.food_name)} 带进确认弹窗，那份估算 ${escapeHtml(String(m.last_cal==null?'无读数':m.last_cal))} 千卡" onclick="useRecentMeal(${i})"><span class="rm-name">${escapeHtml(m.food_name)}</span><span class="rm-meta">记过 ${Number(m.times)} 次 · 上次 ${escapeHtml(String(m.last_log_date||'—'))} · ${escapeHtml(String(m.last_cal==null?'无读数':m.last_cal))} kcal</span></button>`).join('');
+}
+
+/** 点一下常用菜：带出菜名 + 上次那份估算，仍然只是草稿；不直接入账。 */
+function useRecentMeal(index){
+    const m=(state.recentMeals||[])[index];
+    if(!m){callNativeToast('这一条常用餐食已经不在列表里了，重新打开「更多功能」刷一下');return;}
+    if(!state.token){openAuthModal();return;}
+    const slot=m.last_slot&&MEAL_SLOT_CN[m.last_slot]?m.last_slot:(m.last_slot||'餐食');
+    const slotKey=MEAL_SLOT_KEY[slot]||state.selectedMealSlot;
+    if(typeof selectMealSlot==='function')selectMealSlot(slotKey);
+    const cal=Number(m.last_cal);
+    const known=Number.isFinite(cal);
+    document.getElementById('input-meal-text').value=m.food_name;
+    openMealConfirm({food_name:m.food_name,slot,slotKey,
+        estimate:known?cal:0,base_cal:known?cal:null,
+        reparse:known&&MEAL_REPARSE_SOURCES.indexOf(m.last_source)>=0,
+        why:known?('上次那笔的来源：'+tdSourceLabel(m.last_source)):'上次那笔没存下热量数字',
+        origin:`这是你记过 ${Number(m.times)} 次的菜，最近一次 ${String(m.last_log_date||'—')}。现在还是草稿，点「确认并保存」才入账。`,
+        ...occurrenceNow()});
+}
+
+/* ---------- 复制上一餐：只填草稿，不入账（B03） ---------- */
+async function copyLastMeal(scope){
+    if(!state.token){openAuthModal();return;}
+    let row=null;
+    if(scope==='today'){
+        const d=state.mealDiary||[];   // 服务端按 id 倒序给，第 0 条就是今天最近那一笔
+        row=d.length?d[0]:null;
+        if(!row){callNativeToast('今天还没有一笔餐食可以复制');return;}
+    }else{
+        try{const r=await getJson('/api/records?kind=food&limit=1&offset=0',{tag:'copy-last-meal'});row=(r.rows&&r.rows[0])||null;}
+        catch(e){callNativeToast('最近一餐没读到：'+((e&&e.message)||'网络不通'));return;}
+        if(!row){callNativeToast('你还没有过餐食记录，没有可复制的上一餐');return;}
+    }
+    const slot=row.slot&&MEAL_SLOT_CN[row.slot]?row.slot:(row.slot||'餐食');
+    const slotKey=MEAL_SLOT_KEY[slot]||state.selectedMealSlot;
+    if(typeof selectMealSlot==='function')selectMealSlot(slotKey);
+    const cal=Number(row.cal);
+    const known=Number.isFinite(cal);
+    document.getElementById('input-meal-text').value=row.food_name||'';
+    openMealConfirm({food_name:(row.food_name||'').trim()||'未命名餐食',slot,slotKey,
+        estimate:known?cal:0,base_cal:known?cal:null,
+        reparse:known&&MEAL_REPARSE_SOURCES.indexOf(row.source)>=0,
+        why:known?('抄的是 '+(row.log_date||'—')+' 那笔，来源：'+tdSourceLabel(row.source)):'那笔没存下热量数字',
+        origin:`草稿：抄自${scope==='today'?'今天最近那一餐':'最近一餐'}（${String(row.log_date||'—')}）。改完点「确认并保存」才入账，现在云端什么都没动。`,
+        ...occurrenceNow()});
+}
+/* 省步骤入口与权限中心改用事件绑定（C11：内联 onclick 要一路往下减，
+   正式 CSP 才有落地的可能）。函数本身一个都没动，只是接线方式换了。 */
+function bindMealQuickAndPermissionActions(){
+    [['copy-last-today',()=>copyLastMeal('today')],
+     ['copy-last-ever',()=>copyLastMeal('latest')],
+     ['recent-meal-reload',()=>loadRecentMeals()],
+     ['tools-permission-row',()=>openPermissionCenter()]]
+    .forEach(([id,fn])=>{const el=document.getElementById(id);if(el)el.addEventListener('click',fn);});
+}
+
 /* 在线模型估热量。没配置时按钮上就写着没配置，不点出一个"看起来像答案"的数。 */
 async function estimateMealByAi(){
     const out=document.getElementById('meal-ai-result');
@@ -49,20 +185,26 @@ async function estimateMealByAi(){
     }
     const cal=document.getElementById('meal-confirm-cal');
     if(cal)cal.value=String(r.cal);
+    // 模型给的数是新的基准：份量档要按它折算，不能再按原来那份估算折
+    if(pendingMeal){pendingMeal.base_cal=Number(r.cal);pendingMeal.reparse=false;}
     const src=(r.status&&r.status.source)||'模型';
     if(out){out.textContent='按 '+r.grams+' g 估到 '+r.cal+' kcal（'+(r.basis||'依据未给')+'，来源：'
         +src+'）——已填进上面那格，不对就直接改。';out.dataset.err='0';}
 }
 async function confirmMealRecord(){
     if(!pendingMeal)return;
-    const body={food_name:pendingMeal.food_name,slot:pendingMeal.slot};
+    const body={food_name:pendingMeal.food_name,slot:pendingMeal.slot,log_date:pendingMeal.log_date,occurred_at:pendingMeal.occurred_at,timezone_offset_minutes:pendingMeal.timezone_offset_minutes};
     const grams=document.getElementById('meal-grams').value;const per100=document.getElementById('meal-per100').value;
     const edited=Number(document.getElementById('meal-confirm-cal').value);
     if(grams!==''||per100!==''){
         if(grams===''||per100===''||!Number.isFinite(Number(grams))||!Number.isFinite(Number(per100))||Number(grams)<=0||Number(per100)<0){callNativeToast('重量和每100g热量需同时填写有效数字');return;}
         body.cal=Math.round(Number(grams)*Number(per100)/100);
     }else if(edited!==pendingMeal.estimate)body.cal=edited;
-    try{const result=await postApi('/api/food/log',body);document.getElementById('account-tools-dialog').close();document.getElementById('input-meal-text').value='';pendingMeal=null;callNativeToast(result.msg);await syncRemoteDashboard();await syncRemoteCharts();}
+    // 数字没动：常用菜/复制来的那份如果本来就出自成分表，就让服务端重新按名字解析，
+    // 这样宏量和"来源"仍是同一条口径；手填过的数字（或模型给的）必须原样发回去，
+    // 不能装作"没填"让服务端换个数出来。
+    else if(!pendingMeal.reparse)body.cal=Number.isFinite(edited)?edited:pendingMeal.estimate;
+    try{const result=await postApi('/api/food/log',body);document.getElementById('account-tools-dialog').close();document.getElementById('input-meal-text').value='';pendingMeal=null;callNativeToast(result.msg);await Promise.all([syncRemoteDashboard(),syncRemoteCharts(),loadRecentMeals()]);}
     catch(e){document.getElementById('meal-confirm-result').textContent=e.message;}
 }
 const readDrafts = () => {try{const rows=JSON.parse(localStorage.getItem(draftKey())||'[]');return Array.isArray(rows)?rows.filter(x=>x&&typeof x.id==='string'&&['/api/food/log','/api/workout/complete'].includes(x.path)&&x.body&&typeof x.body==='object'):[];}catch(e){return [];}};
@@ -72,12 +214,18 @@ const tdRow=(title,o)=>{const c=o||{};return `<div class="td-row"><div class="td
 const tdSwitch=(id,on,label)=>`<input class="td-switch" id="${id}" type="checkbox" ${on?'checked':''} aria-label="${escapeHtml(label)}">`;
 const tdToggleRow=(id,on,title,hint)=>tdRow(title,{hint,control:tdSwitch(id,on,title)});
 const tdValueRow=(title,value,hint)=>tdRow(title,{hint,control:`<span class="td-row-value">${escapeHtml(String(value))}</span>`});
-const TD_SOURCE_CN={direct:'本人填写',manual:'本人填写',legacy_estimate:'按名称粗估',nutrition_heuristic:'按关键词粗估',nutrition_kb_partial:'部分食材已匹配成分表'};
+const TD_SOURCE_CN={direct:'本人填写',manual:'本人填写',legacy_estimate:'按名称粗估',nutrition_kb:'成分表匹配',nutrition_heuristic:'按关键词粗估',nutrition_kb_partial:'部分食材已匹配成分表'};
 const tdSourceLabel=source=>TD_SOURCE_CN[source]||'估算来源未知';
 function openDraftManager(){
     const rows=readDrafts();
-    const body=rows.length?rows.map((d,i)=>`<div class="td-item"><div class="td-item-main"><div class="td-item-title">${escapeHtml(d.body.food_name||d.body.plan_name||'训练记录')}</div><div class="td-item-meta">${d.unsubmitted?'尚未提交，可编辑餐食原文':'保存结果尚不确定；请先同步核对，再到历史记录修正，避免重复记账'}</div>${d.unsubmitted?`<label class="td-field"><span class="td-field-label">餐食原文</span><textarea id="draft-edit-${i}" maxlength="500">${escapeHtml(d.body.food_name||'')}</textarea><button type="button" class="td-mini" onclick="editUnsubmittedDraft(${i})">保存本机修改</button>`:''}</div><div class="td-item-acts"><button type="button" class="td-mini" onclick="discardLocalDraft(${i})">移除本机草稿</button></div></div>`).join('')+'<div class="td-actions"><button type="button" class="td-btn" onclick="syncOfflineDrafts()">同步并核对</button></div>':'<div class="td-empty">没有待同步草稿，本机记录都已对上云端</div>';
+    const body=rows.length?rows.map((d,i)=>`<div class="td-item"><div class="td-item-main"><div class="td-item-title">${escapeHtml(d.body.food_name||d.body.plan_name||'训练记录')}</div><div class="td-item-meta">${d.unsubmitted?'尚未提交，可编辑餐食原文':'保存结果尚不确定；请先同步核对，再到历史记录修正，避免重复记账'} · ${escapeHtml(d.body.log_date||'日期待确认')}</div>${!d.body.log_date?`<label class="td-field"><span>记录发生日期</span><input type="date" id="draft-date-${i}" max="${localDay()}"><button type="button" onclick="confirmDraftDate(${i})">确认日期</button></label>`:''}${d.unsubmitted?`<label class="td-field"><span class="td-field-label">餐食原文</span><textarea id="draft-edit-${i}" maxlength="500">${escapeHtml(d.body.food_name||'')}</textarea><button type="button" class="td-mini" onclick="editUnsubmittedDraft(${i})">保存本机修改</button>`:''}</div><div class="td-item-acts"><button type="button" class="td-mini" onclick="discardLocalDraft(${i})">移除本机草稿</button></div></div>`).join('')+'<div class="td-actions"><button type="button" class="td-btn" onclick="syncOfflineDrafts()">同步并核对</button></div>':'<div class="td-empty">没有待同步草稿，本机记录都已对上云端</div>';
     toolDialog('本机待同步草稿',`<p class="td-lead">断网时新记的餐食与训练先留在本机，联网后同步即可入账；草稿不会重复记账。</p>${body}`);
+}
+function confirmDraftDate(index){
+    const rows=readDrafts(),draft=rows[index];if(!draft)return;
+    const value=document.getElementById('draft-date-'+index).value;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||value>localDay()){callNativeToast('请选择有效的发生日期');return;}
+    draft.body.log_date=value;setDrafts(rows);openDraftManager();
 }
 function editUnsubmittedDraft(index){
     const rows=readDrafts();const draft=rows[index];if(!draft?.unsubmitted)return;
@@ -141,7 +289,8 @@ async function openRecordManager(kind='food',offset=0){
         const metaOf=x=>kind==='food'?`<span class="td-chip">${x.cal} kcal</span> ${escapeHtml(tdSourceLabel(x.source))}`
             :kind==='workout'?`<span class="td-chip">${x.duration_minutes} 分钟</span> ${x.cal_burned} kcal（估算）`:'';
         const tabs=Object.entries(names).map(([k,n])=>`<button type="button" role="tab" aria-selected="${k===kind}" onclick="openRecordManager('${k}')">${n}</button>`).join('')
-            +'<button type="button" role="tab" aria-selected="false" onclick="openBackfill()">补录</button>';
+            +'<button type="button" role="tab" aria-selected="false" onclick="openBackfill()">补录</button>'
+            +'<button type="button" role="tab" aria-selected="false" onclick="openChangeLog()">修正流水</button>';
         toolDialog('历史记录',`<nav class="td-seg" role="tablist" aria-label="记录类型">${tabs}</nav>
           ${d.rows.length?`<div class="td-items">${d.rows.map(x=>`<div class="td-item"><div class="td-item-main"><div class="td-item-title">${escapeHtml(x.log_date)} · ${escapeHtml(titleOf(x))}</div><div class="td-item-meta">${metaOf(x)}</div></div><div class="td-item-acts"><button type="button" class="td-mini" onclick="editHistoryRecord(${Number(x.id)})">修正</button><button type="button" class="td-mini" onclick="deleteHistoryRecord(${Number(x.id)})">删除</button></div></div>`).join('')}</div>`:`<div class="td-empty">还没有${names[kind]}记录，可以去「补录」加一条</div>`}
           <div class="td-pager"><button type="button" class="td-mini" ${offset===0?'disabled':''} onclick="openRecordManager('${kind}',${Math.max(0,offset-20)})">上一页</button><span class="td-pager-pos">${d.rows.length?`第 ${offset+1}–${offset+d.rows.length} 条`:'第 1 页'}</span><button type="button" class="td-mini" ${d.rows.length<20?'disabled':''} onclick="openRecordManager('${kind}',${offset+20})">下一页</button></div>`);
@@ -155,13 +304,32 @@ async function editHistoryRecord(id){
     if(!text.trim()||!Number.isFinite(Number(text))){callNativeToast('请填写数字');return;}
     const body={[field]:Number(text)};
     if(recordKind==='food'){const name=window.prompt('餐食名称',row.food_name);if(name===null)return;if(!name.trim()){callNativeToast('餐食名称不能为空');return;}body.food_name=name.trim();}
-    try{await postApi(`/api/records/${recordKind}/${id}/update`,body);await syncRemoteDashboard();await syncRemoteCharts();await openRecordManager(recordKind,recordOffset);}
+    try{const r=await postApi(`/api/records/${recordKind}/${id}/update`,body);showRecordImpact(r,'已修正');
+        await syncRemoteDashboard();await syncRemoteCharts();await openRecordManager(recordKind,recordOffset);}
     catch(e){callNativeToast(e.message);}
 }
 async function deleteHistoryRecord(id){
     if(!window.confirm('删除此记录并重新计算统计？'))return;
-    try{await postApi(`/api/records/${recordKind}/${id}/delete`,{});await syncRemoteDashboard();await syncRemoteCharts();await openRecordManager(recordKind,recordOffset);}
+    try{const r=await postApi(`/api/records/${recordKind}/${id}/delete`,{});showRecordImpact(r,'已删除');
+        await syncRemoteDashboard();await syncRemoteCharts();await openRecordManager(recordKind,recordOffset);}
     catch(e){callNativeToast(e.message);}
+}
+
+/* 修正与删除的流水：改掉的值要能读回来，不然"我记得昨天改过"没有凭据。 */
+const CHANGE_OP_CN={update:'修正',delete:'删除'};
+async function openChangeLog(offset=0){
+    if(!state.token){openAuthModal();return;}
+    try{
+        const d=await getJson(`/api/records/changes?offset=${offset}&limit=20`);
+        const names={food:'餐食',weight:'体重',workout:'训练'};
+        const fieldOf=x=>x.kind==='food'?`${x.previous&&x.previous.cal} kcal`
+            :x.kind==='weight'?`${x.previous&&x.previous.weight_jin} 斤`
+            :`${x.previous&&x.previous.duration_minutes} 分钟`;
+        const rows=d.rows.length?`<div class="td-items">${d.rows.map(x=>`<div class="td-item"><div class="td-item-main"><div class="td-item-title">${escapeHtml(String(x.created_at).slice(0,16).replace('T',' '))} · ${CHANGE_OP_CN[x.operation]||x.operation}${escapeHtml(names[x.kind]||x.kind)} #${x.record_id}</div><div class="td-item-meta">改之前那一份记的是 ${escapeHtml(fieldOf(x))}${x.previous&&x.previous.log_date?' · 归属日 '+escapeHtml(x.previous.log_date):''}${x.previous&&x.previous.food_name?' · '+escapeHtml(x.previous.food_name):''}</div></div></div>`).join('')}</div>`
+            :'<div class="td-empty">还没有修正或删除过任何一条记录，所以现在没有流水。</div>';
+        toolDialog('修正与删除流水',`<p class="td-lead">这里是你自己改过、删过的那些笔：每条留的是改动前那一份的值，用来核对"我到底改了什么"。界面只读，不能在这里撤销。</p>${rows}
+          <div class="td-pager"><button type="button" class="td-mini" ${offset===0?'disabled':''} onclick="openChangeLog(${Math.max(0,offset-20)})">上一页</button><span class="td-pager-pos">${d.rows.length?`第 ${offset+1}–${offset+d.rows.length} 条`:'第 1 页'}</span><button type="button" class="td-mini" ${d.rows.length<20?'disabled':''} onclick="openChangeLog(${offset+20})">下一页</button></div>`);
+    }catch(e){callNativeToast(e.message);}
 }
 function openBackfill(){
     toolDialog('补录记录',`<p class="td-lead">补的是历史某一天的真实记录，会重算那天的统计；填错可以到「历史记录」里修正。</p>
@@ -172,7 +340,7 @@ function openBackfill(){
         <label class="td-field-row"><span class="td-field-label">餐食热量（kcal）</span><input id="backfill-cal" type="number" min="0" max="10000" inputmode="numeric"><span class="td-field-hint">留空则按名称估算</span></label>
         <label class="td-field-row"><span class="td-field-label">体重（斤）</span><input id="backfill-weight" type="number" min="40" max="600" step="0.1" inputmode="decimal"></label>
         <label class="td-field-row"><span class="td-field-label">训练分钟</span><input id="backfill-duration" type="number" min="1" max="1440" value="20" inputmode="numeric"></label>
-        <label class="td-field-row"><span class="td-field-label">训练估算消耗（kcal）</span><input id="backfill-burned" type="number" min="0" max="10000" value="0" inputmode="numeric"><span class="td-field-hint">不知道就留 0，按 220 kcal 兜底</span></label>
+        <label class="td-field-row"><span class="td-field-label">训练估算消耗（kcal）</span><input id="backfill-burned" type="number" min="0" max="10000" value="0" inputmode="numeric"><span class="td-field-hint">填 0 表示本次不计入消耗，不会自动补成 220 kcal</span></label>
       </div>
       <p id="backfill-result" class="td-status" role="status"></p>
       <div class="td-actions"><button type="button" class="td-btn" onclick="saveBackfill()">保存补录</button></div>`);
@@ -197,6 +365,9 @@ async function syncOfflineDrafts(){
     const owner=state.user.username;const generation=sessionGeneration;
     const rows=readDrafts();for(const draft of rows){
         if(generation!==sessionGeneration||state.user?.username!==owner)return;
+        if(!draft.body.log_date){
+            callNativeToast('旧草稿缺少发生日期，请先在草稿管理中确认日期');openDraftManager();return;
+        }
         try{await rawPostApi(draft.path,draft.body);if(generation!==sessionGeneration)return;setDrafts(readDrafts().filter(x=>x.id!==draft.id));}
         catch(e){callNativeToast('草稿未同步：'+e.message);break;}
     }
@@ -220,6 +391,7 @@ function handleNativeBack(){
 const accountPostApi=postApi;
 postApi=function(path,body,opts){
     const record=path==='/api/food/log'||path==='/api/workout/complete';
+    if(record&&!body.log_date)Object.assign(body,occurrenceNow());
     const owner=state.user?.username;const generation=sessionGeneration;
     return accountPostApi(path,body,opts).catch(error=>{
         if(record && owner && generation===sessionGeneration && state.user?.username===owner && !error.status && (error.name==='TypeError'||error.name==='AbortError'||/fetch|network|网络/i.test(error.message))){
@@ -263,6 +435,7 @@ function renderPublicView(data){
     state.publicNickname=data.user.nickname;state.cheerTotal=data.cheer_total||0;
 }
 window.addEventListener('DOMContentLoaded',()=>{
+    bindMealQuickAndPermissionActions();
     fetch('guidance.json').then(r=>r.json()).then(rows=>{localGuidanceRows=rows;}).catch(()=>{});
     if(isPublicScreen())document.body.classList.add('public-readonly');
     else {
@@ -293,8 +466,264 @@ async function deleteLatestPhoto(){
 }
 function resetAccountTools(){
     pendingMeal=null;recordRows=[];recordOffset=0;lastBackfill={signature:'',id:''};
+    // 常用餐食是本人的账：换号/退出必须一起清掉，不能留在上一个人的列表里
+    state.recentMeals=[];state.recentMealsNote='';
+    if(typeof renderRecentMeals==='function')renderRecentMeals();
     const dialog=document.getElementById('account-tools-dialog');if(dialog)dialog.remove();
     accountCache=null;
+}
+
+// ================ 权限中心（B09）================
+// 铁律：读不到就是"未知"，绝不画成 0 或"已关闭"。
+// 0 次的含义是"确实一次都没打开"，"已关闭"的含义是"确实读到了 off"——
+// 把未知冒充成这两种，用户就分不清"没发生"和"没权限"。
+const PERM_TONE = { granted: 'on', denied: 'warn', blocked: 'off', prompt: 'off',
+    unknown: 'off', absent: 'off', unsupported: 'off' };
+const PERM_CN = {
+    granted: '已授权', denied: '这次拒绝了（还能再问一次）',
+    blocked: '永久拒绝：系统不再弹窗，只能去设置里开',
+    prompt: '还没问过：用到时系统会弹窗',
+    unknown: '未知（读不到实际状态）',
+    absent: '这个运行环境没有这条通道',
+    unsupported: '这个浏览器不支持该接口'
+};
+
+/** 统一成 {state, detail, why} —— 三条路必须分得开：读到了、读不到、这个环境根本没这条通道。 */
+function permCall(read, name) {
+    const b = window.AndroidBridge;
+    if (!b || typeof b[name] !== 'function') {
+        return { state: 'absent', detail: '', why: '这里没有 ' + name + ' 这个原生通道（网页版 or 旧安装包），所以状态是"读不到"，不是"已关闭"。' };
+    }
+    try {
+        const v = read(b);
+        if (v === true) return { state: 'granted', detail: '', why: '' };
+        if (v === false) return { state: 'denied', detail: '', why: '原生接口回的是 false。' };
+        return { state: 'unknown', detail: String(v == null ? '' : v), why: '原生接口回了个认不出来的值，不猜。' };
+    } catch (e) {
+        return { state: 'unknown', detail: '', why: '原生接口抛了：' + ((e && e.message) || '未知原因') };
+    }
+}
+
+function permReadMicrophone() {
+    const b = window.AndroidBridge;
+    if (!b || typeof b.microphonePermissionState !== 'function') {
+        return { state: 'absent', detail: '', why: '网页版读不到安卓的麦克风授权状态；在浏览器里发语音用的是浏览器自己的权限，两者不是一个东西。' };
+    }
+    let s = '';
+    try { s = String(b.microphonePermissionState()); } catch (e) { return { state: 'unknown', detail: '', why: '读麦克风状态时抛异常了，不猜成"已关闭"。' }; }
+    if (PERM_CN[s]) return { state: s, detail: '', why: s === 'granted' ? '' : '要发语音或通话，点右边的入口去开。' };
+    return { state: 'unknown', detail: s, why: '原生回了个没见过的状态名，不替你判断。' };
+}
+
+function permReadLocation() {
+    if (!navigator.geolocation) {
+        return Promise.resolve({ state: 'unsupported', detail: '', why: '这个浏览器没有定位接口，城市只能手填。' });
+    }
+    const last = permLastTry('location');
+    if (!navigator.permissions || typeof navigator.permissions.query !== 'function') {
+        return Promise.resolve({ state: 'unknown', detail: '', why: '这里读不到 Permissions API 的真实状态'
+            + (last ? '；上次实测是「' + last.label + '」（' + last.at + '）' : '，也还没实测过') });
+    }
+    return navigator.permissions.query({ name: 'geolocation' })
+        .then(r => {
+            const map = { granted: 'granted', denied: 'blocked', prompt: 'prompt' };
+            const st = map[r.state];
+            if (!st) return { state: 'unknown', detail: r.state, why: 'Permissions API 回了个认不出来的状态名。' };
+            return { state: st, detail: r.state, why: st === 'granted' ? '' : '没授权时点定位只会走到"你拒绝了定位授权"，城市可以手填。' };
+        })
+        .catch(() => Promise.resolve({ state: 'unknown', detail: '', why: 'Permissions API 查询失败（部分 WebView 会禁这个查询）'
+            + (last ? '；上次实测是「' + last.label + '」（' + last.at + '）' : '') }));
+}
+
+function permReadNotifications() {
+    const sys = permCall(b => b.notificationsEnabled(), 'notificationsEnabled');
+    let web = { state: 'absent', detail: '', why: '网页通知接口（Notification）在这个环境里不存在，App 的 WebView 就是这种情况。' };
+    if (typeof Notification !== 'undefined' && Notification.permission) {
+        const map = { granted: 'granted', denied: 'blocked', default: 'prompt' };
+        web = { state: map[Notification.permission] || 'unknown', detail: Notification.permission, why: '' };
+    } else if (typeof Notification !== 'undefined') {
+        web = { state: 'unknown', detail: '', why: '有 Notification 接口但读不到 permission 字段。' };
+    }
+    return { sys, web };
+}
+
+function permReadUsage() {
+    const r = permCall(b => b.usageAccessEnabled(), 'usageAccessEnabled');
+    if (r.state === 'granted') {
+        // 授权之后才去读真实条数；没授权绝对不许画 0 次
+        let raw = null;
+        try { raw = window.AndroidBridge.takeoutUsageToday ? window.AndroidBridge.takeoutUsageToday(TAKEOUT_PKGS) : null; } catch (e) { raw = null; }
+        let n = null;
+        try { const p = JSON.parse(raw || 'null'); if (p && p.apps) n = p.apps.reduce((s, x) => s + Number(x.count || 0), 0); } catch (e) { n = null; }
+        return Object.assign(r, { detail: n === null ? '授权了，但今天的使用记录没读回来' : '今天打开外卖 App ' + n + ' 次' });
+    }
+    if (r.state === 'absent') return Object.assign(r, { detail: '今天点了外卖 App 几次这条读不到' });
+    return Object.assign(r, { detail: '没授权时这里只会写"读不到"，不会写 0 次 —— 0 次的含义是"确实一次都没打开"。' });
+}
+
+function permReadReminder() {
+    const b = window.AndroidBridge;
+    if (!b || typeof b.reminderStatus !== 'function') {
+        return { state: 'absent', detail: '每日提醒是安卓本地闹钟，网页版没有这条通道', why: '' };
+    }
+    try {
+        const s = JSON.parse(b.reminderStatus());
+        return { state: s.enabled ? 'granted' : 'denied',
+            detail: '排在 ' + String(s.hour).padStart(2, '0') + ':' + String(s.minute).padStart(2, '0')
+                + (s.enabled ? '（已开启）' : '（未开启）'), why: '' };
+    } catch (e) {
+        return { state: 'unknown', detail: '', why: '提醒状态读回来解析失败，不猜。' };
+    }
+}
+
+const PERM_TRY_KEY = () => 'QINGSU_PERM_TRY_' + (state.user ? state.user.username : 'guest');
+function permLastTry(kind) {
+    try {
+        const all = JSON.parse(localStorage.getItem(PERM_TRY_KEY()) || '{}');
+        return all && all[kind] ? all[kind] : null;
+    } catch (e) { return null; }
+}
+/** 记一次实测结果：Permissions API 读不到时，"上次点定位到底放没放行"是唯一凭据。 */
+function permRecordTry(kind, label) {
+    let all = {};
+    try { all = JSON.parse(localStorage.getItem(PERM_TRY_KEY()) || '{}') || {}; } catch (e) { all = {}; }
+    all[kind] = { label, at: new Date().toLocaleString('zh-CN', { hour12: false }) };
+    try { localStorage.setItem(PERM_TRY_KEY(), JSON.stringify(all)); } catch (e) {}
+}
+
+function permRow(item) {
+    const tone = PERM_TONE[item.state] || 'off';
+    const badge = `<span class="td-badge" data-tone="${tone}" id="perm-badge-${item.id}">${escapeHtml(PERM_CN[item.state] || '未知')}</span>`;
+    const lines = [item.detail, item.why,
+        item.measure ? ('读取依据：' + item.measure) : '读取依据：这条没读到任何接口返回值']
+        .filter(s => s && String(s).trim());
+    return `<div class="td-row"><div class="td-row-main">
+        <div class="td-row-title">${escapeHtml(item.title)} ${badge}</div>
+        ${lines.map(t => `<div class="td-row-hint">${escapeHtml(String(t))}</div>`).join('')}
+      </div>${item.action ? `<button type="button" class="td-mini" id="perm-act-${item.id}" onclick="${item.action}">${escapeHtml(item.actionLabel || '去开启')}</button>` : '<span class="td-row-hint">没有可点的开启入口</span>'}</div>`;
+}
+
+async function openPermissionCenter() {
+    const mic = permReadMicrophone();
+    const loc = await permReadLocation();
+    const notif = permReadNotifications();
+    const usage = permReadUsage();
+    const remind = permReadReminder();
+    const rows = [
+        Object.assign(mic, { id: 'mic', title: '麦克风（发语音、语音通话）',
+            measure: 'AndroidBridge.microphonePermissionState()',
+            action: 'permGo("mic")', actionLabel: mic.state === 'granted' ? '再确认一次' : '去申请' }),
+        Object.assign(loc, { id: 'loc', title: '定位（把城市认出来，给外卖排序）',
+            measure: 'navigator.permissions.query({name:"geolocation"})',
+            action: 'permGo("loc")', actionLabel: '用浏览器定位试一次' }),
+        Object.assign(notif.sys, { id: 'notifsys', title: '系统通知（App 内的每日提醒能不能弹出来）',
+            measure: 'AndroidBridge.notificationsEnabled()',
+            action: 'permGo("notifsys")', actionLabel: '去系统通知设置' }),
+        Object.assign(notif.web, { id: 'notifweb', title: '浏览器推送（网页版新消息提醒）',
+            measure: typeof Notification !== 'undefined' ? 'Notification.permission' : '这个环境没有 Notification 接口',
+            action: 'permGo("notifweb")', actionLabel: '去开浏览器提醒' }),
+        Object.assign(usage, { id: 'usage', title: '使用情况访问（今天外卖 App 开了几次）',
+            measure: 'AndroidBridge.usageAccessEnabled() + takeoutUsageToday()',
+            action: 'permGo("usage")', actionLabel: '去系统设置开启' }),
+        Object.assign(remind, { id: 'remind', title: '安卓本地每日提醒（本地闹钟）',
+            measure: 'AndroidBridge.reminderStatus()',
+            action: 'permGo("remind")', actionLabel: '去设置提醒时间' })
+    ];
+    toolDialog('权限中心', `<p class="td-lead">这里只报<b>真的读到的</b>状态。读不到就写"未知"并说明是哪一个接口没回话，不会拿 0 次、"已关闭"冒充读到的结果。</p>
+      <div class="td-group">${rows.map(permRow).join('')}</div>
+      <div class="td-group-label">离线通知能力，说清楚到哪一步</div>
+      <div class="td-group"><p class="td-note">现在只有两条提醒通道：① 网页版的浏览器推送（要 HTTPS＋域名＋浏览器订阅成功，国内网络常常订阅不上）；② 安卓本地的每日提醒（系统闹钟，App 没被杀时按点到）。<b>没有接厂商推送（小米/华为/OPPO/vivo 那条离线通道）</b>，所以杀掉后台、重启手机之后不会响；这条不是"通知权限没开"，是能力本身还没有。</p></div>
+      <div class="td-actions"><button type="button" class="td-btn-quiet" onclick="openPermissionCenter()">重新读一次</button></div>`);
+}
+
+// ================ 自助账号处置（B09）================
+// 只有"真的存在的通道"才做成按钮：
+//   导出 = GET /api/export.csv（六张表，本人鉴权，本来就有）
+//   注销 = POST /api/feedback(kind=data) + GET /api/feedback/mine 追踪状态
+// 服务端没有面向本人账号的注销接口，所以这里绝不写成"已注销"，
+// 也只说"提交了诉求、单号是多少、现在什么状态"。
+const DELETION_TEXT = '申请注销我的轻塑账号。请核对我的数据依赖后按运维流程执行：'
+    + '个人数据导出（A03）、社区与私信依赖、注销队列与媒体清理（A07）。'
+    + '这条只是诉求单，不代表已经删除。';
+
+async function qsExportMyData() {
+    const box = document.getElementById('export-status');
+    if (box) { box.removeAttribute('data-err'); box.textContent = '正在拉取 CSV（只含本人六张表的流水，不含私信正文与照片）…'; }
+    let ok = false;
+    try { ok = await exportMyData(); }
+    catch (e) { ok = false; }
+    if (box) {
+        if (ok) { box.removeAttribute('data-err'); box.textContent = '导出已发起：文件名「轻塑我的记录.csv」。这份里没有私信正文、社区帖子和身材照片 —— 那部分要走运维侧完整导出。'; }
+        else { box.setAttribute('data-err', '1'); box.textContent = '导出没成功：登录、网络或这条 CSV 接口的问题，按上面那条提示核对。'; }
+    }
+    return ok;
+}
+
+async function requestAccountDeletion() {
+    if (!state.token) { openAuthModal(); return; }
+    const box = document.getElementById('deletion-status');
+    if (!window.confirm('这会以意见反馈（类型 data）提交一条注销申请。\n账号不会因为点了这个就自动删除，要等运维侧执行。\n确定提交？')) return;
+    if (box) { box.removeAttribute('data-err'); box.textContent = '正在提交…'; }
+    try {
+        const r = await postApi('/api/feedback', { kind: 'data', text: DELETION_TEXT, page: 'account-center', contact: '' });
+        if (box) {
+            box.removeAttribute('data-err');
+            box.textContent = '申请已提交，单号 #' + r.id + '。状态可以点下面「查看申请处理状态」跟；'
+                + '这一步不等于注销完成，运维那边做完才是。';
+        }
+        callNativeToast('注销申请已提交（单号 #' + r.id + '），还没删除任何数据');
+    } catch (e) {
+        if (box) { box.setAttribute('data-err', '1'); box.textContent = '申请没提交出去：' + ((e && e.message) || '未知原因'); }
+        callNativeToast('注销申请没提交出去：' + ((e && e.message) || '网络不通'));
+    }
+}
+
+async function openDeletionRequests() {
+    if (!state.token) { openAuthModal(); return; }
+    try {
+        const d = await getJson('/api/feedback/mine');
+        const rows = (d.items || []).filter(x => x.kind === 'data');
+        const body = rows.length ? `<div class="td-items">${rows.map(x => `<div class="td-item"><div class="td-item-main"><div class="td-item-title">单号 #${Number(x.id)} · ${escapeHtml(d.status_names[x.status] || x.status || '状态未知')}</div><div class="td-item-meta">提交于 ${escapeHtml(String(x.created_at || '').slice(0, 16))}${x.replied_at ? ' · 回复于 ' + escapeHtml(String(x.replied_at).slice(0, 16)) : ' · 还没回复'}${x.reply ? '<br>回复：' + escapeHtml(x.reply) : ''}</div></div></div>`).join('')}</div>`
+            : '<div class="td-empty">还没有注销申请。没提交过就不会有单号，这里不编一条"处理中"给你看。</div>';
+        toolDialog('注销申请与处理状态', `<p class="td-lead">这是你自己提过的数据类诉求单（含注销）。状态由后台运维改：待处理 / 处理中 / 已处理 / 暂不做。</p>${body}
+          <p class="td-note">「已处理」指这条诉求被处理完；账号真正注销要运维侧走双因子的注销队列（A07），这个界面里没有那一步的凭据。</p>`);
+    } catch (e) { callNativeToast('申请状态没读到：' + ((e && e.message) || '网络不通')); }
+}
+
+function permGo(id) {
+    if (id === 'mic') {
+        if (window.AndroidBridge && typeof window.AndroidBridge.requestMicrophonePermission === 'function') {
+            permRecordTry('mic', '已发起系统弹窗');
+            window.AndroidBridge.requestMicrophonePermission();
+            callNativeToast('系统弹窗已发起，回来点「重新读一次」');
+        } else callNativeToast('网页版申请不了安卓权限；浏览器会在真正录音那一刻自己问');
+        return;
+    }
+    if (id === 'loc') {
+        permRecordTry('loc', '点过一次定位入口');
+        if (typeof useMyLocation === 'function') useMyLocation();
+        else callNativeToast('这个页面没有定位入口');
+        return;
+    }
+    if (id === 'notifsys') {
+        if (typeof openSystemNotifSettings === 'function') openSystemNotifSettings();
+        return;
+    }
+    if (id === 'notifweb') {
+        if (typeof Notification === 'undefined') { callNativeToast('这个环境没有浏览器通知接口，开不了浏览器推送'); return; }
+        permRecordTry('notifweb', '点过浏览器提醒');
+        if (typeof openWebPush === 'function') { openWebPush(); return; }
+        callNativeToast('浏览器提醒入口在「我的」页，这里没接到那个函数');
+        return;
+    }
+    if (id === 'usage') {
+        if (typeof requestUsageAccess === 'function') requestUsageAccess();
+        return;
+    }
+    if (id === 'remind') {
+        if (typeof openReminderSettings === 'function') openReminderSettings();
+        return;
+    }
 }
 
 // ================ 个人中心：头像 / 改密 / 邮箱绑定与找回 / 城市与忌口 ================
@@ -465,6 +894,20 @@ async function openAccountCenter(){
         <p id="pw-status" class="td-status" role="status"></p>
         <p class="td-note">改成功后其他设备会掉线需要重新登录，这台机器不受影响。</p>
       </div>
+      <div class="td-group-label">数据与账号处置（自助）</div>
+      <div class="td-group">
+        <div class="td-row"><div class="td-row-main">
+          <div class="td-row-title">导出我的数据</div>
+          <div class="td-row-hint">走已有的 /api/export.csv：饮食、体重、训练、饮水、门禁事件、周期六张表，UTF-8 BOM 的 CSV。私信正文、社区帖子与身材照片不在这份里 —— 后台那份完整导出（A03）是运维侧双因子接口，没有对普通账号开放。</div></div>
+          <button type="button" class="td-mini" id="qs-export-btn" onclick="qsExportMyData()">导出 CSV</button></div>
+        <p id="export-status" class="td-status" role="status">还没导出过。</p>
+        <div class="td-row"><div class="td-row-main">
+          <div class="td-row-title">申请注销账号</div>
+          <div class="td-row-hint">点「提交注销申请」只是把你这条诉求写进意见反馈（kind=data）并留个单号，方便追踪处理状态；账号不会因此自动删除。服务端目前<b>没有</b>给用户自助用的删除/注销接口，真正执行注销仍然只有运维侧那条双因子通道（A07：先算依赖、媒体清理、再删）。缺的那一层是「本人身份再次验证 + 自助注销任务队列」，补上之前这里不会假装能一键注销。</div></div>
+          <button type="button" class="td-mini" id="qs-delete-btn" onclick="requestAccountDeletion()">提交注销申请</button></div>
+        <p id="deletion-status" class="td-status" role="status">还没提交过申请。</p>
+        <div class="td-actions"><button type="button" class="td-btn-quiet" onclick="openDeletionRequests()">查看申请处理状态</button></div>
+      </div>
       <div class="td-group-label">账号</div>
       <div class="td-group">
         ${tdValueRow('当前登录',escapeHtml(((a.user&&(a.user.nickname||a.user.username))||state.user&&(state.user.nickname||state.user.username)||'—')))}
@@ -473,6 +916,13 @@ async function openAccountCenter(){
           <button type="button" class="td-btn-danger" onclick="logoutUser()">退出登录</button>
         </div>
         <p class="td-note">切换账号会退出当前账号并直接弹出登录框，不用等整页刷新。</p>
+      </div>
+      <div class="td-group-label">权限中心</div>
+      <div class="td-group">
+        <div class="td-row"><div class="td-row-main">
+          <div class="td-row-title">麦克风 / 定位 / 通知 / 使用情况</div>
+          <div class="td-row-hint">看每一条到底读到的是什么状态，以及从哪儿开。</div></div>
+          <button type="button" class="td-mini" onclick="openPermissionCenter()">打开</button></div>
       </div>
       <div class="td-group-label">去过的城市</div>
       <div class="td-group">${(a.cities_seen||[]).length
@@ -608,12 +1058,9 @@ async function changePassword(){
 // 这条链路必须在强更门豁免清单里：抬门之后如果把它也挡住，
 // 忘密码的人就彻底回不来了——那正是"更新门"最坏的误伤。
 // 也不能复用 postApi：那条要求已登录，而走到这里的人恰恰是没登录的。
-async function publicPost(path,body){
-    const res=await fetch(`${API_BASE}${path}`,{
-        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    let data=null;try{data=await res.json();}catch(e){data=null;}
-    if(!res.ok)throw new Error((data&&data.detail)||`HTTP ${res.status}`);
-    return data||{};
+async function publicPost(path, body){
+    // 免登录链路：不带鉴权头，但超时、错误形状与其余请求同一口径（底座 auth:false 分支）
+    return requestBase(path, { method: "POST", body, auth: false });
 }
 
 async function openForgotPassword(){
@@ -683,8 +1130,8 @@ let cmGeneration = 0;
 const cm = {
     feed: "latest", items: [], cursor: 0, more: false, loading: false, loaded: false,
     msgTab: "chats", convs: [], notices: [], loadingMsg: false, msgAgain: false,
-    thread: null, bubbles: [], pending: {},
-    ws: null, wsState: "idle", wsRetry: 0, wsTimer: null,
+    thread: null, bubbles: [], pending: {}, failed: {},
+    ws: null, wsState: "idle", wsRetry: 0, wsTimer: null, wsBlind: false,
     stats: null, feedbackKind: "bug", images: [],
     myTheme: "green", unreadTotal: 0, postId: 0,
     // 评论草稿态：配图、@ 到的人、当前展开的面板，换帖子或发出去都要清干净
@@ -703,8 +1150,8 @@ function resetCommunity() {
     cm.feed = "latest"; cm.items = []; cm.cursor = 0; cm.more = false;
     cm.loading = false; cm.loaded = false; cm.loadingMsg = false;
     cm.convs = []; cm.notices = []; cm.thread = null; cm.bubbles = [];
-    cm.pending = {}; cm.stats = null; cm.images = []; cm.myTheme = "green";
-    cm.unreadTotal = 0; cm.postId = 0;
+    cm.pending = {}; cm.failed = {}; cm.stats = null; cm.images = []; cm.myTheme = "green";
+    cm.unreadTotal = 0; cm.postId = 0; cm.wsBlind = false;
     cm.cmtImages = []; cm.cmtMentions = []; cm.cmtPanel = ""; cm.atRows = []; cm.atQuery = "";
     qsCloseAllPages();
     paintNavBadge();
@@ -1110,34 +1557,14 @@ async function toggleFavorite(id, btn) {
     }
 }
 
-/* PATCH 同样单独走一条：帖子编辑用它 */
+/* PATCH 同样单独走一条：帖子编辑用它。改走 app.js 的请求底座（30 秒超时、代次检查、统一错误形状） */
 async function patchJson(path, body) {
-    const r = await fetch(API_BASE + path, {
-        method: "PATCH",
-        headers: { "Authorization": "Bearer " + state.token, "Content-Type": "application/json" },
-        body: JSON.stringify(body || {})
-    });
-    if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        const err = new Error(j && j.detail ? j.detail : ("HTTP " + r.status));
-        err.status = r.status;
-        throw err;
-    }
-    return r.json().catch(() => ({}));
+    return requestBase(path, { method: "PATCH", body: body || {} });
 }
 
 /* postApi 只会 POST，删除要单独走一条，失败原因照样要说出来 */
 async function deleteJson(path) {
-    const r = await fetch(API_BASE + path, {
-        method: "DELETE", headers: { "Authorization": "Bearer " + state.token }
-    });
-    if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        const err = new Error(j && j.detail ? j.detail : ("HTTP " + r.status));
-        err.status = r.status;
-        throw err;
-    }
-    return r.json().catch(() => ({}));
+    return requestBase(path, { method: "DELETE" });
 }
 
 /** 把正文里 @昵称 换成可点的按钮。只替换服务端确认过的那几个人，前端不猜谁是用户。
@@ -2042,7 +2469,8 @@ const dmHold = {pending:false,timer:0,held:false,released:false,cancelled:false,
 const dmCall = {
     state: "idle", id: "", peer: null, role: "", pc: null, stream: null, audio: null,
     offer: null, pendingIce: [], localIce: [], timer: 0, ring: 0, timeout: 0,
-    startedAt: 0, muted: false, speaker: false, reason: "", endTimer: 0, minimized: false
+    startedAt: 0, muted: false, speaker: false, reason: "", endTimer: 0, minimized: false,
+    failKind: ""
 };
 const dmOfficial = { items: [], byId: new Map(), loaded: false, task: null };
 const DM_AUDIO_MAX = 5 * 1024 * 1024;
@@ -2063,7 +2491,14 @@ function dmIsVisible() {
 function dmRequestId() { return "dm-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10); }
 function dmPending(rid, s, data) {
     cm.pending[rid] = { rid, scope: s, msg: Object.assign({ from_id: state.user && state.user.id,
-        to_id: s.threadId, body: "", created_at: "" }, data) };
+        to_id: s.threadId, body: "", created_at: "", request_id: rid }, data) };
+}
+/* 失败必须留在界面上。上一版只弹一次 toast 就把那条抹掉，机主原话是
+   「发没发出去我根本不知道」；现在它常驻标「没发出去」并带单条重试。 */
+function dmFail(rid, why) {
+    const p = cm.pending[rid];
+    delete cm.pending[rid];
+    if (p) cm.failed[rid] = Object.assign({}, p, { why: why || "网络不通" });
 }
 function dmClosePanels() {
     dmUi.panel = "";
@@ -2964,19 +3399,20 @@ function dmRenderBubbles() {
     const stick = dmUi.stickBottom !== false;
     const nearBottom = host.scrollHeight - host.scrollTop - host.clientHeight < 100;
     const previousHeight = host.scrollHeight;
-    const rows = cm.bubbles.map(m => ['m' + m.id, m, false]);
-    Object.values(cm.pending).filter(p => qsSameId(p.msg.to_id, uid)).forEach(p => rows.push(['p' + p.rid, p.msg, true]));
+    const rows = cm.bubbles.map(m => ['m' + m.id, m, '']);
+    Object.values(cm.pending).filter(p => qsSameId(p.msg.to_id, uid)).forEach(p => rows.push(['p' + p.rid, p.msg, 'pending']));
+    Object.values(cm.failed).filter(p => qsSameId(p.msg.to_id, uid)).forEach(p => rows.push(['f' + p.rid, p.msg, 'failed']));
     const nodes = new Map(Array.from(host.children).map(n => [n.dataset.dmKey, n]));
     const wanted = new Set();
-    if (cm.thread.more) rows.unshift(['older', null, false]);
+    if (cm.thread.more) rows.unshift(['older', null, '']);
     let cursor = host.firstElementChild;
-    for (const [key, m, pending] of rows) {
+    for (const [key, m, state] of rows) {
         wanted.add(key);
-        const signature = m ? JSON.stringify([m.id, m.body, m.kind, m.recalled_at, m.duration, String(m.media_url || '').split('?')[0], cm.myTheme, m.asr_text, !!m.asr_pending, !!m.asr_failed, !!m.asr_empty, m.quote ? m.quote.id : 0]) : 'older';
+        const signature = m ? JSON.stringify([m.id, m.body, m.kind, m.recalled_at, m.duration, String(m.media_url || '').split('?')[0], cm.myTheme, m.asr_text, !!m.asr_pending, !!m.asr_failed, !!m.asr_empty, m.quote ? m.quote.id : 0, state, !!m.read_at, m.request_id || '']) : 'older';
         let node = nodes.get(key);
         if (!node || node.dataset.signature !== signature) {
             const next = document.createElement('div'); next.dataset.dmKey = key; next.dataset.signature = signature; next.className = 'dm-message';
-            next.innerHTML = m ? cmBubbleHTML(m, me, pending) : '<button type="button" class="td-btn td-btn-quiet" onclick="loadOlderMessages()">看更早的消息</button>';
+            next.innerHTML = m ? cmBubbleHTML(m, me, state) : '<button type="button" class="td-btn td-btn-quiet" onclick="loadOlderMessages()">看更早的消息</button>';
             if (node) { dmReleasePlayback(node); if (cursor === node) cursor = next; node.replaceWith(next); }
             node = next;
         }
@@ -2989,7 +3425,9 @@ function dmRenderBubbles() {
     dmUi.stickBottom = host.scrollHeight - host.scrollTop - host.clientHeight < 120;
 }
 
-function cmBubbleHTML(m, me, pending) {
+function cmBubbleHTML(m, me, st) {
+    const pending = st === true || st === "pending";
+    const failed = st === "failed";
     const hasMeId = me !== undefined && me !== null && Number.isFinite(Number(me)) && Number(me) > 0;
     const partnerId = cm.thread && cm.thread.partner && cm.thread.partner.id;
     const mine = qsSameId(m.from_id, me) || (!hasMeId && qsSameId(m.to_id, partnerId));
@@ -3001,9 +3439,13 @@ function cmBubbleHTML(m, me, pending) {
     const avatar = '<span class="cm-avatar dm-avatar">' + cmAvatarInner(who) + "</span>";
     const kind = m.kind || "text";
     const isMedia = ["image", "video", "audio"].includes(kind);
+    // 投递状态常驻在气泡上：发送中 / 已发送 / 已读 / 没发出去，一眼看得出这一条到哪一步了。
+    const status = pending ? (isMedia && !m.media_url ? "上传中" : "发送中")
+        : failed ? "没发出去" : mine ? (m.read_at ? "已读" : "已发送") : "";
+    const statusCls = failed ? "dm-status-fail" : pending ? "dm-status-wait" : "dm-status-ok";
     const bubble = '<div class="cm-bubble ' + (mine ? "me" : "them")
         + (kind === "sticker" ? " sticker" : "") + (isMedia ? " media" : "")
-        + (pending ? " pending" : "") + '"'
+        + (pending ? " pending" : "") + (failed ? " failed" : "") + '"'
         + (mine && cm.myTheme && cm.myTheme !== "green" ? ' data-t="' + escapeHtml(cm.myTheme) + '"' : "")
         + ' data-mid="' + mid + '" data-mine="' + (mine ? 1 : 0) + '"'
         + ' oncontextmenu="return qsBubbleMenu(event,' + mid + ')"'
@@ -3014,7 +3456,11 @@ function cmBubbleHTML(m, me, pending) {
         + ((kind === "audio" && !pending && !m.recalled_at) ? dmAsrHTML(m) : "")
         + ((kind === "audio" && !pending && !m.recalled_at && !m.asr_text && !m.asr_pending && !m.asr_failed && !m.asr_empty)
             ? '<button type="button" class="dm-asr-btn" onclick="dmTranscribe(' + mid + ')">转文字</button>' : "")
-        + "<time>" + escapeHtml(pending ? (isMedia && !m.media_url ? "上传中…" : "发送中") : cmAgo(m.created_at)) + "</time></div>";
+        + "<time>" + escapeHtml(pending || failed ? "" : cmAgo(m.created_at)) + "</time>"
+        + (status ? '<span class="dm-status ' + statusCls + '">' + status
+            + (failed ? '<button type="button" class="dm-retry" onclick="dmRetrySend(\''
+                + escapeHtml(m.request_id || "") + '\')">重试</button>' : "") + "</span>" : "")
+        + "</div>";
     // 自己发的靠右、对方靠左，各带一个头像——小红书的私信就是这条规矩；
     // 只靠 align-self 时气泡和背景同色，看起来像"没有气泡"（截图里的样子）。
     return '<div class="dm-row ' + (mine ? "me" : "them") + '">'
@@ -3143,6 +3589,38 @@ async function loadOlderMessages() {
     } catch (e) { callNativeToast("更早的消息没读到"); }
 }
 
+/* 一条私信的真正出口：首发与单条重试共用同一段，request_id 从第一条就带上，
+   重试走的是同一个键，服务端 UNIQUE(from_id,request_id) 保证不会存出第二条。 */
+async function dmSendNow(rid, s, data, restore) {
+    try {
+        const r = await rawPostApi('/api/chat/send', { to: s.threadId, kind: data.kind || 'text',
+            text: data.body || '', media_name: data.media_name || '', request_id: rid,
+            quote_id: data.quote ? data.quote.id : 0 });
+        dmAck(rid, r.message, s);
+        if (dmScopeAlive(s) && dmUi.textRetry && dmUi.textRetry.rid === rid) dmUi.textRetry = null;
+        return true;
+    } catch (e) {
+        if (!dmAccountAlive(s)) return false;
+        dmFail(rid, (e && e.message) || '网络不通');
+        if (dmScopeAlive(s)) {
+            if (restore) { const i = cmEl('dm-input'); if (i && !i.value) i.value = data.body; }
+            paintThread();
+            callNativeToast('这条没发出去，点气泡上的重试：' + ((e && e.message) || '网络不通'));
+        }
+        return false;
+    }
+}
+
+async function dmRetrySend(rid) {
+    const f = cm.failed[rid];
+    if (!f) return;
+    delete cm.failed[rid];
+    if (!dmAccountAlive(f.scope)) { if (dmIsVisible()) paintThread(); return; }
+    cm.pending[rid] = f;
+    if (dmScopeAlive(f.scope)) paintThread();
+    await dmSendNow(rid, f.scope, f.msg, false);
+}
+
 async function sendDM() {
     if (dmUi.draft) { await dmSendDraft(); return; }
     if (dmUi.record) { await dmSendAudio(); return; }
@@ -3153,16 +3631,8 @@ async function sendDM() {
     dmUi.textRetry = { text, rid };
     const quote = dmUi.quote;
     dmPending(rid, s, { body: text, kind: 'text', quote: quote ? { id: quote.id, name: quote.name, text: quote.text } : null }); input.value = ''; dmUi.caret = [0, 0]; paintThread();
-    try {
-        const r = await rawPostApi('/api/chat/send', { to: s.threadId, text, request_id: rid, quote_id: quote ? quote.id : 0 });
-        dmAck(rid, r.message, s);
-        if (quote && dmUi.quote && dmUi.quote.id === quote.id) dmClearQuote();
-        if (dmScopeAlive(s) && dmUi.textRetry?.rid === rid) dmUi.textRetry = null;
-    } catch (e) {
-        if (!dmAccountAlive(s)) return;
-        delete cm.pending[rid];
-        if (dmScopeAlive(s)) { if (!input.value) input.value = text; paintThread(); callNativeToast('发送未确认，可重试：' + (e.message || '网络不通')); }
-    }
+    if (await dmSendNow(rid, s, cm.pending[rid] ? cm.pending[rid].msg : { body: text }, true)
+        && quote && dmUi.quote && dmUi.quote.id === quote.id) dmClearQuote();
 }
 
 /** 本地顶一条会话摘要。列表和聊天窗共用这一份 cm.convs，
@@ -3184,6 +3654,9 @@ function dmAck(rid, message, scope) {
     if (scope && !dmAccountAlive(scope)) return;
     if (pending?.scope && !dmAccountAlive(pending.scope)) return;
     delete cm.pending[rid];
+    // 回执也可能晚于"失败"到达（先超时、后 ack）：ack 一到失败标记必须撤，
+    // 否则界面上同一句话会同时挂着"没发出去"和已发送两条。
+    delete cm.failed[rid];
     if (message) {
         if (cm.thread && (qsSameId(message.from_id, cm.thread.partner.id) || qsSameId(message.to_id, cm.thread.partner.id))) {
             if (!cm.bubbles.some(b => qsSameId(b.id, message.id))) cm.bubbles.push(message);
@@ -3218,14 +3691,22 @@ async function connectChat() {
         const base = String(API_BASE || "").replace(/^http/, "ws");
         const sock = new WebSocket(base + t.ws_path + "?ticket=" + encodeURIComponent(t.ticket));
         cm.ws = sock;
-        sock.onopen = () => { cm.wsRetry = 0; setWsState("connected"); };
+        sock.onopen = () => {
+            // 断连期间对方发的消息只落在服务端历史里：光把连接接上不算恢复，
+            // 必须回头补拉一次，否则用户看到的就是"少了几天消息"。
+            const back = cm.wsBlind || cm.wsRetry > 0;
+            cm.wsRetry = 0; cm.wsBlind = false;
+            setWsState("connected");
+            if (back) dmCatchUp();
+        };
         sock.onmessage = ev => { if (dmAccountAlive(scope) && cm.ws === sock) handleWsEvent(ev); };
         sock.onerror = () => setWsState("error");
         sock.onclose = () => {
             if (!dmAccountAlive(scope) || cm.ws !== sock) return;
             cm.ws = null;
-            if (["incoming", "outgoing", "connecting", "active"].includes(dmCall.state)) dmCallFinish("实时连接断了");
+            if (["incoming", "outgoing", "connecting", "active"].includes(dmCall.state)) dmCallFinish("实时连接断了，通话结束", "network");
             cm.wsRetry++;
+            cm.wsBlind = true;
             setWsState("closed");
             clearTimeout(cm.wsTimer);
             cm.wsTimer = setTimeout(connectChat, Math.min(30000, 2000 * cm.wsRetry));
@@ -3234,6 +3715,15 @@ async function connectChat() {
         cm.wsRetry++;
         setWsState("unavailable", (e && e.message) || "握手失败");
     }
+}
+
+/** 重连后的补拉：会话列表与当前线程都回读一次，把断连期间到达的补回来。
+    服务端历史是唯一事实源，本地只做展示，所以重复拉取不会造出第二条。
+
+     服务端历史是唯一事实源，本地只做展示，所以重复拉取不会造出第二条。 */
+function dmCatchUp() {
+    loadMessages();
+    if (cm.thread && dmIsVisible()) refreshThread();
 }
 
 function wsSend(obj) {
@@ -3309,6 +3799,18 @@ function dmCallPeerTop(name, kicker, sub) {
         + '<h2>' + name + '</h2><p class="dm-call-kicker">' + kicker + '</p>'
         + (sub ? '<p class="dm-call-sub">' + sub + '</p>' : '') + '</div>';
 }
+/* 通话失败必须说清是哪一种。「通话失败」四个字等于没说：
+   对方拒绝、没人接听、没给麦克风权限、网络或中继不可用，用户要做的事完全不同。 */
+const DM_CALL_WHY = {
+    rejected: "对方拒绝了这个通话", timeout: "响铃太久，对方没有接听",
+    no_mic: "没拿到麦克风权限，通话没起来", network: "网络不通或中继服务器（TURN）不可用",
+    busy: "对方正忙，已经在另一通电话里", offline: "对方不在线，通话要两边都在应用里",
+    cancelled: "已取消呼叫", ended: "通话已结束", failed: "呼叫失败"
+};
+function dmCallErrKind(error) {
+    const text = String((error && error.name) || "") + " " + String((error && error.message) || "");
+    return /NotAllowed|Permission|denied|麦克风/i.test(text) ? "no_mic" : "network";
+}
 function dmCallRound(id, cls, label, icon, action, active) {
     return '<button type="button"' + (id ? ' id="' + id + '"' : '') + ' class="dm-call-round ' + cls + (active ? ' active' : '') + '"'
         + (id ? ' aria-pressed="' + (active ? 'true' : 'false') + '"' : '') + ' onclick="' + action + '">' + icon + '<span>' + label + '</span></button>';
@@ -3337,7 +3839,7 @@ function dmCallRender() {
     const speakerIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h3l4 4V5L7 9zM15 9a4 4 0 0 1 0 6M17.5 6.5a7 7 0 0 1 0 11"/></svg>';
     let body = "";
     if (dmCall.state === "incoming") {
-        body = dmCallPeerTop(name, "语音通话邀请", "邀请你语音通话")
+        body = dmCallPeerTop(name, "语音通话邀请", "响铃中，接听即可通话")
             + '<div class="dm-call-page-actions">'
             + dmCallRound("", "reject dm-call-btn-reject", "拒绝", hangIcon, "dmRejectCall()")
             + dmCallRound("", "accept dm-call-btn-accept", "接听", acceptIcon, "dmAcceptCall()")
@@ -3348,13 +3850,13 @@ function dmCallRender() {
             + dmCallRound("", "hang dm-call-btn-hang", "取消", hangIcon, "dmCancelCall()") + '</div>';
     } else if (dmCall.state === "connecting") {
         body = '<button type="button" class="dm-call-down" aria-label="最小化" onclick="dmCallMinimize()">⌄</button>'
-            + dmCallPeerTop(name, "语音通话", "正在连接…")
+            + dmCallPeerTop(name, "已接听，正在接通", "还在建立语音通道，稍等一下")
             + '<div class="dm-call-page-actions">'
             + dmCallRound("", "hang dm-call-btn-hang", "挂断", hangIcon, "dmEndCall()") + '</div>';
     } else if (dmCall.state === "active") {
         const canSpeaker = !!(window.AndroidBridge && typeof window.AndroidBridge.setVoiceCallSpeaker === "function");
         body = '<button type="button" class="dm-call-down" aria-label="最小化" onclick="dmCallMinimize()">⌄</button>'
-            + dmCallPeerTop(name, "语音通话中", "")
+            + dmCallPeerTop(name, "已接通", "通话中")
             + '<p class="dm-call-timer" id="dm-call-timer">' + dmCallTimeText() + '</p>'
             + '<div class="dm-call-page-actions">'
             + dmCallRound("dm-call-mute", "", "静音", muteIcon, "dmToggleMute()", dmCall.muted)
@@ -3362,7 +3864,12 @@ function dmCallRender() {
             + dmCallRound("", "hang dm-call-btn-hang", "挂断", hangIcon, "dmEndCall()")
             + '</div>';
     } else if (dmCall.state === "ended") {
-        body = dmCallPeerTop(name, "语音通话", escapeHtml(dmCall.reason || "通话结束"));
+        // 失败的那几种要留在屏幕上让人读完，还给一条出路：关页面 / 重拨。
+        const bad = dmCall.failKind && dmCall.failKind !== "ended";
+        body = dmCallPeerTop(name, bad ? "通话没成" : "语音通话", escapeHtml(dmCall.reason || "通话结束"))
+            + (bad ? '<div class="dm-call-page-actions">'
+                + (dmCall.role === "caller" ? dmCallRound("", "accept dm-call-btn-accept", "重拨", acceptIcon, "dmCallRetry()") : '')
+                + dmCallRound("", "hang dm-call-btn-hang", "关闭", hangIcon, "dmCallReset()") + '</div>' : '');
     }
     layer.innerHTML = '<div class="dm-call-card dm-call-page">' + body + '</div>';
     if (dmCall.state === "active") { dmCallPaintControls(); dmCallTick(); }
@@ -3437,20 +3944,31 @@ function dmCallReset() {
     dmCall.state = "idle"; dmCall.id = ""; dmCall.peer = null; dmCall.role = "";
     dmCall.offer = null; dmCall.pendingIce = []; dmCall.localIce = [];
     dmCall.startedAt = 0; dmCall.muted = false; dmCall.speaker = false; dmCall.reason = "";
+    dmCall.failKind = "";
     dmCall.minimized = false; dmCallMiniHide();
     dmCallRender();
 }
-function dmCallFinish(reason) {
+function dmCallFinish(reason, kind) {
     if (dmCall.state === "idle" || dmCall.state === "ended") return;
     const wasActive = ["outgoing", "connecting", "active"].includes(dmCall.state);
     dmCallCleanupMedia();
     dmCall.minimized = false;
     dmCallMiniHide();
     dmCall.state = "ended";
-    dmCall.reason = reason || (wasActive ? "通话已结束" : "通话结束");
+    dmCall.failKind = kind || (wasActive ? "ended" : "failed");
+    dmCall.reason = reason || DM_CALL_WHY[dmCall.failKind] || "通话结束";
     dmCall.startedAt = 0;
     dmCallRender();
-    dmCall.endTimer = setTimeout(() => { if (dmCall.state === "ended") dmCallReset(); }, 1800);
+    // 正常挂断 1.8 秒收起就够了；失败原因得留够时间让人读完，
+    // 一闪就没等于没告诉用户到底是哪一种失败。
+    const hold = dmCall.failKind === "ended" ? 1800 : 8000;
+    dmCall.endTimer = setTimeout(() => { if (dmCall.state === "ended") dmCallReset(); }, hold);
+}
+/* 失败面板上的「重拨」：先把上一通彻底收干净再发起，
+   不然状态还挂在 ended/outgoing 上，dmStartCall 只会回一句"现在已经在通话里了"。 */
+function dmCallRetry() {
+    dmCallReset();
+    dmStartCall();
 }
 function dmCallFlushLocalIce() {
     if (!dmCall.id) return;
@@ -3479,8 +3997,8 @@ function dmCallWirePeer(pc) {
     pc.onconnectionstatechange = () => {
         const state = pc.connectionState;
         if (state === "connected") dmCallSetActive();
-        else if (state === "failed") dmCallFinish("连接失败，可能双方网络不支持");
-        else if (state === "closed" && dmCall.state === "active") dmCallFinish("通话已结束");
+        else if (state === "failed") dmCallFinish(DM_CALL_WHY.network, "network");
+        else if (state === "closed" && dmCall.state === "active") dmCallFinish(DM_CALL_WHY.ended, "ended");
     };
 }
 function dmCallSetActive() {
@@ -3515,6 +4033,9 @@ function dmCallNewPeer(iceServers) {
     return pc;
 }
 async function dmStartCall() {
+    // 上一通刚结束（含失败/取消）时状态还挂在 ended 上，这时点呼叫算重试，
+    // 不许被当成"已经在通话里"挡回去——那正是机主说的忙线僵尸态。
+    if (dmCall.state === "ended") dmCallReset();
     if (dmCall.state !== "idle") { callNativeToast("现在已经在通话里了"); return; }
     if (!cm.thread) return;
     const peer = cm.thread.partner;
@@ -3540,12 +4061,14 @@ async function dmStartCall() {
         }
         dmCall.timeout = setTimeout(() => {
             if (dmCall.state === "outgoing") {
-                if (dmCall.id) wsSend({ t: "call_cancel", call_id: dmCall.id });
-                dmCallFinish("对方没有接听");
+                wsSend({ t: "call_cancel", call_id: dmCall.id || "" });
+                dmCallFinish(DM_CALL_WHY.timeout, "timeout");
             }
         }, 45000);
     } catch (error) {
-        dmCallFinish("呼叫失败：" + (error.message || "网络不通"));
+        const kind = dmCallErrKind(error);
+        dmCallFinish(kind === "no_mic" ? DM_CALL_WHY.no_mic
+            : DM_CALL_WHY.network + "：" + (error.message || "网络不通"), kind);
     }
 }
 async function dmAcceptCall() {
@@ -3554,8 +4077,8 @@ async function dmAcceptCall() {
     dmCancelRecording(); dmMicRelease();
     const allowed = await dmEnsureMicrophone();
     if (!allowed) {
-        if (dmCall.id) wsSend({ t: "call_reject", call_id: dmCall.id });
-        dmCallFinish("麦克风权限未获准");
+        wsSend({ t: "call_reject", call_id: dmCall.id || "", reason: DM_CALL_WHY.no_mic });
+        dmCallFinish(DM_CALL_WHY.no_mic, "no_mic");
         dmMicHelp();
         return;
     }
@@ -3573,21 +4096,25 @@ async function dmAcceptCall() {
             throw new Error("实时连接没连上");
         }
     } catch (error) {
-        if (dmCall.id) wsSend({ t: "call_reject", call_id: dmCall.id });
-        dmCallFinish("接听失败：" + (error.message || "网络不通"));
+        const kind = dmCallErrKind(error);
+        wsSend({ t: "call_reject", call_id: dmCall.id || "", reason: DM_CALL_WHY[kind] });
+        dmCallFinish(kind === "no_mic" ? DM_CALL_WHY.no_mic
+            : DM_CALL_WHY.network + "：" + (error.message || "网络不通"), kind);
     }
 }
 function dmRejectCall() {
-    if (dmCall.id) wsSend({ t: "call_reject", call_id: dmCall.id });
-    dmCallFinish("已拒绝");
+    wsSend({ t: "call_reject", call_id: dmCall.id || "", reason: "已拒绝" });
+    dmCallFinish("已拒绝这个通话", "rejected");
 }
 function dmCancelCall() {
-    if (dmCall.id) wsSend({ t: "call_cancel", call_id: dmCall.id });
-    dmCallFinish("已取消");
+    // 没拿到 call_id 之前取消也必须通知服务端，否则那通呼叫一直挂在忙线表里，
+    // 下一次拨号只会收到"对方正忙"。
+    wsSend({ t: "call_cancel", call_id: dmCall.id || "" });
+    dmCallFinish(DM_CALL_WHY.cancelled, "cancelled");
 }
 function dmEndCall() {
-    if (dmCall.id) wsSend({ t: "call_end", call_id: dmCall.id });
-    dmCallFinish("通话已结束");
+    wsSend({ t: "call_end", call_id: dmCall.id || "" });
+    dmCallFinish(DM_CALL_WHY.ended, "ended");
 }
 function dmToggleMute() {
     if (!dmCall.stream) return;
@@ -3636,7 +4163,7 @@ function dmHandleCallEvent(data) {
         dmCall.pc.setRemoteDescription(data.sdp).then(() => {
             dmCallFlushRemoteIce();
             if (dmCall.state === "outgoing") { dmCall.state = "connecting"; dmCallRender(); }
-        }).catch(() => dmCallFinish("接听失败"));
+        }).catch(() => dmCallFinish(DM_CALL_WHY.network, "network"));
         return;
     }
     if (kind === "call_active") {
@@ -3649,13 +4176,13 @@ function dmHandleCallEvent(data) {
         else dmCall.pendingIce.push(data.candidate);
         return;
     }
-    if (kind === "call_reject") { dmCallFinish(data.reason || "对方拒绝了"); return; }
-    if (kind === "call_cancel") { dmCallFinish(data.reason || "对方取消了"); return; }
-    if (kind === "call_timeout") { dmCallFinish(data.reason || "对方没有接听"); return; }
-    if (kind === "call_end") { dmCallFinish(data.reason || "对方已挂断"); return; }
-    if (kind === "call_busy") { dmCallFinish(data.detail || "对方正在通话"); return; }
-    if (kind === "call_unavailable") { dmCallFinish(data.detail || "对方不在线"); return; }
-    if (kind === "call_error") { dmCallFinish(data.detail || "通话失败"); }
+    if (kind === "call_reject") { dmCallFinish(data.reason || DM_CALL_WHY.rejected, "rejected"); return; }
+    if (kind === "call_cancel") { dmCallFinish(data.reason || "对方取消了呼叫", "cancelled"); return; }
+    if (kind === "call_timeout") { dmCallFinish(DM_CALL_WHY.timeout, "timeout"); return; }
+    if (kind === "call_end") { dmCallFinish(data.reason || "对方已挂断", "ended"); return; }
+    if (kind === "call_busy") { dmCallFinish(data.detail || DM_CALL_WHY.busy, "busy"); return; }
+    if (kind === "call_unavailable") { dmCallFinish(data.detail || DM_CALL_WHY.offline, "offline"); return; }
+    if (kind === "call_error") { dmCallFinish(data.detail || DM_CALL_WHY.failed, "failed"); }
 }
 function handleWsEvent(ev) {
     let data = null;
@@ -3864,4 +4391,22 @@ async function openMyFeedback() {
     } catch (e) {
         callNativeToast("反馈列表没读到：" + (e.message || "网络不通"));
     }
+}
+
+
+function openRecoveryPasswordDialog(){
+    toolDialog('设置新密码', `<p class="td-lead">临时口令只能登录一次，请在30分钟内设置新密码。</p><label class="td-field-row"><span class="td-field-label">新密码（至少8位）</span><input id="recovery-password" type="password" autocomplete="new-password"></label><label class="td-field-row"><span class="td-field-label">再次输入</span><input id="recovery-password-again" type="password" autocomplete="new-password"></label><button type="button" class="td-btn" onclick="finishRecoveryPassword()">保存新密码</button><button type="button" class="td-btn-quiet" onclick="logoutUser()">退出并重新登录</button><p id="recovery-error" role="status"></p>`);
+}
+async function finishRecoveryPassword(){
+    const password=document.getElementById('recovery-password').value;
+    const error=document.getElementById('recovery-error');
+    if(password!==document.getElementById('recovery-password-again').value){error.textContent='两次密码不一致';return;}
+    try{
+        await postApi('/api/account/recovery-password',{new_password:password});
+        state.user.password_change_required=false;
+        localStorage.setItem(USER_KEY,JSON.stringify(state.user));
+        document.getElementById('account-tools-dialog').close();
+        await Promise.all([syncRemoteDashboard(),syncRemoteCharts()]);
+        callNativeToast('新密码已设置');
+    }catch(e){error.textContent=e.message;}
 }

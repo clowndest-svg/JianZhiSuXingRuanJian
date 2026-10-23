@@ -27,30 +27,37 @@ async function openPeriodSummary(days=7){
     if(!state.token){openAuthModal();return;}
     const generation=sessionGeneration;
     try{
-        const d=await getJson('/api/summary?days='+days);
+        const d=await getJson('/api/weekly/review?days='+days);
         if(generation!==sessionGeneration)return;
         currentPeriod=d;
+        const trendValue=d.weight_trend.status==='ok'?d.weight_trend.change_jin+' 斤':'数据不足';
         toolDialog(days===7?'最近7天回顾':'最近30天回顾', `
           <div class="td-actions"><button class="td-btn-quiet" onclick="openPeriodSummary(7)">最近7天</button><button class="td-btn-quiet" onclick="openPeriodSummary(30)">最近30天</button></div>
           <p class="td-lead">${escapeHtml(d.start)} — ${escapeHtml(d.end)}</p>
-          <dl class="period-stats"><div><dt>确认完整</dt><dd>${d.complete_days} / ${d.days} 天</dd></div>
-          <div><dt>训练记录</dt><dd>${d.workout_days} 天</dd></div><div><dt>体重记录</dt><dd>${d.weight_days} 天</dd></div>
-          <div><dt>首末记录变化</dt><dd>${d.weight_change_jin==null?'记录不足':(d.weight_change_jin>0?'+':'')+d.weight_change_jin+' 斤'}</dd></div></dl>
-          <p>确认完整且有餐食记录的 ${d.calorie_sample_days} 天，平均已记热量：${d.average_recorded_kcal==null?'暂无数据':d.average_recorded_kcal+' kcal（估算）'}。</p>
-          <div class="period-table"><table><thead><tr><th>日期</th><th>完整</th><th>已记热量</th><th>训练分钟</th></tr></thead><tbody>${d.rows.map(r=>`<tr><td>${escapeHtml(r.date.slice(5))}</td><td>${r.complete?'已确认':'未确认'}</td><td>${r.recorded_kcal==null?'未记录':r.recorded_kcal}</td><td>${r.workout_minutes==null?'未记录':r.workout_minutes}</td></tr>`).join('')}</tbody></table></div>
-          <p class="td-note">未记录不代表零摄入或零运动；变化只取窗口内真实记录。补录和修正会影响结果，报告不用于诊断。</p>
+          <dl class="period-stats"><div><dt>完整记录日</dt><dd>${d.full_record_days} 天</dd></div>
+          <div><dt>训练完成日</dt><dd>${d.training_days} 天</dd></div>
+          <div><dt>体重趋势</dt><dd>${escapeHtml(trendValue)}</dd></div>
+          <div><dt>有称重日期</dt><dd>${d.weight_days} 天</dd></div></dl>
+          <p class="td-note">${escapeHtml(d.weight_trend.text)}</p>
+          ${d.coverage_note?`<p class="td-note">${escapeHtml(d.coverage_note)}</p>`:''}
+          <p class="td-note">有餐食记录的 ${d.meal_days} 天，平均已记热量：${d.average_recorded_kcal==null?'暂无数据':d.average_recorded_kcal+' kcal（估算）'}。</p>
+          <div class="td-group" aria-label="可执行建议">${d.feedback.map((f,i)=>`<div class="td-row"><span class="td-row-main"><span class="td-row-title">${i+1}. ${escapeHtml(f.text)}</span><span class="td-row-hint">依据：${escapeHtml(f.basis.label)} ${f.basis.value} ${escapeHtml(f.basis.unit)}（本周真实记录）</span></span></div>`).join('')}</div>
+          <div class="period-table"><table><thead><tr><th>日期</th><th>记全</th><th>已记热量</th><th>训练分钟</th></tr></thead><tbody>${d.rows.map(r=>`<tr><td>${escapeHtml(r.date.slice(5))}</td><td>${r.full_record?'已记全':'未记全'}</td><td>${r.recorded_kcal==null?'未记录':r.recorded_kcal}</td><td>${r.workout_minutes==null?'未记录':r.workout_minutes}</td></tr>`).join('')}</tbody></table></div>
+          <p class="td-note">未记录不代表零摄入或零运动；缺口按当前档案预算估算，只算有餐食记录的日子。补录和修正会影响结果，报告不用于诊断。</p>
           <div class="td-actions"><button class="td-btn" onclick="savePeriodImage()">生成回顾图片</button></div>`);
     }catch(e){callNativeToast(e.message);}
 }
 function savePeriodImage(){
     if(!currentPeriod)return;
-    const d=currentPeriod,c=document.createElement('canvas');c.width=900;c.height=920;
-    const x=c.getContext('2d');x.fillStyle='#f5faf6';x.fillRect(0,0,900,920);
+    const d=currentPeriod,c=document.createElement('canvas');c.width=900;c.height=980;
+    const x=c.getContext('2d');x.fillStyle='#f5faf6';x.fillRect(0,0,900,980);
     x.fillStyle='#16603c';x.font='bold 48px sans-serif';x.fillText('轻塑 · 我的'+d.days+'天回顾',56,100);
     x.fillStyle='#475569';x.font='28px sans-serif';x.fillText(d.start+' — '+d.end,56,160);
-    const rows=[['确认完整',d.complete_days+' / '+d.days+' 天'],['训练记录',d.workout_days+' 天'],['体重记录',d.weight_days+' 天'],['首末体重变化',d.weight_change_jin==null?'记录不足':d.weight_change_jin+' 斤'],['完整日平均已记热量',d.average_recorded_kcal==null?'暂无数据':d.average_recorded_kcal+' kcal（估算）']];
+    const trendValue=d.weight_trend.status==='ok'?d.weight_trend.change_jin+' 斤':'数据不足';
+    const average=d.average_recorded_kcal==null?'暂无数据':d.average_recorded_kcal+' kcal（估算）';
+    const rows=[['完整记录日',d.full_record_days+' 天'],['训练完成日',d.training_days+' 天'],['体重趋势',trendValue],['有餐食记录',d.meal_days+' 天'],['平均已记热量',average]];
     rows.forEach((r,i)=>{x.fillStyle='#475569';x.font='28px sans-serif';x.fillText(r[0],56,255+i*96);x.fillStyle='#172b20';x.font='bold 36px sans-serif';x.fillText(r[1],480,255+i*96);});
-    x.fillStyle='#64748b';x.font='24px sans-serif';x.fillText('未记录不代表零；仅汇总本人记录。',56,790);x.fillText('热量为估算，不用于诊断。',56,830);
+    x.fillStyle='#64748b';x.font='24px sans-serif';x.fillText('未记录不代表零；缺口只算有餐食记录的日子。',56,840);x.fillText('热量为估算，不用于诊断。',56,880);
     const image=c.toDataURL('image/png');
     const nativeSave=inApp()&&window.AndroidBridge&&AndroidBridge.savePng;
     toolDialog('我的回顾图片',`<p class="td-note">图片包含你的记录，请确认后再分享。${nativeSave?'点击保存后选择文件位置。':'手机可长按图片保存；浏览器也可点击下载。'}</p><img id="period-export-image" style="width:100%;border-radius:16px" src="${image}" alt="我的${d.days}天记录回顾"><div class="td-actions">${nativeSave?'<button class="td-btn" onclick="AndroidBridge.savePng(document.getElementById(\'period-export-image\').src)">保存回顾图片</button>':`<a class="td-btn" href="${image}" download="轻塑-${d.end}-${d.days}天.png">下载图片</a>`}</div>`);

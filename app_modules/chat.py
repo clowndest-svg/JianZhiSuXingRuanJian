@@ -36,10 +36,11 @@ def _unb64(text):
     return base64.urlsafe_b64decode((text or "") + pad)
 
 
-def mint_ticket(secret, user_id, build, nonce, now=None):
+def mint_ticket(secret, user_id, build, nonce, now=None, session_hash=""):
     """nonce 由调用方给（secrets.token_urlsafe(8)），保证同一秒内的两张票也不同。"""
     payload = {"u": int(user_id), "b": int(build or 0), "n": str(nonce),
                "exp": int((now if now is not None else time.time())) + TICKET_TTL}
+    payload["s"] = session_hash
     body = _b64(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
     sig = hmac.new(secret, body.encode("ascii"), hashlib.sha256).digest()
     return "%s.%s" % (body, _b64(sig))

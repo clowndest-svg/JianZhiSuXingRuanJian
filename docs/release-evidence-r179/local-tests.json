@@ -1,0 +1,59 @@
+{
+  "version": "2.2.18 (63)",
+  "source_commit": "PENDING-PUSH",
+  "artifact": {
+    "local_signed_size": 5488150,
+    "local_signed_sha256": "0ab89149d121a0fd95db5c9382a3b67caf083dd4f3618604655cfb92381c769e",
+    "local_signed_md5": "eb28384b160a15cf9327fd111ccf79d1",
+    "build": "gradlew assembleRelease --no-daemon -Dorg.gradle.jvmargs=-Xmx1024m",
+    "note": "本机空闲内存 1.74GB，用 1GB 堆构建成功；CI 会用自己的签名密钥重建同一个提交，线上产物的哈希以 deploy.json 为准"
+  },
+  "backend_legacy": { "suite": "tests/legacy-backend.py", "total": 623, "green": 623, "red": 0 },
+  "frontend_vm": { "suite": "tests/legacy-frontend.mjs", "total": 355, "green": 355, "red": 0 },
+  "integration": { "suite": "tests/test_integration.py", "tests": 64, "result": "OK" },
+  "optimization_suites": {
+    "tests/test_optimization_security.py": 21,
+    "tests/test_optimization_data.py": 7,
+    "tests/test_optimization_ux.py": 10,
+    "tests/test_optimization_ai_status.py": 8,
+    "tests/test_optimization_weekly.py": 6,
+    "tests/test_long_tasks.py": 15,
+    "tests/test_monitor_alerts.py": 15,
+    "tests/test_backup_verify.py": 15,
+    "tests/test_deploy_pairing.py": 4
+  },
+  "browser_suites": {
+    "tests/records-profile-permission.mjs": { "total": 49, "green": 49, "red": 0 },
+    "tests/a11y-dialog-contract.mjs": { "total": 134, "green": 134, "red": 0 }
+  },
+  "node_contracts": {
+    "tests/dm-state-call.mjs": "8 组 PASS",
+    "tests/home-first-screen.mjs": { "total": 7, "green": 7, "red": 0 },
+    "tests/request-contract.mjs": "全部通过",
+    "tests/pwa-cache-contract.mjs": "5 条 PASS",
+    "tests/frontend-budget.mjs": { "total": 13, "green": 13, "red": 0 }
+  },
+  "artifact_checks": {
+    "verify-release-artifacts": "version_code=63 size=5488150 sha256=0ab89149d121",
+    "manifest": "app/src/main/web_version.json code=63 name=2.2.18 min=63"
+  },
+  "mutation_validation": {
+    "A06_gate_and_A02_session": { "mutants": 7, "killed": 7 },
+    "C01_helpers": { "mutants": 5, "killed": 5 },
+    "C02_directus_readonly": { "mutants": 2, "killed": 2 },
+    "C10_long_tasks": { "mutants": 1, "killed": 1 },
+    "A10_thumbnail_orphans": { "mutants": 1, "killed": 1 },
+    "B03_B04_B09": { "mutants": 4, "killed": 4 },
+    "B06_ai_status": { "mutants": 4, "killed": 4 },
+    "B08_state_call": { "mutants": 2, "killed": 2, "note": "另有两次变异未生效（缩进错/条件恒假），已作废重做" },
+    "B01_home": { "mutants": 7, "killed": 7 },
+    "B07_weekly": { "mutants": 7, "killed": 7, "spot_checked_by_hand": 1 }
+  },
+  "known_gaps": [
+    "真机小屏 / 200% 字号视觉验收未做（仅真浏览器 320px + 200% 判据）",
+    "离线通知能力没有厂商推送，杀后台不会响（界面已如实说明）",
+    "C07 仍是单 worker，跨进程 WS/通话未做",
+    "C11 正式 CSP 未上（内联处理器仍 186 处）",
+    "生产 Directus 策略、systemd 单元、C01 降权均未发布"
+  ]
+}

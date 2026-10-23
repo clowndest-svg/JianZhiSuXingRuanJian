@@ -16,6 +16,22 @@ GRADLE = os.path.join(ROOT, "app", "build.gradle")
 APK = os.path.join(ROOT, "qingsu.apk")
 OUT = os.path.join(ROOT, "app", "src", "main", "web_version.json")
 ASSET_JS = os.path.join(ROOT, "app", "src", "main", "assets", "app.js")
+ASSET_SW = os.path.join(ROOT, "app", "src", "main", "assets", "sw.js")
+
+
+def sync_sw_build(code):
+    """把构建号同步进 sw.js 的 BUILD（PWA 缓存名由它派生）。
+
+    缓存名一旦和构建号脱钩，换版后旧壳还会被命中，用户看到的是半新半旧的界面。
+    """
+    text = io.open(ASSET_SW, encoding="utf-8", newline="").read()
+    hit = re.search(r"const BUILD=(\d+);", text)
+    if not hit:
+        raise SystemExit("sw.js 里找不到 BUILD 常量，缓存清单无法随构建号版本化")
+    if int(hit.group(1)) != code:
+        io.open(ASSET_SW, "w", encoding="utf-8", newline="").write(
+            text.replace(hit.group(0), "const BUILD=%d;" % code))
+    return code
 
 
 def sync_asset_build(code):
@@ -125,8 +141,9 @@ def latest_release_note():
 def main():
     code, name = read_gradle_version()
     sync_asset_build(code)
+    sync_sw_build(code)
     if sys.argv[1:] == ["--sync-asset-build-only"]:
-        print("已将 app.js APP_BUILD 同步为 %d" % code)
+        print("已将 app.js APP_BUILD 与 sw.js BUILD 同步为 %d" % code)
         return 0
     if sys.argv[1:]:
         raise SystemExit("用法：python make_version_json.py [--sync-asset-build-only]")

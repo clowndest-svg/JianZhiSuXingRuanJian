@@ -325,10 +325,21 @@ def admin_smoke(expected_html_hash):
     health = json.loads(open_after_restart("http://172.17.0.1:8100/api/health", headers))
     if not isinstance(health, dict) or "app" not in health or "console_container" not in health:
         raise RuntimeError("admin API health response is incomplete")
+    # 版本配对门（方案 C03/C05）：后台与主应用共用一个库，后台要写的列由主应用的迁移创建。
+    # 只替换后台这两个文件就上线，等于把"后台先于主服务"这个顺序风险交给运气——
+    # 现场形状是运营点一下高危按钮才 500，而那时业务改动可能已经提交了。
+    pairing_raw = open_after_restart("http://172.17.0.1:8100/api/version-pairing", headers)
+    pairing = json.loads(pairing_raw)
+    if not pairing.get("paired"):
+        raise RuntimeError("主后台版本没配对，拒绝发布后台：缺 %s（主应用结构版本 %s，回读 %s）"
+                           % (pairing.get("missing_app_columns") or ["(结构读不出)"],
+                              pairing.get("app_schema_version"),
+                              pairing.get("app_error") or "可达"))
     body = open_after_restart(PUBLIC_BASE + "/ops/?ci=" + expected_html_hash[:12],
                               {"Authorization": auth})
     if hashlib.sha256(body).hexdigest() != expected_html_hash:
         raise RuntimeError("public admin console HTML does not match the deployed file")
+    return pairing
 
 
 def deploy_admin(run_id, revision, archive):
@@ -363,7 +374,7 @@ def deploy_admin(run_id, revision, archive):
         else:
             raise RuntimeError("admin service did not become active")
         expected_html_hash = hashlib.sha256((temp / "ops" / "console.html").read_bytes()).hexdigest()
-        admin_smoke(expected_html_hash)
+        pairing = admin_smoke(expected_html_hash)
     except Exception:
         for name, target in targets.items():
             if name in previous:
@@ -374,9 +385,13 @@ def deploy_admin(run_id, revision, archive):
     finally:
         shutil.rmtree(temp, ignore_errors=True)
         archive.unlink(missing_ok=True)
-    metadata = {"source_revision": revision, "backup": str(backup), "run_id": run_id}
+    metadata = {"source_revision": revision, "backup": str(backup), "run_id": run_id,
+                # 配对记录（方案 C03）：这一版后台是跟哪一版主应用一起验过的，事后要答得出。
+                "paired_app_schema": pairing.get("app_schema_version"),
+                "paired_app_release": pairing.get("app_release")}
     atomic_write(ROOT / "admin-console" / "release.json", json.dumps(metadata).encode(), 0o600)
-    print(json.dumps({"target": "admin", "revision": revision, "backup": str(backup)}, separators=(",", ":")))
+    print(json.dumps({"target": "admin", "revision": revision, "backup": str(backup),
+                      "paired_app_schema": pairing.get("app_schema_version")}, separators=(",", ":")))
 
 
 def main():

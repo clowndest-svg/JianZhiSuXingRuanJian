@@ -106,7 +106,13 @@ def main():
                     return 1
             print('绿 两个独立进程能在同一个数据库上同时冷启动')
             if not shared:
-                print('跳过：本机没有可用的 Redis，多进程共享计数无从验证')
+                # 跳过要单独计数、单独定性：CI 一旦给 Redis，缺 Redis 就是红而不是"没测"。
+                # 否则这条判据可以常年以"绿"的名义什么都不验。
+                print('SKIPPED=1 本机没有可用的 Redis，多进程共享计数未验证')
+                if os.environ.get('QINGSU_REQUIRE_REDIS') == '1':
+                    print('红 CI 声明了 Redis 服务却连不上：这条不能算跳过')
+                    return 1
+                print('结论：本文件 0 条通过 / 2 条跳过（未验证，不等于通过）')
                 return 0
 
             stamp = int(time.time() * 1000) % 100000

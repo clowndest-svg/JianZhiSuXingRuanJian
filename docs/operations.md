@@ -89,7 +89,60 @@ IP证书路径 `/etc/letsencrypt/live/124.220.54.64`，Certbot运行时 `/opt/qi
 
 Windows 任务 `QingsuEncryptedBackup` 每日04:00运行 `scripts/pull-backup.py`，从服务器拉取加密副本至仓库内被忽略且权限受限的 `.private-backups/`；保留30天，恢复数据库副本并实际还原媒体文件验证。计划任务使用当前用户交互登录，已启用错过后补跑；电脑关闭、离线或用户未登录时无法完成异地拉取，因此异地 RPO 依赖这台电脑在线；服务器每日本地备份独立运行。
 
+拉取后同一脚本会做一次真验证：解密 → `PRAGMA integrity_check` → `PRAGMA foreign_key_check` → 各表记录数 → 媒体成员逐个核路径（拒绝绝对路径、`..`、链接成员）并按抽样真实还原再比 SHA-256。结果写进 `.private-backups/verify-report.json`（`--report` 或 `QINGSU_BACKUP_REPORT` 可改路径），任何一步失败都以非零退出并在报告里留下中文原因。报告同时带"备份年龄"：默认阈值26小时（`--age-threshold-hours`/`QINGSU_BACKUP_AGE_HOURS`），主口径是副本文件名里的服务器产出时刻，本机落地时刻用来区分病因——拉取准点但数据年龄超标＝服务器没产出新备份，两者都超标＝这台电脑没跑成（关机、离线或未登录），本机一个副本都没有＝异地拉取从没落地。
+
+**未做（不要当成已完成）**：目前不存在与这台电脑无关的独立异地副本。要满足"电脑离线时仍有异地一份"，需要对象存储凭据（腾讯云 COS 或等价），本轮没有凭据、没有配置、也没有演练过，因此 RPO≤24h 与 RTO≤2h 只是建议目标，不是达成状态。`verify-report.json` 只能证明"拉回来的那一份可用"，不能证明服务器仍在产出新备份；服务器侧备份年龄监控见 `scripts/monitor.py` 的 `backup_age_hours`。
+
 恢复必须在空的隔离目录进行，先解密到内存/临时受限目录，验证 SQLite 完整性、外键、记录数和媒体文件，再停止服务并选择恢复时间点；不要直接覆盖正在运行的数据库。生产回退默认只回退代码和配置，schema保留前向兼容。历史58条孤儿记录已放在 root 私有隔离数据库中，未猜测归属或不可恢复地删除。
+
+## 发布顺序与版本配对（2026-10-22 起，方案 C03/C05）
+
+两仓共用同一个业务库，后台要写的列由主应用的迁移创建。**必须先发主应用、再发后台**；
+这条现在不再只写在文档里，有三处会拦：
+
+1. `scripts/deploy.py` 在备份之后、重启之前显式跑 `scripts/migrate.py`，并在起来之后
+   复核 `/health/ready` 的 `schema_version == schema_required`，对不上直接失败回退。
+2. 服务进程的 unit 带 `Environment=QINGSU_SKIP_MIGRATE=1`：import 期不再改结构，
+   库落后于代码时 `guard_schema_version()` 拒绝启动，而不是静默补列或等第一条请求炸。
+3. 后台 CI 按 `JianZhiSuXingRuanJianHouTai/deploy/APP_REVISION` 里钉住的**精确 SHA** 跑跨仓判据
+   （占位值会让 CI 直接红）；发布入口 `admin_smoke` 读 `/api/version-pairing`，
+   `paired` 为假就拒绝发布后台，配对结果写进 `admin-console/release.json`。
+
+结构版本与表归属登记在 `app_modules/migrations.py`：业务表归主应用，`ops_*` 归后台。
+加一条迁移要在 `MIGRATIONS` 追加并把 `SCHEMA_VERSION` 抬到该条的号——
+`tests/test_optimization_data.py` 会核对"版本号＝清单最后一条"，忘了抬会红。
+
+## 后台会话与降权（2026-10-22 起，方案 A02/C01）
+
+- 后台 Cookie 是服务端登记的随机会话号（库里只存 SHA-256），退出真的撤销服务端那行。
+  空闲 2 小时（`SESSION_IDLE_TTL`）与绝对 8 小时（`SESSION_TTL`）分别到期；
+  会话记 `credential_fp`，**换掉某个命名账号的口令即撤销它名下所有会话**。
+- 命名操作者来自 `console.json` 的 `operators`（或本地 `OPS_OPERATORS_JSON`）；
+  没配时回落成单把 `ops_token`，审计里的身份变成 `console`（浏览器）/`script:console`（脚本直调）。
+  两把凭据共用同一口令且请求没带 `operator` 时会拒绝登录——猜不出是谁就不该顶掉某个具体的人。
+- `/ops/` 的「后台会话」页能看现在谁在线、各自还剩多久到期；撤销别人的会话要原样带回确认短语。
+- 运维服务从 `User=root` 改为 `User=qingsu-ops`，需要 root 的三件事改经 sudo 调
+  `qingsu-{backup,set-gate,container-health}` 三个参数白名单 helper（不给 ALL、不进 docker 组）。
+  **上生产的前置**：`console.json`/`mail-check.json` 改 `root:qingsu-ops 640`、
+  `mail.json` 给服务账号可写、sudoers 落 `/etc/sudoers.d/qingsu-ops`（`visudo -c` 不过就撤掉）、
+  helper 装到 `/usr/local/sbin`，然后跑 `deploy/verify-ops.sh`。
+  `NoNewPrivileges=yes` 故意没进 unit——它和"经 sudo 调 setuid helper"互斥，
+  要开得换成 socket 激活的 root helper。
+- **未做**：以上都是仓库侧状态，生产尚未切账号。切失败会让后台整体不可用，
+  回退办法是先把 unit 改回 `User=root` 再 `systemctl daemon-reload && systemctl restart qingsu-ops`。
+
+## 媒体缓存分层（2026-10-22 起，方案 A14）
+
+`/uploads/{name}` 的 `Cache-Control` 按"撤销靠什么生效"分三层：
+
+| 素材 | 策略 | 为什么 |
+| --- | --- | --- |
+| 身材照（带 `audience`） | `private, no-store` | 分享开关一改就该看不见 |
+| 社区/列表缩略图（`thumb=1`） | `private, max-age=300` | 这张图能不能拿到本来就只由 15 分钟签名决定，路由不回查帖子状态；no-store 只买到重复下载 |
+| 私信媒体、原图、头像 | `private, no-store` | 撤回与换设备不该被缓存兜住 |
+
+`COMMUNITY_THUMB_MAX_AGE=300` 必须明显短于签名 900 秒，判据钉住这个大小关系。
+**已被用户保存到设备的内容无法远程收回**，这句要如实写在对外说明里。
 
 ## 容量与性能
 

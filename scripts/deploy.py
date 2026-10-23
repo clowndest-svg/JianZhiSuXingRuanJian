@@ -66,7 +66,11 @@ try:
     if (root/'app_modules').exists():shutil.rmtree(root/'app_modules')
     shutil.copytree(stage/'app_modules',root/'app_modules');copy_files(stage/'web',root/'web')
     for name in ('backup.py','monitor.py','set-min-build.py','push-worker.py'):shutil.copy2(stage/'scripts'/name,root/name)
-    for name in ('server.py','app_modules','web','backup.py','monitor.py','set-min-build.py','push-worker.py'):protect_code(root/name)
+    shutil.copy2(stage/'scripts'/'migrate.py',root/'migrate.py')
+    for name in ('server.py','app_modules','web','backup.py','monitor.py','set-min-build.py','push-worker.py','migrate.py'):protect_code(root/name)
+    # 迁移显式跑一次（方案 C05）：新代码已就位、库已备份，这一步失败就停在部署里，
+    # 而不是等服务起来后由第一条业务请求以"某列不存在"的形状炸出来。
+    print(run('python3',str(root/'migrate.py')))
     # Provision once; redeployment must retain the key behind browser subscriptions.
     import sys,grp
     sys.path.insert(0,str(root))
@@ -77,6 +81,9 @@ try:
     config=unit.read_text();import re
     config=re.sub(r'--forwarded-allow-ips=\S+','--forwarded-allow-ips='+','.join(ips),config)
     if 'QINGSU_CACHE_NAMESPACE=' not in config:config=config.replace('Environment=TZ=', 'Environment=QINGSU_CACHE_NAMESPACE=qingsu-prod\nEnvironment=TZ=')
+    # 服务进程不再于 import 期改结构：迁移是上面那一步显式做的。
+    # 留着这句，"起一个只读进程"就不会顺手改生产表；库落后于代码时 guard 会拒绝启动而不是静默补列。
+    if 'QINGSU_SKIP_MIGRATE=' not in config:config=config.replace('[Service]\n', '[Service]\nEnvironment=QINGSU_SKIP_MIGRATE=1\n')
     if 'Environment=QINGSU_SITE_BASE=' in config:
         config=re.sub(r'Environment=QINGSU_SITE_BASE=.*', 'Environment=QINGSU_SITE_BASE='+public_base, config)
     else:config=config.replace('[Service]', '[Service]\nEnvironment=QINGSU_SITE_BASE='+public_base)
@@ -89,6 +96,14 @@ try:
                 if body.get('source_revision')==args.revision and body.get('release')==RELEASE:break
         except Exception:time.sleep(.5)
     else:raise RuntimeError('Candidate readiness failed')
+    # 跑完独立复核一次结构版本（方案 C05"跑后独立复核"）：迁移那步打了日志不算数，
+    # 要服务自己承认它看到的库就是代码要求的那一版。
+    with opener.open('http://172.17.0.1:8000/health/ready',timeout=5) as r:
+        ready=json.load(r)
+    if ready.get('schema_version')!=ready.get('schema_required'):
+        raise RuntimeError('结构版本没对上：库 %s / 代码要求 %s'
+                           % (ready.get('schema_version'),ready.get('schema_required')))
+    print('schema_version=%s' % ready.get('schema_version'))
     # Keep QA routing until its final smoke test has completed; remove explicitly afterwards.
     new_tls=old_tls if 'gzip_min_length 1024;' in old_tls else old_tls.replace('    client_max_body_size 10m;','''    client_max_body_size 10m;
     access_log off;

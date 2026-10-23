@@ -1559,7 +1559,20 @@ check("打印样式只留复盘页",
   const fire = (ev) => { ev.preventDefault = () => { prevented++; }; ev.repeat = !!ev.repeat; kd.forEach(fn => fn(ev)); };
   // 桩里的观察器只记账不自动派发，测试自己 flush 等价于浏览器投递变更记录
   const flush = () => h14.muts.forEach(m => { try { m.cb([]); } catch (e) { errs14.push(String(e && e.message)); } });
-  check("五个弹窗都绑上了观察器", h14.muts.length === 5, String(h14.muts.length));
+  // 数量写死成 5 的话，每往白名单里补一个浮层都要来改这条判据——而且它证明不了
+  // "补进去的那个真的被观察了"。改成拿白名单现算：正向、逐项。
+  const _watched = h14.muts.map(m => m.target && m.target.id).filter(Boolean);
+  let _unwatched;
+  try {
+    // 同一个 vm context 里能直接读到 app.js 顶层 const：拿"代码现在认了哪些"当基准，
+    // 而不是在测试里再抄一份名单（抄的那份会自己过期）。
+    const _ids = vm.runInContext("DIALOG_OVERLAY_IDS.slice()", h14.context);
+    _unwatched = _ids.filter(id => !_watched.includes(id));
+    check("白名单里每个浮层都真的绑上了观察器", _unwatched.length === 0,
+          _unwatched.length ? '漏绑：' + _unwatched.join(',') : String(_ids.length) + ' 项全绑');
+  } catch (e) {
+    check("白名单里每个浮层都真的绑上了观察器", false, "读不到 DIALOG_OVERLAY_IDS: " + e.message);
+  }
 
   // 旧版本根本没有这些函数，直接 run 会把整台砸崩；缺实现必须逐条记红而不是"没测"。
   const guard = (name, fn) => {

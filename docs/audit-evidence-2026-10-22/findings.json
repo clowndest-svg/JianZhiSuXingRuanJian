@@ -1,0 +1,51 @@
+{
+  "active_socket_after_ban": {
+    "event": "ack",
+    "persisted": true,
+    "http_status": 403
+  },
+  "active_socket_after_revoke": {
+    "event": "ack",
+    "persisted": true,
+    "http_status": 401
+  },
+  "new_column_default": {
+    "included_in_safe_columns": true
+  },
+  "generic_export_recalled_message": {
+    "exposes_body": true
+  },
+  "admin_logout_cookie_replay": {
+    "status": 200
+  },
+  "reset_password_reuse": {
+    "login_statuses": [
+      200,
+      200
+    ]
+  },
+  "gate_above_published_build": {
+    "manifest_code": 34,
+    "accepted_value": 99999
+  },
+  "audit_atomicity": {
+    "business_write_survived_audit_failure": true
+  },
+  "community_page_queries": {
+    "cards": 12,
+    "selects_excluding_auth": 73
+  },
+  "comment_media_orphan_detection": {
+    "files": 1,
+    "referenced": 0,
+    "orphans": 1
+  },
+  "delete_with_other_users_comment_like": {
+    "status": 500,
+    "type": "HTTPException"
+  },
+  "account_delete_media": {
+    "delete_code": 0,
+    "owned_avatar_file_remains": true
+  }
+}

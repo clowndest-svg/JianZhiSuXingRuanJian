@@ -19,6 +19,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -82,11 +83,116 @@ def body_of(r):
     return r if isinstance(r,str) else r.body.decode("utf8")
 
 
+def _js_call_args(src, open_idx):
+    """从 '(' 之后扫到配对 ')'，按顶层逗号切参数。字符串内的括号与逗号不参与配对。"""
+    BS = chr(92)
+    QUOTES = ('"', "'", chr(96))
+    depth, i, quote, parts = 1, open_idx + 1, None, ['']
+    while i < len(src) and depth:
+        ch = src[i]
+        if quote:
+            parts[-1] += ch
+            if ch == BS:
+                parts[-1] += src[i + 1]
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in QUOTES:
+            quote = ch
+            parts[-1] += ch
+        elif ch == '(':
+            depth += 1
+            parts[-1] += ch
+        elif ch == ')':
+            depth -= 1
+            if depth == 0:
+                break
+            parts[-1] += ch
+        elif ch == ',' and depth == 1:
+            parts.append('')
+        else:
+            parts[-1] += ch
+        i += 1
+    return parts
+
+
+def _js_string_literals(arg):
+    """把一个参数里出现过的字符串字面量按顺序拼起来，代表它运行时画出来的样子。
+    拼接中间夹的变量（+ x +）会丢掉，但排版结构件都在字面量里，够用。"""
+    BS = chr(92)
+    QUOTES = ('"', "'", chr(96))
+    out, i, quote, buf = [], 0, None, ''
+    while i < len(arg):
+        ch = arg[i]
+        if quote is None:
+            if ch in QUOTES:
+                quote = ch
+                buf = ''
+        else:
+            if ch == BS:
+                buf += arg[i:i + 2]
+                i += 2
+                continue
+            if ch == quote:
+                out.append(buf)
+                quote = None
+            else:
+                buf += ch
+        i += 1
+    return ''.join(out)
+
+
+def _tool_dialog_bodies(src):
+    """每个 toolDialog( 调用点的正文。跳过函数定义本身，并对单层 name() 求值。"""
+    bodies = []
+    cursor = 0
+    while True:
+        at = src.find("toolDialog(", cursor)
+        if at < 0:
+            break
+        cursor = at + 10
+        head = src[max(0, at - 12):at]
+        if head.endswith("function "):
+            continue                      # 这是实现，不是调用点
+        args = _js_call_args(src, at + len("toolDialog"))
+        if len(args) < 2:
+            continue
+        body = _js_string_literals(args[1])
+        if not body:
+            # 正文来自 helper：toolDialog('标题', buildThing())。跟进去一层，
+            # 不然这类弹窗会静默逃过排版检查（本轮 mealConfirmHtml 就是这个形状）。
+            hit = re.search(r"([A-Za-z_$][\w$]*)\(\)", args[1])
+            if hit:
+                inner = re.search(r"function\s+%s\s*\([^)]*\)\s*\{" % re.escape(hit.group(1)), src)
+                if inner:
+                    close = src.find("\n}", inner.end())
+                    if close > 0:
+                        body = _js_string_literals(src[inner.end():close])
+        if body:
+            bodies.append(body)
+    return bodies
+
+
+def _run_namespace():
+    """每轮一个唯一的 Redis 命名空间。
+
+    单独一个函数是因为 main() 里第 1951 行有一句 `import time`，
+    那会让 time 在整个 main() 内先变成局部名——在 main 开头直接用 time 会 UnboundLocalError。
+    """
+    return 'qingsu-legacy-%d-%d' % (os.getpid(), int(time.time()))
+
+
 def main():
     mutant = any(a == "--mutant" or a.startswith("--mutant=") for a in sys.argv)
     assert os.path.dirname(SANDBOX)==os.path.join(ROOT,"_audit_sandbox")
     shutil.rmtree(SANDBOX, ignore_errors=True)
     os.makedirs(SANDBOX, exist_ok=True)
+    # 本机起着真 Redis 时，限流计数是跨进程、跨轮次共享的：上一轮把某个窗口打满，
+    # 这一轮同名的键一上来就是 429，判据会以"产品坏了"的样子红一片（实测红过 4 条）。
+    os.environ['QINGSU_CACHE_NAMESPACE'] = _run_namespace()
 
     m = load_server(get_source(mutant))
     r3_missing = [f for f in ("set_day_mode", "submit_measure", "export_csv", "ask",
@@ -497,6 +603,17 @@ def main():
     check("前端没有摄像机与模型残留",
           "Body3D" not in js_txt and "ex3DCamera" not in js_txt
           and "setEx3DAngle" not in js_txt and "MUSCLE_VOLUMES" not in js_txt, "")
+    # Exercise the real card projection so moving it into a module cannot evade the contract.
+    projection_conn = m.get_db()
+    try:
+        projection_pid = projection_conn.execute("INSERT INTO posts(user_id,body,title,edited_at,created_at) VALUES (?,?,'probe','edited-probe','test')", (user['id'], 'projection probe')).lastrowid
+        projection_conn.execute("INSERT OR IGNORE INTO follows VALUES (?,?,'test')", (user['id'], user['id']))
+        projection_conn.execute("INSERT INTO post_favorites VALUES (?,?,'test')", (projection_pid, user['id']))
+        projection_row = projection_conn.execute("SELECT * FROM posts WHERE id=?", (projection_pid,)).fetchone()
+        projection_card = m._post_card(projection_conn, projection_row, user)
+    finally:
+        projection_conn.rollback()
+        projection_conn.close()
     srv_src = get_source(mutant)
     check("服务端不再暴露 vendor/models 静态子目录",
           "_STATIC_SUBDIRS" not in srv_src and "/vendor/{name}" not in srv_src, "")
@@ -706,7 +823,11 @@ def main():
     # 白名单：内置知识与结构说明里的数字，不是统计量，允许写死
     STATIC_OK = {"kpi-protein-sub", "kpi-carbs-sub", "kpi-fat-sub",
                  "modal-tab-female", "modal-tab-male", "timer-display", "timer-label",
-                 "takeout-quota-rule", "display-user-public-url", "modal-download-url"}
+                 "takeout-quota-rule", "display-user-public-url", "modal-download-url",
+                 # 档案四组的 "1 · 基础资料" 这类是分组序号，不是读数：
+                 # 组数由 PROFILE_GROUPS 定死，永远不会被数据刷新。
+                 "prof-group-basic-title", "prof-group-goal-title",
+                 "prof-group-scene-title", "prof-group-dining-title"}
 
     def all_zero(t):
         """数字全为 0 —— 那是"没有记录"的诚实占位，不算假数据。"""
@@ -1523,23 +1644,10 @@ def main():
         feat_js = read_asset("features.js")  # 下面几条弹窗判据要看它，这里先取一次
         check("闲聊来源在界面上有中文标签，不显示 undefined", "chat:" in js_txt_for_build, "")
         # 弹窗排版系统要能被"下一个新弹窗"自动守住：裸 p/label/button 就是没接上样式。
-        # 取模板正文用"反引号之间"这种朴素切法，别拿正则去啃引号，容易把自己绕死。
-        _bodies = []
-        _cursor = 0
-        while True:
-            _at = feat_js.find("toolDialog(", _cursor)
-            if _at < 0:
-                break
-            _head = feat_js[_at:_at + 200]
-            # 只数调用点：toolDialog 自己的函数体里也有反引号模板，混进来会把实现当弹窗
-            if ('",' not in _head and "'," not in _head):
-                _cursor = _at + 10
-                continue
-            _tick = feat_js.find(chr(96), _at)
-            _end = feat_js.find(chr(96), _tick + 1) if _tick > 0 else -1
-            if _tick > 0 and _end > _tick:
-                _bodies.append(feat_js[_tick + 1:_end])
-            _cursor = _at + 10
+        # 取正文必须按"第几个参数"扫，不能"找下一个反引号"：模板可以是 'a'+x+'b' 拼出来的，
+        # 那种写法后面根本没有反引号，旧的朴素切法会一路漂到很后面的无关字面量上
+        # ——实测漂出过"四个不同调用点回同一份正文"，等于这几条判据一直在漏检。
+        _bodies = _tool_dialog_bodies(feat_js)
         check("每个 toolDialog 模板都用到了排版系统的结构件",
               len(_bodies) >= 6 and all(('class="td-' in b) for b in _bodies),
               {"模板数": len(_bodies),
@@ -1548,11 +1656,30 @@ def main():
         check("每个弹窗正文一开头就是排版结构件（不是裸段落）",
               all(b.lstrip()[:60].find('class="td-') >= 0 for b in _bodies),
               [b[:44] for b in _bodies if b.lstrip()[:60].find('class="td-') < 0][:2])
-        _btn_all = sum(b.count("<button") for b in _bodies)
-        _btn_classed = sum(b.count('<button type="button" class="td-') for b in _bodies)
-        check("弹窗模板里每个按钮都带样式类（裸按钮会退回浏览器默认外观）",
-              _btn_all > 0 and _btn_all == _btn_classed,
-              {"按钮数": _btn_all, "带类的": _btn_classed})
+        # 意图是"不许有按钮退回浏览器默认外观"，不是"必须用 td- 这套类名"。
+        # 原来只数 class="td- 前缀，会把 .theme-dot 这种自有组件误判成裸按钮，
+        # 反过来一个 class="nope" 的假样式类却能过——所以改成：有 type、有类、
+        # 且那个类在样式表里真的存在。
+        _css_all = read_asset("style.css") + read_asset("features.css")
+        _btn_tags = re.findall(r"<button\b[^>]*>", "".join(_bodies))
+        _missing_type = [b[:70] for b in _btn_tags if 'type="button"' not in b and 'type="submit"' not in b]
+        _no_class = [b[:70] for b in _btn_tags if "class=" not in b]
+        _unstyled = []
+        for b in _btn_tags:
+            mm = re.search(r'class="([^"$]+)"', b)
+            if not mm:
+                continue
+            classes = mm.group(1).split()
+            # 至少要有一个类在样式表里真的存在。允许再挂纯钩子类
+            # （td-file-upload 是给选择器/JS 用的标记，本身不需要样式），
+            # 否则一个样式并没写错的按钮会被误判成裸按钮。
+            if classes and not any("." + cls in _css_all for cls in classes):
+                _unstyled.append(mm.group(1))
+        check("弹窗模板里每个按钮都有 type 与样式类",
+              len(_btn_tags) > 0 and not _missing_type and not _no_class,
+              {"按钮数": len(_btn_tags), "缺type": _missing_type[:2], "无类": _no_class[:2]})
+        check("弹窗按钮用的样式类在样式表里真的存在（写错类名等于没样式）",
+              not _unstyled, sorted(set(_unstyled))[:4])
         check("弹窗里的输入框都挂在表单行或记录行上",
               all(("<input" not in b) or ("td-field-row" in b or "td-row" in b or "td-item" in b)
                   for b in _bodies),
@@ -1652,7 +1779,10 @@ def main():
                            if ("CREATE TABLE IF NOT EXISTS %s" % t) not in srv_txt]
         check("社区与私信的表都在 migrate_db 里建好", not _missing_tables, _missing_tables)
         check("建表集中在 migrate_db（不是路由里现建，第一次并发请求会抢着建）",
-              "_community_schema(c)" in srv_txt[srv_txt.index("def migrate_db"):srv_txt.index("\nmigrate_db()")], "")
+              # 锚点从"模块级那句 migrate_db()"换成迁移段的收尾：那句现在被
+              # QINGSU_SKIP_MIGRATE 包进 if/else（C05），再钉原文会在每次改迁移入口时误报。
+              "_community_schema(c)" in srv_txt[srv_txt.index("def migrate_db")
+                                                :srv_txt.index("\ndef guard_schema_version()")], "")
         # 未读一律现算：多存一份计数，就要在发/读/撤/重连四条路上各维护一次，早晚对不上
         check("未读不落第二份存储",
               "unread_a" not in srv_txt and "unread_b" not in srv_txt
@@ -1792,7 +1922,7 @@ def main():
                            "td-item-title", "td-item-meta")
                if (".%s{display:block" % k) not in feat_css])
         check("关注按钮的初始态来自服务端而不是写死",
-              "p.followed_by_me" in feat_js and '"followed_by_me": followed' in srv_src, "")
+              "p.followed_by_me" in feat_js and projection_card.get('followed_by_me') is True, "")
         # 评论的「删除」按钮看的是服务端给的 deletable。这个字段一旦漏返回，
         # 按钮就永远不出现，界面上看着像"本来就没有删除"——本轮真的这么漏过一次。
         check("评论回执带 deletable，且口径与删除端点一致（作者或楼主）",
@@ -2316,7 +2446,7 @@ def main():
           "banned_at" in _login_fn and "AccountBanned" in _login_fn
           and _login_fn.find("用户名或密码错误") < _login_fn.find("banned_at"), "")
     check("私信建连也认封号（手里已有票据也连不上，且复用原来那次存在性查询）",
-          "SELECT banned_at FROM users WHERE id=?" in _ws_fn and "SELECT 1 FROM users" not in _ws_fn
+          ("SELECT banned_at FROM users WHERE id=?" in _ws_fn or "SELECT u.banned_at FROM users u JOIN sessions" in _ws_fn) and "SELECT 1 FROM users" not in _ws_fn
           and "4403" in _ws_fn, "execute 次数=%d，封号在切片里=%s" % (_ws_fn.count("conn.execute("), "banned_at" in _ws_fn))
     check("封号响应带机器码，前端不拿 403 当凭据",
           '"code": "account_banned"' in srv_txt and "@app.exception_handler(AccountBanned)" in srv_txt, "")
@@ -2349,7 +2479,7 @@ def main():
     check("编辑时不带 title 的旧客户端不许把已有标题洗成空",
           'title = (row["title"] or "") if req.title is None else community.clean_title(req.title)' in srv_txt, "")
     check("帖子卡片带 edited_at（前端才能显示已编辑）",
-          '"edited_at": row["edited_at"]' in srv_txt, "")
+          projection_card.get('edited_at') == 'edited-probe', "")
     check("自己/对方的 id 比较用 qsSameId（=== 会把字符串 id 判成别人）",
           "function qsSameId" in _fjs and _fjs.count("qsSameId(") >= 4
           and "m.from_id === me" not in _fjs and "p.author.id === (state.user" not in _fjs, "")
@@ -2387,7 +2517,7 @@ def main():
           and "PRIMARY KEY(post_id, user_id)" in _fav_ddl
           and "FOREIGN KEY(post_id) REFERENCES posts(id)" in _fav_ddl, _fav_ddl[:120])
     check("帖子卡片带收藏态与收藏数（前端据此点亮星标）",
-          '"favorited_by_me": bool(' in srv_txt and '"favorite_count": int(' in srv_txt, "")
+          projection_card.get('favorited_by_me') is True and projection_card.get('favorite_count') == 1, "")
     check("收藏开关是接口不是本地状态",
           '@app.post("/api/community/posts/{post_id}/favorite")' in srv_txt
           and "INSERT OR IGNORE INTO post_favorites" in srv_txt
@@ -2397,7 +2527,7 @@ def main():
           and "JOIN post_favorites f ON f.post_id=p.id" in srv_txt
           and "p.status='open'" in srv_txt, "")
     check("搜索同时返回人和帖子，前端两段都渲染",
-          "posts = conn.execute(" in srv_txt and '"posts": [_post_card' in srv_txt
+          "posts = conn.execute(" in srv_txt and ('"posts": [_post_card' in srv_txt or '"posts": _post_cards' in srv_txt)
           and "r.posts" in _fjs, "")
     check("前端星标可点且状态跟着接口走",
           "async function toggleFavorite" in _fjs and "favorited_by_me" in _fjs

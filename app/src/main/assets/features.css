@@ -12,7 +12,9 @@
 .tool-dialog>header{display:flex;align-items:flex-start;gap:12px;padding:18px 18px 14px;border-bottom:1px solid #EEF2F6;flex:0 0 auto}
 .tool-dialog>header h2{margin:0;font-size:17px;font-weight:800;letter-spacing:-.01em;line-height:1.4;flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
 .tool-dialog .td-close{flex:0 0 auto;width:34px;height:34px;min-height:0;padding:0;border:1px solid #E2E8F0;border-radius:10px;background:#F8FAFC;color:#64748B;font-size:17px;line-height:1;cursor:pointer}
-.td-body{padding:16px 18px 18px;overflow:auto;flex:1 1 auto}
+/* min-height:0 是这套封顶能生效的关键：flex 项默认 min-height:auto，
+   正文比壳子高时它拒绝收缩，88dvh 的壳 + overflow:hidden 会把底栏直接切掉。 */
+.td-body{padding:16px 18px 18px;overflow:auto;flex:1 1 auto;min-height:0;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .td-lead{margin:0 0 14px;color:#64748B;font-size:13.5px;line-height:1.65}
 .td-note{margin:10px 0 0;color:#64748B;font-size:12.5px;line-height:1.6}
 .td-empty{padding:26px 12px;text-align:center;color:#94A3B8;font-size:14px;border:1px dashed #E2E8F0;border-radius:14px}
@@ -851,3 +853,52 @@ body.desktop-view .ex-detail{max-width:min(500px,calc(100vw - 24px))}
 #panel-workout .timer-btn{padding:8px 14px}
 #btn-complete-workout{line-height:1.45;padding:12px 10px;height:auto}
 @media (min-width:640px){.scene-switch{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
+/* ============================================================
+   r179 B10：对话框底栏、窄屏与 200% 字号下的弹窗行为
+   ============================================================ */
+/* 底栏是 flex 列里的一项，默认 0 1 auto = 可以被压缩。长内容一挤，
+   「提交举报」就先被压扁再被挤出 88dvh 的壳子。这里钉成不许压缩、可以换行。 */
+.tool-dialog>footer,.tool-dialog>.td-foot{
+  flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  padding:12px 18px calc(12px + env(safe-area-inset-bottom));
+  border-top:1px solid #EEF2F6;background:#fff}
+.tool-dialog>footer>.td-btn,.tool-dialog>footer>.td-btn-quiet,.tool-dialog>footer>.td-btn-danger{min-height:44px}
+/* toolDialog 只有 header + body，按钮写在正文里时同样要滚得到：给最后一行留出自下限。 */
+.tool-dialog .td-actions{flex-wrap:wrap}
+
+/* 320px / 200% 字号：弹窗优先保可视高度与左右留白，正文继续在自己的层里滚。 */
+@media(max-width:320px){
+ .tool-dialog{width:calc(100vw - 12px);max-height:94dvh}
+ .tool-dialog>header{padding:14px 14px 10px}
+ .td-body{padding:14px 14px 16px}
+ .tool-dialog>footer,.tool-dialog>.td-foot{padding:10px 14px calc(10px + env(safe-area-inset-bottom))}
+ /* 整页层在窄屏下靠 .pl-body 滚（它已经是 min-height:0 + overflow-y:auto），
+    底栏同样不许被压：私信输入行在 320 档曾被键盘顶掉半个按钮。 */
+ .pl-foot{flex:0 0 auto}
+ .pl-foot .td-btn{min-width:64px}
+}
+
+/* 减少动态效果：features.css 的通配符那条管全站，这里点名弹层，
+   免得将来谁给对话框写了带 !important 的动画就悄悄绕过。 */
+@media(prefers-reduced-motion:reduce){
+ .tool-dialog,.tool-dialog>header,.td-body,.td-foot,.page-layer,.pl-head,.pl-foot,
+ .bubble-menu,.dm-hold-layer,.dm-call-layer,.dm-call-mini,.pub-cheer-toast{
+  animation:none!important;transition:none!important}
+ .td-switch,.td-switch::after{transition:none!important}
+}
+/* 份量快捷选择（B03）：点一下只改上面那格数字，手改这条路永远保留。
+   按钮一排自动换行、各自最小 44px 高，320 窄屏与 200% 字号都能按到。 */
+.td-portion-row{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 4px;padding:0 14px}
+.td-portion{flex:1 1 84px;min-height:44px;padding:8px 10px;font-size:13.5px;line-height:1.25;
+ font-family:inherit;border:1.5px solid #CBD5E1;border-radius:999px;background:#fff;color:#334155;cursor:pointer}
+.td-portion.is-on{background:#ECFDF5;border-color:#059669;color:#047857;font-weight:700}
+.td-portion:active{transform:translateY(1px)}
+.td-meal-origin{margin:0 0 12px;padding:0 14px;font-size:12.5px;line-height:1.6;color:#475569;
+ background:#F8FAFC;border-left:3px solid #94A3B8;border-radius:0 8px 8px 0;overflow-wrap:anywhere}
+#meal-portion-note{padding-left:14px;padding-right:14px}
+@media(prefers-reduced-motion:reduce){.td-portion,.td-portion:active{transform:none!important;animation:none!important;transition:none!important}}
+/* 权限中心（B09）：读不到/被拒这类"不确定"要有自己的颜色，
+   不能跟"已关闭"共用一套灰色，否则界面看起来像是真的读到了 off。 */
+.td-badge[data-tone="warn"]{background:#FFFBEB;color:#92400E}
+.td-mini{min-height:40px}

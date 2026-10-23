@@ -16,6 +16,15 @@ _state = {"checked_at": 0.0, "cfg": None, "why": ""}
 _RECHECK = 30.0
 _TIMEOUT = float(os.environ.get("QINGSU_ONLINE_AI_TIMEOUT", "25"))
 
+# 三件事必须分开答（B06）：
+#   configured   —— 配置在不在。静态事实，**不证明能跑**；
+#   last_success —— 真的成功过一次吗、什么时候、哪个模型、花了多久；
+#   last_failure —— 最后一次失败是什么类型、什么时候。
+# 以前只有一个 ok，把"配置在"当成了"能用"，于是模型挂了很久还显示"已接入"。
+# 只记类型与耗时，**不记提示词、不记模型回复**：那里面全是用户的私人内容。
+_runtime = {"ok_at": 0.0, "ok_model": "", "ok_ms": 0,
+            "fail_at": 0.0, "fail_kind": "", "fail_ms": 0}
+
 # 热量合理区间：一份菜超过这个数或低于这个数，基本就是模型在胡说
 _CAL_RANGE = (15, 3000)
 _MACRO_RANGE = (0.0, 400.0)
@@ -49,17 +58,63 @@ def _load():
 
 
 def online_status(force=False):
-    """给状态接口和判据用：用哪个模型、为什么不能用。绝不返回密钥。"""
+    """给状态接口和判据用：用哪个模型、为什么不能用。绝不返回密钥。
+
+    `ok` 只代表**配置可用**，不代表跑得通。要判断"能不能用"，看 `last_success_at`：
+    配置在、但从没成功过，那就是"从没跑通过"，不能显示成可用。
+    """
     now = time.time()
     if not force and now - _state["checked_at"] < _RECHECK:
         cfg = _state["cfg"]
-        return {"ok": cfg is not None, "why": _state["why"],
+        base = {"ok": cfg is not None, "why": _state["why"],
                 "model": (cfg or {}).get("model", ""),
                 "source": "本机模型" if (cfg or {}).get("local") else "外部接口"}
-    cfg, why = _load()
-    _state.update(checked_at=now, cfg=cfg, why=why)
-    return {"ok": cfg is not None, "why": why, "model": (cfg or {}).get("model", ""),
-            "source": "本机模型" if (cfg or {}).get("local") else ("外部接口" if cfg else "无")}
+    else:
+        cfg, why = _load()
+        _state.update(checked_at=now, cfg=cfg, why=why)
+        base = {"ok": cfg is not None, "why": why, "model": (cfg or {}).get("model", ""),
+                "source": "本机模型" if (cfg or {}).get("local") else ("外部接口" if cfg else "无")}
+    base.update({
+        "configured": base["ok"],          # 配置在不在（静态）
+        "last_success_at": _runtime["ok_at"] or None,
+        "last_success_model": _runtime["ok_model"],
+        # 有没有跑过用时间戳判断，不能用 "ms or None"：一次几毫秒的调用是 0，
+        # 被 `or None` 吞掉就变成"从没跑过"，正好把这个字段要回答的问题答反。
+        "last_elapsed_ms": _runtime["ok_ms"] if _runtime["ok_at"] else None,
+        "last_failure_at": _runtime["fail_at"] or None,
+        "last_failure_kind": _runtime["fail_kind"],
+        "last_failure_ms": _runtime["fail_ms"] if _runtime["fail_at"] else None,
+    })
+    return base
+
+
+def _note_ok(model, began):
+    _runtime.update(ok_at=time.time(), ok_model=str(model or ""),
+                    ok_ms=int((time.time() - began) * 1000))
+
+
+def _note_fail(kind, began):
+    _runtime.update(fail_at=time.time(), fail_kind=str(kind or "unknown"),
+                    fail_ms=int((time.time() - began) * 1000))
+
+
+def online_state(status=None):
+    """把"配置在 / 真跑通过 / 最后一次成功"折成一个能给界面看的词。
+
+    up       —— 最近一次调用成功，且此后没有更新的失败；
+    down     —— 最近一次调用失败，或压根没配置；
+    untested —— 配置在，但一次都没真跑过。**这一格以前被冒充成 up**，
+                所以它必须是个独立的词，不能和 up 合并。
+    """
+    st = status if status is not None else online_status()
+    if not st["ok"]:
+        return "down"
+    last_ok, last_fail = st.get("last_success_at"), st.get("last_failure_at")
+    if last_ok and (not last_fail or last_ok >= last_fail):
+        return "up"
+    if last_fail:
+        return "down"
+    return "untested"
 
 
 def online_chat(prompt, max_tokens=400, temperature=0.3):
@@ -76,19 +131,26 @@ def online_chat(prompt, max_tokens=400, temperature=0.3):
     request = urllib.request.Request(url, data=body, headers={
         "Content-Type": "application/json",
         **({"Authorization": "Bearer " + str(cfg["api_key"])} if not cfg.get("local") else {})})
+    began = time.time()
     try:
         with urllib.request.urlopen(request, timeout=_TIMEOUT) as response:
             got = json.loads(response.read().decode("utf-8", "replace"))
     except urllib.error.HTTPError as error:
+        _note_fail("http_%d" % error.code, began)
         return None, "在线模型返回 HTTP %d" % error.code
     except Exception as error:
+        _note_fail(type(error).__name__, began)
         return None, "连不上在线模型（%s）" % type(error).__name__
     try:
         text = ((got.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
     except Exception:
         text = ""
     text = str(text).strip()
-    return (text, "") if text else (None, "在线模型返回了空内容")
+    if text:
+        _note_ok(cfg.get("model"), began)
+        return text, ""
+    _note_fail("empty_content", began)
+    return None, "在线模型返回了空内容"
 
 
 _JSON_BLOCK = re.compile(r"\{.*\}", re.S)
