@@ -1,0 +1,53 @@
+{
+  "checked_at": 1792739693,
+  "note": "Archive anchors verified before this evidence-only commit; final containing commit also checked clean and equal to origin/main after push.",
+  "main": {
+    "archive_anchor": "a735b1d2fb441abc20f02595540c612f84ef8413",
+    "origin_main": "a735b1d2fb441abc20f02595540c612f84ef8413",
+    "clean": true,
+    "business_candidate": "f8af43d15df7e234bfe33723d1bbff494ee7fe54",
+    "post_candidate_changes": [
+      "app/src/main/web_version.json",
+      "docs/audit-evidence-2026-10-23/local-tests.txt",
+      "docs/optimization-acceptance-2026-10-23.md",
+      "docs/optimization-execution-2026-10-22.md",
+      "docs/optimization-plan-2026-10-22.md",
+      "docs/release-evidence-r180/admin-ci-tests.json",
+      "docs/release-evidence-r180/admin-config.json",
+      "docs/release-evidence-r180/admin-runtime.json",
+      "docs/release-evidence-r180/artifact-consistency.json",
+      "docs/release-evidence-r180/backup-restore.json",
+      "docs/release-evidence-r180/browser-cache.json",
+      "docs/release-evidence-r180/chat-browser.json",
+      "docs/release-evidence-r180/environment.json",
+      "docs/release-evidence-r180/load-20-resources.json",
+      "docs/release-evidence-r180/load-20-result.json",
+      "docs/release-evidence-r180/load-5-resources.json",
+      "docs/release-evidence-r180/load-5-result.json",
+      "docs/release-evidence-r180/load-driver.py",
+      "docs/release-evidence-r180/local-cleanup.json",
+      "docs/release-evidence-r180/local-tests.json",
+      "docs/release-evidence-r180/media-cleanup.json",
+      "docs/release-evidence-r180/monitor.json",
+      "docs/release-evidence-r180/performance-local.json",
+      "docs/release-evidence-r180/pipelines.json",
+      "docs/release-evidence-r180/qoder-source.json",
+      "docs/release-evidence-r180/screenshots/chat-1200.png",
+      "docs/release-evidence-r180/screenshots/chat-320.png",
+      "docs/release-evidence-r180/screenshots/chat-393.png",
+      "docs/release-evidence-r180/server-cleanup.json",
+      "docs/release-evidence-r180/server-final-cleanup.json",
+      "docs/release-r180-final.md",
+      "qingsu.apk"
+    ]
+  },
+  "admin": {
+    "archive_anchor": "155534fe39dd4395756aec03ec5b4fc9ba52ff60",
+    "origin_main": "155534fe39dd4395756aec03ec5b4fc9ba52ff60",
+    "clean": true,
+    "business_candidate": "6335e3a105aea4374479c96b6063225d52ca55c3",
+    "post_candidate_changes": [
+      "docs/release-r180.md"
+    ]
+  }
+}
