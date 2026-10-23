@@ -688,10 +688,13 @@ check("两次档案写入按调用顺序发出",
 let opened = null;
 sandbox.window.AndroidBridge.openBrowser = (u) => { opened = u; };
 run(h.context, `openExerciseVideo(1)`);
-check("视频按钮跳必应视频搜索", !!opened && opened.includes("bing.com/videos/search") &&
-      encodeURIComponent("侧平举").slice(0, 6).length > 0, opened);
-check("跳转前声明视频来自第三方",
-      log.toasts.some(t => t.includes("第三方") && t.includes("不内置")), "");
+check("视频按钮跳抖音对应动作搜索", !!opened && opened.startsWith("https://www.douyin.com/search/") &&
+      decodeURIComponent(opened).includes(sandbox.window.__currentExercises[1].name.replace(/^\d+\.\s*/, "").trim()), opened);
+let nativeKeyword = '';
+sandbox.window.AndroidBridge.searchDouyin = keyword => { nativeKeyword = keyword; };
+run(h.context, `openExerciseVideo(1)`);
+check("新版App使用抖音搜索桥", nativeKeyword.includes("标准动作 教学"), nativeKeyword);
+delete sandbox.window.AndroidBridge.searchDouyin;
 
 // 日子切换真的打到后端
 log.fetches.length = 0;

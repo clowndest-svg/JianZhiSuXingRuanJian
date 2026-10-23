@@ -45,6 +45,55 @@ class CallSignalling(unittest.TestCase):
     def auth(self, name):
         return {"Authorization": "Bearer " + self.users[name]["token"], "X-App-Build": "99"}
 
+    def setUp(self):
+        c = self.m.get_db()
+        c.execute('DELETE FROM follows')
+        a, b, third = (self.users[n]['id'] for n in ('caller', 'callee', 'third'))
+        c.executemany('INSERT INTO follows VALUES (?,?,?)',
+                      [(a,b,'test'),(b,a,'test'),(third,b,'test'),(b,third,'test')])
+        c.commit(); c.close()
+
+    def invite(self, socket):
+        socket.send_json({'t':'call_invite','to':self.users['callee']['id'],
+                          'sdp':{'type':'offer','sdp':'v=0\r\n'}})
+
+    def test_no_follow_or_one_way_follow_cannot_ring_or_reserve_call(self):
+        a,b = (self.users[n]['id'] for n in ('caller','callee'))
+        with self.ws('caller') as ca, self.ws('callee') as cb:
+            ca.receive_json(); cb.receive_json()
+            for edges in ([],[(a,b)],[(b,a)]):
+                c=self.m.get_db();c.execute('DELETE FROM follows')
+                c.executemany('INSERT INTO follows VALUES (?,?,?)',[(x,y,'test') for x,y in edges])
+                c.commit();c.close()
+                self.invite(ca);error=ca.receive_json()
+                self.assertEqual(error['t'],'call_error');self.assertIn('互相关注',error['detail'])
+                self.assertFalse(self.m._CALLS);self.assertFalse(self.m._CALL_BY_USER)
+
+    def test_stale_invite_cannot_be_accepted_after_relation_removed(self):
+        with self.ws('caller') as ca, self.ws('callee') as cb:
+            ca.receive_json();cb.receive_json();self.invite(ca)
+            ident=ca.receive_json()['call_id'];cb.receive_json()
+            c=self.m.get_db();c.execute('DELETE FROM follows');c.commit();c.close()
+            cb.send_json({'t':'call_accept','call_id':ident,'sdp':{'type':'answer','sdp':'v=0\r\n'}})
+            for sock in (ca,cb):self.assertEqual(sock.receive_json()['t'],'call_end')
+            self.assertFalse(self.m._CALLS);self.assertFalse(self.m._CALL_BY_USER)
+
+    def test_unfollow_ends_ringing_and_active_calls(self):
+        for accept in (False,True):
+            self.setUp()
+            with self.ws('caller') as ca, self.ws('callee') as cb:
+                ca.receive_json();cb.receive_json();self.invite(ca)
+                ident=ca.receive_json()['call_id'];cb.receive_json()
+                if accept:
+                    cb.send_json({'t':'call_accept','call_id':ident,'sdp':{'type':'answer','sdp':'v=0\r\n'}})
+                    self.assertEqual(ca.receive_json()['t'],'call_accept');self.assertEqual(cb.receive_json()['t'],'call_active')
+                r=self.c.post('/api/community/users/'+str(self.users['callee']['id'])+'/follow',
+                              headers=self.auth('caller'),json={'on':False})
+                self.assertEqual(r.status_code,200,r.text)
+                for sock in (ca,cb):
+                    end=sock.receive_json();self.assertEqual(end['t'],'call_end');self.assertIn('互相关注',end['reason'])
+                self.assertFalse(self.m._CALLS);self.assertFalse(self.m._CALL_BY_USER)
+
     def ticket(self, name):
         r = self.c.post("/api/chat/ticket", headers=self.auth(name), json={})
         self.assertEqual(r.status_code, 200, r.text)

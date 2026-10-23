@@ -118,6 +118,7 @@ jobs:
       - run: python tests/test_deploy_pairing.py
       - run: python tests/test_calls.py
       - run: python tests/test_native_media_contract.py
+      - run: python tests/test_douyin_bridge.py
       # 并发与冗余计数：起真 Uvicorn 打同一批请求，判据只看落库结果
       - run: python tests/test_consistency.py
       # 多进程共享限流：CI 起了 Redis 服务，所以这里"连不上 Redis"就是红而不是跳过
@@ -144,6 +145,7 @@ jobs:
       - run: node tests/dm-asr-race.mjs
       # 私信四态 / 单条重试复用 request_id / 重连补拉 / 通话失败分型
       - run: node tests/dm-state-call.mjs
+      - run: node tests/exercise-video.mjs
       # B01：首屏三组的顺序、点击、状态机与"未知不画成 0"
       - run: node tests/home-first-screen.mjs
       - name: Install browser test runtime

@@ -260,4 +260,16 @@ function fresh(opts = {}) {
     console.log('PASS: ws 已读回执能把气泡状态从已发送翻到已读');
 }
 
+{
+    const { h, run } = fresh();
+    run('cm.thread.partner.mutual_follow=false;paintThread();');
+    assert.match(run('document.getElementById("pl-slot").innerHTML'), /disabled title="互相关注后才能语音通话"/);
+    let permissions=0;
+    h.sandbox.dmEnsureMicrophone=async()=>{permissions++;return true;};
+    await run('dmStartCall()');
+    assert.equal(permissions,0,'非互关不应请求麦克风');
+    assert.equal(run('dmCall.state'),'idle');
+    assert.match(h.log.toasts.at(-1),/互相关注/);
+    console.log('PASS: 非互关按钮禁用，直接调用也在申请麦克风前拒绝');
+}
 console.log('PASS: dm-state-call 全部判据通过');

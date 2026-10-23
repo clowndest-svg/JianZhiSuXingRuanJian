@@ -2458,7 +2458,8 @@ function paintThread() {
     const slot = cmEl("pl-slot");
     if (slot) {
         const blocked = !!(p && p.blocked);
-        slot.innerHTML = (blocked ? '' : '<button type="button" class="td-mini dm-call-btn" id="thread-call-btn" onclick="dmStartCall()" aria-label="语音通话">语音</button>')
+        slot.innerHTML = (blocked ? '' : '<button type="button" class="td-mini dm-call-btn" id="thread-call-btn" onclick="dmStartCall()" aria-label="语音通话"'
+            + (p.mutual_follow ? '' : ' disabled title="互相关注后才能语音通话"') + '>语音</button>')
             + '<button type="button" class="td-mini" id="thread-block-btn" aria-pressed="' +
             (blocked ? "true" : "false") + '" onclick="toggleBlock()">' + (blocked ? "取消拉黑" : "拉黑") + "</button>"
             + '<button type="button" class="td-mini" onclick="openBubbleTheme()">气泡</button>';
@@ -2607,7 +2608,7 @@ function dmFootHTML() {
         + tile('拍照', "document.getElementById('dm-camera-file').click()", true)
         + tile('视频', "document.getElementById('dm-video-file').click()", true)
         + tile('常用语', 'dmShowPhrases()', false) + '</div>'
-        + '<p class="dm-lock-hint" id="dm-lock-hint">互相关注后才能发图片和视频；表情、语音不受此限制。</p>'
+        + '<p class="dm-lock-hint" id="dm-lock-hint">互相关注后才能发图片、视频和语音通话；表情和语音消息不受此限制。</p>'
         + '<div class="dm-phrases" id="dm-phrases" hidden>' + DM_PHRASES.map(p => '<button type="button" onclick="dmUsePhrase(\'' + escapeHtml(p) + '\')">' + escapeHtml(p) + '</button>').join('') + '</div></section>'
         + '<section id="dm-quote-bar" class="dm-quote-bar" hidden></section>'
         + '<section id="dm-draft" class="dm-draft" aria-label="待发送附件" hidden></section>'
@@ -4067,6 +4068,7 @@ async function dmStartCall() {
     if (!cm.thread) return;
     const peer = cm.thread.partner;
     if (!peer || peer.blocked) { callNativeToast("现在不能给这个人打电话"); return; }
+    if (!peer.mutual_follow) { callNativeToast("互相关注后才能语音通话"); return; }
     if (!dmCallSupported()) { callNativeToast("当前客户端不支持语音通话，请升级系统 WebView"); return; }
     if (!wsOpen()) { callNativeToast("实时连接还没连上，正在重连"); connectChat(); return; }
     const allowed = await dmEnsureMicrophone();

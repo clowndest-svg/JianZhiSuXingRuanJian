@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 64;
+const APP_BUILD = 65;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -4400,13 +4400,18 @@ function openExerciseVideo(idx) {
     const list = window.__currentExercises || [];
     const item = list[idx];
     if (!item) return;
-    const name = String(item.name).replace(/^\d+\.\s*/, "").replace(/\s*[\/（(].*$/, "").trim();
-    const url = "https://cn.bing.com/videos/search?q=" + encodeURIComponent(name + " 标准动作 健身");
-    callNativeToast("视频来自第三方，本软件不内置教程");
+    const name = String(item.name || "").replace(/^\d+\.\s*/, "").trim();
+    if (!name) return;
+    const keyword = name + " 标准动作 教学";
+    const url = "https://www.douyin.com/search/" + encodeURIComponent(keyword) + "?type=video";
+    if (window.AndroidBridge && window.AndroidBridge.searchDouyin) {
+        window.AndroidBridge.searchDouyin(keyword);
+        return;
+    }
     if (window.AndroidBridge && window.AndroidBridge.openBrowser) {
         window.AndroidBridge.openBrowser(url);
     } else {
-        window.open(url, "_blank");
+        window.open(url, "_blank", "noopener,noreferrer");
     }
 }
 

@@ -42,7 +42,18 @@ try {
   const bid=await uid('uipartner',b.token),aid=await uid('uiowner',a.token);
   await page.addInitScript(({token,aid})=>{localStorage.setItem('QINGSU_AUTH_TOKEN',token);localStorage.setItem('QINGSU_AUTH_USER',JSON.stringify({id:aid,username:'uiowner'}));},{token:a.token,aid});
   await page.goto(base);await page.waitForFunction(()=>typeof openDM==='function');
+  await page.waitForSelector('.ex-btn.video',{state:'attached'});
+  const exerciseSearch=await page.evaluate(()=>{
+    const saved=window.open;let url='';window.open=u=>{url=u;};
+    document.querySelector('.ex-btn.video').click();window.open=saved;
+    return {url,name:window.__currentExercises[0].name};
+  });
+  assert.equal(new URL(exerciseSearch.url).origin,'https://www.douyin.com');
+  assert.ok(decodeURIComponent(exerciseSearch.url).includes(exerciseSearch.name.replace(/^\d+\.\s*/, '').trim()));
+  checks.push('rendered exercise video button opens matching Douyin video search');
   await page.evaluate(id=>openDM(id),bid);await page.waitForSelector('#dm-input');
+  assert.equal(await page.locator('#thread-call-btn').isDisabled(),true);
+  checks.push('non-mutual voice call button disabled in real browser');
   await page.waitForFunction(()=>dmOfficial.loaded);
   await page.locator('#dm-input').fill('前后');await page.locator('#dm-input').evaluate(e=>{e.setSelectionRange(1,1);dmRememberCaret();});
   await page.locator('#dm-emoji-btn').click();
@@ -195,6 +206,11 @@ try {
   await page.waitForFunction(()=>/对方发来的消息/.test(document.querySelector('#thread-bubbles .dm-quote-inline')?.textContent||''));
   assert.equal(await page.locator('#dm-quote-bar').isVisible(),false);
   checks.push('quote reply shows the original and clears after sending');
+  await api('/api/community/users/'+bid+'/follow',{on:true},a.token);
+  await api('/api/community/users/'+aid+'/follow',{on:true},b.token);
+  await page.evaluate(()=>refreshThread());
+  assert.equal(await page.locator('#thread-call-btn').isEnabled(),true);
+  checks.push('mutual follow enables voice call button after real API refresh');
   const micGate=await page.evaluate(async()=>{const saved=window.AndroidBridge;window.AndroidBridge={microphonePermissionState:()=> 'blocked',requestMicrophonePermission(){}};const blocked=await dmEnsureMicrophone();window.AndroidBridge={microphonePermissionState:()=> 'granted',requestMicrophonePermission(){}};const granted=await dmEnsureMicrophone();window.AndroidBridge=saved;return {blocked,granted};});
   assert.deepEqual(micGate,{blocked:false,granted:true});
   checks.push('microphone preflight blocks blocked state and passes granted state');

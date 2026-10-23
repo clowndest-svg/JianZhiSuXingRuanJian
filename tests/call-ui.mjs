@@ -23,6 +23,8 @@ try{
  const api=async(url,body,token)=>{const r=await fetch(base+url,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-App-Build':String(build),...(token?{Authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});const d=await r.json();if(r.status!==200)throw new Error(url+' '+r.status+' '+JSON.stringify(d));return d;};
  const profile={password:'Call!12345',age:30,height:170,weight_jin:160,target_weight_jin:140};
  const a=await api('/api/register',{...profile,username:'callowner'}),b=await api('/api/register',{...profile,username:'callpartner'});
+ await api('/api/community/users/'+b.id+'/follow',{on:true},a.token);
+ await api('/api/community/users/'+a.id+'/follow',{on:true},b.token);
  browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
  const mk=async(user)=>{const context=await browser.newContext({viewport:{width:393,height:850},permissions:['microphone']});const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(String(e)));
   await page.addInitScript(({token,id,name})=>{localStorage.setItem('QINGSU_AUTH_TOKEN',token);localStorage.setItem('QINGSU_AUTH_USER',JSON.stringify({id,username:name}));window.__QS_FORCE_RELAY__=true;window.__speakerCalls=[];window.AndroidBridge={playBeep(){},vibrate(){},startVoiceCallAudio(){},stopVoiceCallAudio(){},setVoiceCallSpeaker(v){window.__speakerCalls.push(v);}};},{token:user.token,id:user.id,name:user.username});

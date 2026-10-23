@@ -203,6 +203,28 @@ public class WebAppInterface {
     }
 
     @JavascriptInterface
+    public void searchDouyin(String keyword) {
+        if (keyword == null || keyword.trim().isEmpty() || keyword.length() > 200) return;
+        final String query = keyword.trim();
+        final String packageName = "com.ss.android.ugc.aweme";
+        try {
+            // Package visibility is declared explicitly for Android 11+.
+            context.getPackageManager().getPackageInfo(packageName, 0);
+            android.net.Uri uri = new android.net.Uri.Builder().scheme("snssdk1128")
+                    .authority("search").appendQueryParameter("keyword", query).build();
+            Intent search = new Intent(Intent.ACTION_VIEW, uri).setPackage(packageName);
+            search.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (search.resolveActivity(context.getPackageManager()) != null) {
+                context.startActivity(search);
+                return;
+            }
+        } catch (Exception ignored) {
+            // Missing, disabled, or incompatible Douyin: retain the same search on the web.
+        }
+        openBrowser("https://www.douyin.com/search/" + android.net.Uri.encode(query) + "?type=video");
+    }
+
+    @JavascriptInterface
     public boolean launchApp(String packageName) {
         if (!"com.sankuai.meituan".equals(packageName) && !"me.ele".equals(packageName)) return false;
         try {

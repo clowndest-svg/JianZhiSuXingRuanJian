@@ -4880,6 +4880,8 @@ def toggle_follow(ident: str, req: FollowReq, user: dict = Depends(get_current_u
                 conn.execute("DELETE FROM notifications WHERE kind='follow' AND dedup=?",
                              ("follow:%d:%s" % (user["id"], target["id"]),))
         conn.commit()
+        if not req.on:
+            _end_call_between(user["id"], target["id"])
         return {"code": 0, "following": bool(req.on),
                 "followers": int(conn.execute("SELECT COUNT(*) FROM follows WHERE followee_id=?",
                                               (target["id"],)).fetchone()[0])}
@@ -5796,6 +5798,35 @@ def _call_cleanup(call_id, *, event=None, targets=(), reason=""):
             _push(int(uid), {"t": event, "call_id": call_id, "reason": reason})
 
 
+def _end_call_between(a, b):
+    """Follow HTTP handlers run in a worker thread; mutate call tasks on their WS loop."""
+    call_id = _CALL_BY_USER.get(a)
+    call = _CALLS.get(call_id)
+    if not call or {call["from"], call["to"]} != {a, b}:
+        return
+    def finish():
+        _call_cleanup(call_id, event="call_end", targets=(a, b), reason="互相关注后才能语音通话")
+    for uid in (a, b):
+        for socket in tuple(_WS_HUB.get(uid, ())):
+            loop = _WS_LOOPS.get(socket)
+            if loop and not loop.is_closed():
+                loop.call_soon_threadsafe(finish)
+                return
+    finish()
+
+
+def _call_permission(a, b):
+    conn = get_db()
+    try:
+        if _blocked(conn, a, b) or _blocked(conn, b, a):
+            return "对方不接受你的私信"
+        if not mutual_follow(conn, a, b):
+            return "互相关注后才能语音通话"
+        return ""
+    finally:
+        conn.close()
+
+
 async def _call_timeout(call_id):
     await asyncio.sleep(CALL_RING_SECONDS)
     call = _CALLS.get(call_id)
@@ -5861,13 +5892,9 @@ async def _handle_call(ws, uid, kind, data):
         if not me or not peer:
             await ws.send_json({"t": "call_error", "detail": "找不到这个用户"})
             return
-        conn = get_db()
-        try:
-            blocked = _blocked(conn, to, uid) or _blocked(conn, uid, to)
-        finally:
-            conn.close()
-        if blocked:
-            await ws.send_json({"t": "call_error", "detail": "对方不接受你的私信"})
+        denied = _call_permission(uid, to)
+        if denied:
+            await ws.send_json({"t": "call_error", "detail": denied})
             return
         if uid in _CALL_BY_USER or to in _CALL_BY_USER:
             await ws.send_json({"t": "call_busy", "detail": "你或对方正在另一通电话里"})
@@ -5887,6 +5914,12 @@ async def _handle_call(ws, uid, kind, data):
         _push(to, {"t": "call_invite", "call_id": call_id, "from": me, "sdp": sdp})
         return
     call_id = data.get("call_id")
+    if kind in ("call_accept", "call_ice"):
+        call = _call_participant(call_id, uid)
+        denied = _call_permission(call["from"], call["to"])
+        if denied:
+            _call_cleanup(call_id, event="call_end", targets=(call["from"], call["to"]), reason=denied)
+            return
     if kind == "call_accept":
         call = _call_participant(call_id, uid)
         if call["to"] != uid or call["state"] != "ringing":
