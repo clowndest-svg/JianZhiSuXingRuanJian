@@ -1,0 +1,60 @@
+{
+  "manifest": {
+    "version_code": 65,
+    "version_name": "2.2.20",
+    "min_version_code": 65,
+    "apk_url": "https://124.220.54.64/qingsu.apk",
+    "size": 5488150,
+    "md5": "b6a7aa37c1012537e1e9b3b762c2af43",
+    "sha256": "38fba2576bbcb527e5cc545a97613d77ef2d5f3c5f3fa6cfc8f7ff8e65c5d726",
+    "notes": "r181 / 2.2.20 (65)\n训练动作演示改用抖音搜索，私聊语音通话仅限互相关注。\n\n更新内容：\n• 网页点击“看演示视频”打开对应动作的抖音视频搜索页，保留动作版本名称。\n• Android App 检查抖音安装情况，优先打开抖音搜索；未安装或无法打开时回到同关键词的抖音网页。\n• 语音通话在界面、呼叫和接听信令中检查互关，一方取消关注后结束待接或进行中的通话。\n• 表情和语音消息继续使用原有私信权限。"
+  },
+  "ready": {
+    "release": "r39923691402",
+    "source_revision": "23126c6c7fd4222b14dbabfe9754d5eaa5740f90",
+    "status": "ok",
+    "site_base": "https://124.220.54.64",
+    "min_build": 0,
+    "schema_version": 12,
+    "schema_required": 12,
+    "build_override": true,
+    "gate": {
+      "blocked": 0,
+      "builds": {
+        "65": 30
+      }
+    },
+    "geoip": {
+      "ok": true,
+      "version": 3,
+      "bytes": 11122642
+    },
+    "keys": {
+      "isolated": true,
+      "regenerated": [],
+      "present": {
+        "media-signing.key": true,
+        "ws-secret.key": true
+      }
+    },
+    "chat": {
+      "online": 0,
+      "sockets": 0,
+      "rejected": 0,
+      "redis": true,
+      "turn": true,
+      "calls": 0,
+      "asr": true
+    },
+    "rate": {
+      "store": "redis",
+      "degraded": false,
+      "last_error": "",
+      "memory_buckets": 0
+    }
+  },
+  "apk_signature_v2": true,
+  "apk_signature_v3": true,
+  "certificate_sha256": "c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f",
+  "seven_apk_assets_equal_workspace": true
+}

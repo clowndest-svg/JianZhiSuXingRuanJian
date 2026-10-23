@@ -1,0 +1,26 @@
+{
+  "source": "23126c6c7fd4222b14dbabfe9754d5eaa5740f90",
+  "checked_at": 1792744650.0652206,
+  "checks": [
+    "no-follow denied",
+    "one-way denied",
+    "mutual invite and accept",
+    "unfollow terminates both synthetic participants"
+  ],
+  "original_users": 2,
+  "remaining_users": 2,
+  "foreign_key_violations": 0,
+  "real_audio_tested": false,
+  "synthetic_users_cleaned": 2,
+  "admin_pairing": {
+    "admin_revision": "6335e3a105aea4374479c96b6063225d52ca55c3",
+    "app_release": "r39923691402",
+    "app_schema_version": 12,
+    "app_schema_required": 12,
+    "app_version": null,
+    "app_error": null,
+    "paired": true,
+    "missing_app_columns": [],
+    "note": "paired \u4e3a\u5047\u65f6\u4e0d\u8981\u53d1\u540e\u53f0\uff1a\u4e24\u4ed3\u5171\u7528\u4e00\u4e2a\u5e93\uff0c\u540e\u53f0\u5148\u4e0a\u4f1a\u8ba9\u9ad8\u5371\u64cd\u4f5c\u5199\u5230\u8fd8\u4e0d\u5b58\u5728\u7684\u5217\u4e0a"
+  }
+}

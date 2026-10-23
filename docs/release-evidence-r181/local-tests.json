@@ -1,0 +1,32 @@
+{
+  "calls": {
+    "passed": 6,
+    "failed": 0
+  },
+  "native_douyin": {
+    "passed": 2,
+    "uses_spies": true
+  },
+  "security": {
+    "passed": 24
+  },
+  "native_microphone": {
+    "passed": 21
+  },
+  "legacy_frontend": {
+    "passed": 355
+  },
+  "frontend_budget": {
+    "passed": 13
+  },
+  "chrome": {
+    "checks": 33,
+    "page_errors": 0
+  },
+  "gradle": [
+    "assembleRelease",
+    "lintRelease"
+  ],
+  "signed": true,
+  "physical_douyin_app_tested": false
+}
