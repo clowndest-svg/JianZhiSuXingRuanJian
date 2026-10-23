@@ -69,6 +69,13 @@ jobs:
           - 6379:6379
     steps:
       - uses: actions/checkout@v4
+      # B07 那条判据借用了后台仓库的 disposable 夹具（真发请求、真读库）。
+      # 缺这一仓时它会直接起不来——本地是兄弟目录，CI 里必须显式签出来。
+      - uses: actions/checkout@v4
+        with:
+          repository: clowndest-svg/JianZhiSuXingRuanJianHouTai
+          ref: main
+          path: .admin-repo
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -98,7 +105,11 @@ jobs:
       # B06：配置在 / 真跑通过 / 最后一次成功时间必须分开答，且状态里不许带提示词
       - run: python tests/test_optimization_ai_status.py
       # B07：周报三维 + 2~3 条带依据的反馈；缺记日不许当 0 摄入
-      - run: python tests/test_optimization_weekly.py
+      - name: B07 weekly review contracts
+        env:
+          QINGSU_ADMIN_REPO: ${{ github.workspace }}/.admin-repo
+          QINGSU_APP_REPO: ${{ github.workspace }}
+        run: python tests/test_optimization_weekly.py
       - run: python tests/test_update_copy.py
       - run: python tests/test_companion.py
       - run: python tests/test_chat_media.py
