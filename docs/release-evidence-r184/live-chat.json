@@ -1,0 +1,18 @@
+{
+  "source": "cc26435c4e0131ba019b04e75fdf7e1ff733451a",
+  "checked_at": "2026-10-23T16:02:12.766Z",
+  "checks": [
+    "public HTTPS actual short messages remain under 49px tall",
+    "all 20 presets available; selected forest applies to actual conversation",
+    "public HTTPS image upload stays local with no image upload requests and survives browser restart",
+    "delete restores default background",
+    "public HTTPS right-click editing persists and peer sees edited revision",
+    "public HTTPS long-press personal deletion survives reload",
+    "public HTTPS visible read receipts leave offscreen history unread",
+    "public HTTPS reverse paging keeps message array and DOM bounded",
+    "public HTTPS search jumps to real message context and returns latest"
+  ],
+  "remaining_users": 2,
+  "foreign_key_violations": 0,
+  "cleaned": 2
+}

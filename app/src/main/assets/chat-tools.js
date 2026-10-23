@@ -16,7 +16,7 @@ function badge(){
 }
 function incoming(id){if(!detached)return false;if(!newIds.has(Number(id))){newIds.add(Number(id));news++;}badge();return true;}
 function reset(){detached=false;news=0;newIds.clear();badge();}
-async function latest(){reset();dmUi.stickBottom=true;await refreshThread(true);}
+async function latest(){epoch++;loading=false;readBusy=false;reset();dmUi.stickBottom=true;await refreshThread(true);}
 function anchor(host){const top=host.getBoundingClientRect().top;const n=Array.from(host.querySelectorAll('[data-dm-key^="m"]')).find(n=>n.getBoundingClientRect().bottom>top+8);return n?{key:n.dataset.dmKey,y:n.getBoundingClientRect().top}:null;}
 async function older(){
  if(loading||!cm.thread?.more||!cm.thread.cursor)return;

@@ -1,0 +1,30 @@
+STEP desktop right-click edits own text; API peer sees revision and edited marker
+STEP mobile long press offers personal deletion; peer keeps original and cannot edit incoming
+STEP personal deletion persists across reload
+STEP only visible foreground incoming messages get read receipts; offscreen history stays unread
+STEP reverse pagination across 420 records keeps both memory and DOM at 120 messages
+STEP incoming websocket messages preserve history window and show return-latest badge
+STEP server-backed history search jumps to bounded surrounding context
+STEP return latest fetches newest cursor window
+STEP late older-page response cannot replace an explicit latest window
+STEP targeted read event repaints sender status immediately
+STEP cancel ASR dismisses pending state and discards late transcription
+STEP refined theme/background panels stay within 320/393/1200 widths
+{
+  "folder": "D:\\RuanJian\\JiaZhiSuXianApk\\_audit_sandbox\\history-r184-10400",
+  "checks": [
+    "desktop right-click edits own text; API peer sees revision and edited marker",
+    "mobile long press offers personal deletion; peer keeps original and cannot edit incoming",
+    "personal deletion persists across reload",
+    "only visible foreground incoming messages get read receipts; offscreen history stays unread",
+    "reverse pagination across 420 records keeps both memory and DOM at 120 messages",
+    "incoming websocket messages preserve history window and show return-latest badge",
+    "server-backed history search jumps to bounded surrounding context",
+    "return latest fetches newest cursor window",
+    "late older-page response cannot replace an explicit latest window",
+    "targeted read event repaints sender status immediately",
+    "cancel ASR dismisses pending state and discards late transcription",
+    "refined theme/background panels stay within 320/393/1200 widths"
+  ],
+  "errors": []
+}

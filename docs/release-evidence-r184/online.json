@@ -1,0 +1,77 @@
+{
+  "manifest": {
+    "version_code": 68,
+    "version_name": "2.2.23",
+    "min_version_code": 68,
+    "apk_url": "https://124.220.54.64/qingsu.apk",
+    "size": 9392189,
+    "md5": "0979035efd6efd315132e93a5ecd26be",
+    "sha256": "5b14314baf479f31007298a2dd439495368b10c1c44689e4da1dded067206d4b",
+    "notes": "r184 / 2.2.23 (68)\n- 细化20款气泡和20款背景的光泽、纹理与插画细节，聊天保持紧凑横向布局。\n\n更新内容：\n• 细化20款气泡和20款背景的光泽、纹理与插画细节，聊天保持紧凑横向布局。\n• 手机长按、电脑右击消息可删除自己的记录；自己的文字支持重新编辑，并向双方展示已编辑标记。\n• 语音转文字支持取消和收起转写，取消后的迟到结果不再显示。\n• 长聊天自动向上分页，最多保留120条页面消息；查看历史时提示新消息，可一键返回最新。\n• 新增聊天记录搜索与上下文定位，引用旧消息可直接定位；实际看到消息才发送已读回执。"
+  },
+  "ready": {
+    "release": "r39979977577",
+    "source_revision": "cc26435c4e0131ba019b04e75fdf7e1ff733451a",
+    "status": "ok",
+    "site_base": "https://124.220.54.64",
+    "min_build": 0,
+    "schema_version": 13,
+    "schema_required": 13,
+    "build_override": true,
+    "gate": {
+      "blocked": 0,
+      "builds": {
+        "68": 30
+      }
+    },
+    "geoip": {
+      "ok": true,
+      "version": 3,
+      "bytes": 11122642
+    },
+    "keys": {
+      "isolated": true,
+      "regenerated": [],
+      "present": {
+        "media-signing.key": true,
+        "ws-secret.key": true
+      }
+    },
+    "chat": {
+      "online": 0,
+      "sockets": 0,
+      "rejected": 0,
+      "redis": true,
+      "turn": true,
+      "calls": 0,
+      "asr": true
+    },
+    "rate": {
+      "store": "redis",
+      "degraded": false,
+      "last_error": "",
+      "memory_buckets": 0
+    }
+  },
+  "source": "cc26435c4e0131ba019b04e75fdf7e1ff733451a",
+  "fifteen_apk_assets_equal_workspace": true,
+  "fourteen_online_static_assets_equal_workspace": true,
+  "index_serves_versioned_wardrobe_resources": true,
+  "asset_sha256": {
+    "app.js": "bba9be72f2e4ec65cb356c044edce2bda12a4128d0cfbe1b0103f0a579643867",
+    "features.js": "a4399493a6112e001e10fe6fda4384c23d7c89bcb2a7eb819f8fdb32d441a536",
+    "companion.js": "18e96316987732b9c1adba3dd0838c818ec8e11fd44981c79e191045f65f04d3",
+    "sw.js": "fc455bd3a9dd4b698f8741c671c45adf7af0b4314298beb5cb6506219f45e0a7",
+    "index.html": "754683b1ddcf5c85fba8ee4c70f8204f282fcaa7f0ab4fbed9603f6409eb9bee",
+    "style.css": "51e76c12cd7a5154c48f84e8d45fecec8f018b0876f722c2a3b8db0fe933ea93",
+    "features.css": "d923fbd161cfbb33ff4abb073e99e930b1db5fa9451a74db8752a3f5520e6acf",
+    "bubble-themes.js": "6bda13513835307e14dba38671ea6d60e3f7206a2347c1f87907880fd8e1dfbb",
+    "bubble-themes.css": "3dfea92f5fc66e7aef2bc73d19da1117f9aea0c95e80feaf23b1be50c3a7c6e4",
+    "bubble-ai.png": "3fbee4c2a8a3fc07f058feb5492f2d37a136b9c6912e0a478f38c5b3d62abaa6",
+    "bubble-moon.png": "9dede84885f7252468677d4f5d225a813fe63986063fb214c05ffd29fc454266",
+    "chat-backgrounds.js": "9cee335349c69cb0dbc83d29be1c4ce0285875290f9a4effa86be4ea267b4960",
+    "chat-backgrounds.css": "8acdd1845b3df9a574ebf7c98061d0362e009792343ea41eb3d81eb1eb2eb232",
+    "chat-tools.js": "aa1fdc4ee53b8def35904821f00c49e7d703d6b4e2bd0aaa7d769fad37abc288",
+    "chat-tools.css": "cd181c20111bcc37019ffefd73c055893eb4180f5bda32ed6455dc2a7643ce9c"
+  }
+}
