@@ -103,7 +103,7 @@ jobs:
           if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
             # The runner's Azure mirror can trickle downloads for many minutes.
             # Only the disposable runner is changed; use Ubuntu's own HTTPS mirror.
-            sudo python - <<'PY'
+            sudo python3 - <<'PY'
           from pathlib import Path
           for path in (Path('/etc/apt/sources.list'), Path('/etc/apt/sources.list.d/ubuntu.sources')):
               if path.is_file():
