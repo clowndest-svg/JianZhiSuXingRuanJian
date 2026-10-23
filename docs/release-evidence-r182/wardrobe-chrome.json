@@ -1,0 +1,14 @@
+{
+  "checks": [
+    "20 unique silhouettes; category filters; preview and cancel do not save or lock chat",
+    "failed save keeps current theme and allows retry without closing preview",
+    "all 20 save through API, update actual short/long messages and keep peer bubbles/status unchanged",
+    "theme survives browser reload and API settings hydration",
+    "320/393/1200: dialog fits viewport, all cards scrollable, apply button visible",
+    "system reduced motion and explicit motion switch stop ornament animation",
+    "all legacy colors remain available; classic clears decorative frame",
+    "original illustrations delivered and no page errors"
+  ],
+  "errors": [],
+  "theme_count": 20
+}

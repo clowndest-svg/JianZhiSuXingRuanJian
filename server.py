@@ -268,6 +268,8 @@ def render_index_html():
         ('src="app.js"', 'src="app.js?v=%s"', "app.js"),
         ('src="features.js"', 'src="features.js?v=%s"', "features.js"),
         ('href="features.css"', 'href="features.css?v=%s"', "features.css"),
+        ('src="bubble-themes.js"', 'src="bubble-themes.js?v=%s"', "bubble-themes.js"),
+        ('href="bubble-themes.css"', 'href="bubble-themes.css?v=%s"', "bubble-themes.css"),
         ('src="companion.js"', 'src="companion.js?v=%s"', "companion.js"),
         ('href="/qingsu.apk"', 'href="/qingsu.apk?v=%s"', "qingsu.apk"),
     ]
@@ -4060,7 +4062,7 @@ ASSET_MEDIA = {"js": "application/javascript", "css": "text/css", "svg": "image/
                "png": "image/png", "webmanifest": "application/manifest+json",
                "json": "application/json"}
 PUBLIC_ASSETS = ("features.js", "features.css", "companion.js", "sw.js", "manifest.webmanifest",
-                 "app-icon.png", "guidance.json")
+                 "app-icon.png", "guidance.json", "bubble-themes.js", "bubble-themes.css", "bubble-ai.png", "bubble-moon.png")
 # 扩展名没登记类型就要在启动时炸，不能等到用户请求才发现是 500：
 # app-icon.png 换图标那次正是这么静默上线的，页面只是不显示图标，没人会去点它。
 for asset in PUBLIC_ASSETS:
@@ -5018,7 +5020,7 @@ def community_profile(req: ProfileCommunityReq, user: dict = Depends(get_current
         if req.bubble_theme is not None:
             theme = str(req.bubble_theme or "").strip().lower()
             if theme not in community.BUBBLE_THEMES:
-                raise HTTPException(status_code=400, detail="没有这种气泡颜色")
+                raise HTTPException(status_code=400, detail="没有这种气泡装扮")
             conn.execute("UPDATE community_profile SET bubble_theme=?, updated_at=? WHERE user_id=?",
                          (theme, _now(), user["id"]))
         conn.commit()
@@ -5634,7 +5636,9 @@ def chat_messages(with_user: int, cursor: int = 0, limit: int = 30,
                 "SELECT 1 FROM follows WHERE follower_id=? AND followee_id=?",
                 (user["id"], with_user)).fetchone())
             partner["mutual_follow"] = mutual_follow(conn, user["id"], with_user)
+        profile = conn.execute("SELECT bubble_theme FROM community_profile WHERE user_id=?", (user["id"],)).fetchone()
         return {"code": 0, "items": items, "partner": partner, "me_id": int(user["id"]),
+                "bubble_theme": profile[0] if profile else "green",
                 "next_cursor": items[0]["id"] if len(rows) > size else 0,
                 "more": len(rows) > size}
     finally:

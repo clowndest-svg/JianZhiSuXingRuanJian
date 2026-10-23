@@ -26,7 +26,9 @@ DEFAULT_PAGE = 12
 NOTICE_KINDS = ("like", "comment", "reply", "follow", "mention")
 
 # 气泡装扮的可选值。只影响自己这一侧的显示，所以不需要对方配合，也不需要新表。
-BUBBLE_THEMES = ("green", "blue", "rose", "ink", "amber")
+BUBBLE_THEMES = ("green", "blue", "rose", "ink", "amber") + tuple("skin-" + name for name in (
+    "ai", "luna", "sakura", "cyber", "cat", "bear", "aurora", "orbit", "holo", "pixel",
+    "manga", "ghost", "rose", "heart", "moon", "cloud", "ocean", "forest", "tea", "whale"))
 
 # 轻塑号：8 位数字，注册时随机生成，唯一且永不复用；搜索按它精确匹配
 PUBLIC_ID_DIGITS = 8

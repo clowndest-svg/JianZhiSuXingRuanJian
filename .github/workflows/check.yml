@@ -131,6 +131,7 @@ jobs:
       - run: python tests/test_r173_contracts.py
       # 发布入口那道版本配对门：后台先于主服务上线必须被拦住，而不是等运营点炸
       - run: python tests/test_deploy_pairing.py
+      - run: python tests/test_bubble_themes.py
       - run: python tests/test_calls.py
       - run: python tests/test_native_media_contract.py
       - run: python tests/test_douyin_bridge.py
@@ -148,6 +149,7 @@ jobs:
       - run: python tests/test_backup_verify.py
       - run: python tests/test_backup_snapshot.py
       - run: node --check app/src/main/assets/app.js
+      - run: node --check app/src/main/assets/bubble-themes.js
       - run: node --check app/src/main/assets/features.js
       - run: node --check app/src/main/assets/sw.js
       - run: node --check app/src/main/assets/companion.js
@@ -177,6 +179,7 @@ jobs:
           QINGSU_APP_REPO: ${{ github.workspace }}
           QINGSU_TEST_PYTHON: python
         run: |
+          node tests/bubble-themes-ui.mjs
           node tests/chat-ui.mjs
           node tests/media-cache-ui.mjs
           node tests/recovery-ui.mjs

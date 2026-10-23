@@ -54,6 +54,11 @@ try {
   await page.evaluate(id=>openDM(id),bid);await page.waitForSelector('#dm-input');
   assert.equal(await page.locator('#thread-call-btn').isDisabled(),true);
   checks.push('non-mutual voice call button disabled in real browser');
+  await page.getByRole('button',{name:'气泡',exact:true}).click();
+  await page.locator('[data-pick-skin="skin-ai"]').click();
+  await page.locator('[data-skin-apply]').click();
+  await page.waitForFunction(()=>!document.getElementById('account-tools-dialog')?.open);
+  checks.push('AI mascot theme enabled for full text, sticker, voice and media regression');
   await page.waitForFunction(()=>dmOfficial.loaded);
   await page.locator('#dm-input').fill('前后');await page.locator('#dm-input').evaluate(e=>{e.setSelectionRange(1,1);dmRememberCaret();});
   await page.locator('#dm-emoji-btn').click();

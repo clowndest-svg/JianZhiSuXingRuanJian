@@ -2421,7 +2421,7 @@ def main():
     check("气泡颜色走白名单",
           'BUBBLE_THEMES = ("green", "blue", "rose", "ink", "amber")' in
           io.open(os.path.join(ROOT, "app_modules", "community.py"), encoding="utf-8").read()
-          and "没有这种气泡颜色" in srv_txt, "")
+          and "没有这种气泡装扮" in srv_txt, "")
     check("气泡只改自己一侧，不写进消息本体",
           "recalled_at" in srv_txt and "bubble_theme" in srv_txt
           and 'data-t="' in _fjs and "cm.myTheme" in _fjs, "")

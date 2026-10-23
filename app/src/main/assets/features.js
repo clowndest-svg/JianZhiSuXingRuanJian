@@ -2416,7 +2416,7 @@ function closeThread() {
 
 async function refreshThread() {
     if (!cm.thread) return;
-    const uid = cm.thread.partner.id, scope = dmScope();
+    const uid = cm.thread.partner.id, scope = dmScope(), themeAtStart = cm.myTheme;
     try {
         const r = await getJson("/api/chat/messages?with_user=" + uid + "&limit=30");
         if (!dmScopeAlive(scope) || !dmIsVisible()) return;
@@ -2427,6 +2427,7 @@ async function refreshThread() {
             state.user = Object.assign({}, state.user || {}, { id: meId });
             try { localStorage.setItem(USER_KEY, JSON.stringify(state.user)); } catch (e) {}
         }
+        if (r.bubble_theme && cm.myTheme === themeAtStart) cm.myTheme = r.bubble_theme;
         cm.thread.partner = r.partner || cm.thread.partner;
         cm.bubbles = r.items || [];
         cm.thread.more = !!r.more;
@@ -3442,6 +3443,7 @@ function dmRenderBubbles() {
     if (stick || nearBottom) host.scrollTop = host.scrollHeight;
     else if (host.firstElementChild?.dataset.dmKey === 'older') host.scrollTop += host.scrollHeight - previousHeight;
     dmUi.stickBottom = host.scrollHeight - host.scrollTop - host.clientHeight < 120;
+    if (window.QSBubbles) window.QSBubbles.watch(host);
 }
 
 function cmBubbleHTML(m, me, st) {
@@ -3466,9 +3468,11 @@ function cmBubbleHTML(m, me, st) {
         + (kind === "sticker" ? " sticker" : "") + (isMedia ? " media" : "")
         + (pending ? " pending" : "") + (failed ? " failed" : "") + '"'
         + (mine && cm.myTheme && cm.myTheme !== "green" ? ' data-t="' + escapeHtml(cm.myTheme) + '"' : "")
+        + (mine && kind !== 'sticker' && window.QSBubbles && window.QSBubbles.has(cm.myTheme) ? ' data-skin="' + escapeHtml(cm.myTheme) + '"' : '')
         + ' data-mid="' + mid + '" data-mine="' + (mine ? 1 : 0) + '"'
         + ' oncontextmenu="return qsBubbleMenu(event,' + mid + ')"'
         + ' ontouchstart="qsBubbleHold(event,' + mid + ')" ontouchend="qsBubbleCancel()" ontouchmove="qsBubbleCancel()">'
+        + (mine && kind !== 'sticker' && window.QSBubbles ? window.QSBubbles.decor(cm.myTheme) : '')
         + (m.quote ? '<button type="button" class="dm-quote-inline" onclick="dmJumpQuote(' + Number(m.quote.id) + ')"><b>'
             + escapeHtml(m.quote.name || '') + '</b> ' + escapeHtml(m.quote.text || '') + '</button>' : '')
         + dmBubbleInner(m, kind, pending)
@@ -3586,6 +3590,7 @@ async function recallDM(mid) {
 /* 气泡装扮：只改自己这一侧，存进 community_profile.bubble_theme */
 const QS_THEMES = [["green", "墨绿"], ["blue", "蓝"], ["rose", "玫红"], ["ink", "黑"], ["amber", "琥珀"]];
 function openBubbleTheme() {
+    if (window.QSBubbles) { window.QSBubbles.open(); return; }
     toolDialog("气泡装扮", '<div class="td-body"><p class="td-lead">只有你自己看到的气泡颜色，对方那边不变。</p>'
         + '<div class="theme-dots">' + QS_THEMES.map(t =>
             '<button type="button" class="theme-dot" data-t="' + t[0] + '" aria-label="' + t[1] + '气泡"'
@@ -3593,14 +3598,17 @@ function openBubbleTheme() {
         + "</div></div>");
 }
 async function pickBubbleTheme(t) {
+    const ownerToken = state.token;
     try {
         await postApi("/api/community/profile", { bubble_theme: t });
+        if (state.token !== ownerToken) return false;
         cm.myTheme = t;
         const dlg = cmEl("account-tools-dialog");
         if (dlg && dlg.open) dlg.close();
         paintThread();
         callNativeToast("气泡换好了");
-    } catch (e) { callNativeToast("没换成：" + (e.message || "网络不通")); }
+        return true;
+    } catch (e) { if(state.token === ownerToken)callNativeToast("没换成：" + (e.message || "网络不通")); return false; }
 }
 
 async function loadOlderMessages() {

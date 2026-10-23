@@ -26,6 +26,9 @@ const BUDGET = {
   "index.html": { raw: 122_880, gzip: 30_720 },
   "style.css": { raw: 88_064, gzip: 20_480 },
   "features.css": { raw: 81_920, gzip: 22_528 },
+  // r182: 20 original frames and wardrobe live in their own bounded files.
+  "bubble-themes.js": { raw: 32_768, gzip: 10_240 },
+  "bubble-themes.css": { raw: 24_576, gzip: 6_144 },
 };
 
 const results = [];
@@ -49,8 +52,9 @@ for (const [file, limit] of Object.entries(BUDGET)) {
         `实测 ${now.gzip} B / 预算 ${limit.gzip} B`);
 }
 
-const shell = measured["index.html"].gzip + measured["app.js"].gzip +
-              measured["style.css"].gzip + measured["features.css"].gzip;
+const shell = Object.values(measured).reduce((sum, file) => sum + file.gzip, 0);
+const artBytes=['bubble-ai.png','bubble-moon.png'].reduce((sum,file)=>sum+fs.statSync(path.join(ASSETS,file)).size,0);
+check('两款原创插画总量有界，按需加载', artBytes<=4_500_000, `${artBytes} B / 4500000 B；不加入首页预缓存`);
 check("首屏关键资源（HTML+JS+CSS）gzip 合计有数可报", shell > 0, `${shell} B`);
 
 // 内联事件处理器：C11 要逐步移除后引入 CSP。这里量的是"还剩多少"，
