@@ -48,6 +48,10 @@ def main():
         if not js_name:
             raise SystemExit("APK does not include assets/app.js")
         apk_build = build_code(archive.read(js_name), "APK app.js")
+        for name in ('app.js','features.js','companion.js','sw.js','index.html','style.css','features.css'):
+            local = Path(args.web_app_js).parent / name
+            if archive.read('assets/'+name) != local.read_bytes():
+                raise SystemExit('APK and served H5 differ: '+name)
     if apk_build != code:
         raise SystemExit("APK app.js build %d does not match manifest %d" % (apk_build, code))
     print("release artifacts agree: version_code=%d size=%d sha256=%s" %

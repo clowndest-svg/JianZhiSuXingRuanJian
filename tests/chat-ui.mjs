@@ -93,6 +93,7 @@ try {
   await page.waitForFunction(()=>document.getElementById('account-tools-dialog').open);
   assert.ok(await page.locator('#account-tools-dialog img').count());
   await page.evaluate(()=>document.getElementById('account-tools-dialog').close());
+  await page.waitForFunction(()=>!document.getElementById('page-layer').inert);
   checks.push('sent image sticker opens the full-size image viewer');
   const messagesBeforeVoice=(await api('/api/chat/messages?with_user='+bid,null,a.token)).items.length;
   await shot(page,'dm-mode-text.png');

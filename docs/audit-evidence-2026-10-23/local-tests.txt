@@ -1,0 +1,110 @@
+
+=== security.log ===
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_optimization_admin_session_idle_absolute_and_rotation (__main__.Security.test_optimization_admin_session_idle_absolute_and_rotation)
+空闲到期、绝对到期、凭据轮换三条路各自都要能把旧会话挡在门外。 ... ok
+test_optimization_async_backup_failure_is_recorded_not_swallowed (__main__.Security.test_optimization_async_backup_failure_is_recorded_not_swallowed)
+备份在线程里失败必须落到任务终态：否则界面永远显示"进行中"，而活其实早死了。 ... ok
+test_optimization_async_backup_returns_task_and_dedups (__main__.Security.test_optimization_async_backup_returns_task_and_dedups)
+浏览器关掉不能把结果一起关掉：异步备份要回任务号，连点两下只能有一份在跑。 ... ok
+test_optimization_async_backup_success_lands_result (__main__.Security.test_optimization_async_backup_success_lands_result) ... ok
+test_optimization_audit_failure_rolls_back_and_gate_bounds (__main__.Security.test_optimization_audit_failure_rolls_back_and_gate_bounds) ... ok
+test_optimization_backup_verifies_even_when_dir_is_not_readable (__main__.Security.test_optimization_backup_verifies_even_when_dir_is_not_readable)
+降权后备份目录 root:700 读不到：校验要改读脚本自己打的那行 JSON，读不到就红。 ... ok
+test_optimization_cookie_replay_and_unknown_column (__main__.Security.test_optimization_cookie_replay_and_unknown_column) ... ok
+test_optimization_expired_temporary_password_is_rejected (__main__.Security.test_optimization_expired_temporary_password_is_rejected) ... ok
+test_optimization_export_recall_and_media_delete (__main__.Security.test_optimization_export_recall_and_media_delete) ... ok
+test_optimization_gate_read_back_mismatch_is_reverted (__main__.Security.test_optimization_gate_read_back_mismatch_is_reverted)
+主应用答话了、答的不是刚写进去的值：这才是真不一致，必须回退并说清。 ... ok
+test_optimization_gate_refuses_a_release_nobody_can_install (__main__.Security.test_optimization_gate_refuses_a_release_nobody_can_install)
+清单说 34，就得真有一个"对得上"的包：包不见、哈希被换、包内自报旧构建号，三种都要拒。 ... ok
+test_optimization_gate_two_threads_one_writer (__main__.Security.test_optimization_gate_two_threads_one_writer)
+两个线程同时抬门：借的是业务库写锁 + 期望旧值，必须只有一个改得动。 ... ok
+test_optimization_gate_when_app_is_silent_says_unconfirmed (__main__.Security.test_optimization_gate_when_app_is_silent_says_unconfirmed)
+主应用联系不上 ≠ 读回不一致：门文件已写对，不能谎称生效，也不该悄悄回退。 ... ok
+test_optimization_helper_failure_is_not_a_success (__main__.Security.test_optimization_helper_failure_is_not_a_success) ... ok
+test_optimization_named_operators_and_revoke (__main__.Security.test_optimization_named_operators_and_revoke)
+多管理员：审计要分得清是谁；一把口令对多个人时不许顶掉某个具体的人。 ... ok
+test_optimization_orphan_scan_counts_thumbnails_as_referenced (__main__.Security.test_optimization_orphan_scan_counts_thumbnails_as_referenced)
+缩略图不落表（按需生成，名字是 原图名 + .thumb.jpg）。 ... ok
+test_optimization_privileged_actions_go_through_helpers (__main__.Security.test_optimization_privileged_actions_go_through_helpers)
+服务账号降权之后，改门/备份/查容器只能经 sudo 调 helper。 ... ok
+test_optimization_privileged_endpoint_reports_missing_helpers (__main__.Security.test_optimization_privileged_endpoint_reports_missing_helpers) ... ok
+test_optimization_revoke_needs_confirm_for_others (__main__.Security.test_optimization_revoke_needs_confirm_for_others) ... ok
+test_optimization_socket_revoke_and_ban (__main__.Security.test_optimization_socket_revoke_and_ban) ... WARNING:root:key_regenerated name=ws-secret.key 此前签发的签名链接与 WS 票据已全部失效
+ok
+test_optimization_temporary_password_is_restricted_and_single_use (__main__.Security.test_optimization_temporary_password_is_restricted_and_single_use) ... ok
+
+----------------------------------------------------------------------
+Ran 21 tests in 50.808s
+
+OK
+
+
+=== data.log ===
+D:\RuanJian\JiaZhiSuXianApk\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+test_batch2_admin_refuses_high_risk_write_when_schema_behind (__main__.DataContracts.test_batch2_admin_refuses_high_risk_write_when_schema_behind)
+后台要写的列还不存在时，必须在建单之前就拒，而不是写完才 500。 ... ok
+test_batch2_community_page_has_bounded_queries_and_correct_state (__main__.DataContracts.test_batch2_community_page_has_bounded_queries_and_correct_state) ... ok
+test_batch2_cursor_pages_and_filters (__main__.DataContracts.test_batch2_cursor_pages_and_filters) ... ok
+test_batch2_guard_refuses_stale_or_unknown_schema (__main__.DataContracts.test_batch2_guard_refuses_stale_or_unknown_schema)
+SKIP_MIGRATE 模式下 import 不动结构，但库落后或版本未知时必须拒绝启动。 ... ok
+test_batch2_migration_registry_is_self_consistent (__main__.DataContracts.test_batch2_migration_registry_is_self_consistent)
+登记表必须自洽：版本号＝清单最后一条，每条都答得出归属。 ... ok
+test_batch2_offline_occurrence_day_and_idempotency (__main__.DataContracts.test_batch2_offline_occurrence_day_and_idempotency) ... ok
+test_batch2_schema_version_is_registered_and_reported (__main__.DataContracts.test_batch2_schema_version_is_registered_and_reported) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 11.044s
+
+OK
+community_page_selects=6
+
+
+=== ai-status.log ===
+test_a_real_success_records_time_model_and_latency (__main__.AiStatus.test_a_real_success_records_time_model_and_latency) ... ok
+test_configured_is_not_the_same_as_working (__main__.AiStatus.test_configured_is_not_the_same_as_working) ... ok
+test_connection_errors_keep_their_own_kind (__main__.AiStatus.test_connection_errors_keep_their_own_kind) ... ok
+test_failures_are_typed_and_do_not_erase_the_last_success (__main__.AiStatus.test_failures_are_typed_and_do_not_erase_the_last_success) ... ok
+test_state_word_is_down_when_unconfigured (__main__.AiStatus.test_state_word_is_down_when_unconfigured) ... ok
+test_state_word_never_turns_configured_into_working (__main__.AiStatus.test_state_word_never_turns_configured_into_working)
+界面那一格给的是 up / down / untested 三个词，不许把"配置在"折成 up。 ... ok
+test_status_never_leaks_the_prompt (__main__.AiStatus.test_status_never_leaks_the_prompt) ... ok
+test_unconfigured_still_says_why (__main__.AiStatus.test_unconfigured_still_says_why) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.077s
+
+OK
+
+
+=== request.log ===
+PASS: GET 15s 超时会被中止，错误形状 status/code/message 齐全
+PASS: 超时分级 read=15s / write=30s / upload=120s
+PASS: 上传失败有明确错误结果，界面不会静默播报成功
+PASS: 旧账号迟到响应被 409 丢弃，同账号响应正常接受
+PASS: 403 按机器码分成强更门/封号/普通拒绝三条互不串路
+PASS: 封号清会话、原因原样播报、几秒内不重复轰炸
+PASS: 409 单次请求、统一形状、不改本机状态
+PASS: 响应丢失后的重试复用 request_id；并发点击合并成一条
+PASS: 同 tag 后发取消先发，在途表随落定清空
+PASS: 断网错误形状统一且不破坏离线草稿判定
+PASS: publicPost 走底座——无鉴权头、有超时、错误形状统一
+PASS: request-contract 全部判据通过
+
+
+=== dm-state.log ===
+PASS: 气泡常驻状态 发送中/已发送/已读 三条分开，对方气泡不串状态
+PASS: 失败常驻 + 单条重试入口在，重进会话不丢、切账号清干净
+PASS: 单条重试复用 request_id、界面只留一条、状态转成已发送
+PASS: 重连后自动补拉遗漏消息且不重复
+PASS: 通话失败分成 拒绝/未接/忙线/不在线/没权限/网络-TURN 六种可读原因
+PASS: 取消/重试不留忙线僵尸态，失败面板停留够久且能自动收回
+PASS: ws 已读回执能把气泡状态从已发送翻到已读
+PASS: dm-state-call 全部判据通过
+
+
+=== pwa.log ===
+PASS: pwa cache key keeps query string, static-only whitelist, 64-entry trim, build-derived cache name, offline replay

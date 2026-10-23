@@ -84,17 +84,18 @@ def online_status(force=False):
         "last_failure_at": _runtime["fail_at"] or None,
         "last_failure_kind": _runtime["fail_kind"],
         "last_failure_ms": _runtime["fail_ms"] if _runtime["fail_at"] else None,
+        "last_outcome": _runtime.get("last_outcome"),
     })
     return base
 
 
 def _note_ok(model, began):
-    _runtime.update(ok_at=time.time(), ok_model=str(model or ""),
+    _runtime.update(last_outcome="up", ok_at=time.time(), ok_model=str(model or ""),
                     ok_ms=int((time.time() - began) * 1000))
 
 
 def _note_fail(kind, began):
-    _runtime.update(fail_at=time.time(), fail_kind=str(kind or "unknown"),
+    _runtime.update(last_outcome="down", fail_at=time.time(), fail_kind=str(kind or "unknown"),
                     fail_ms=int((time.time() - began) * 1000))
 
 
@@ -109,8 +110,12 @@ def online_state(status=None):
     st = status if status is not None else online_status()
     if not st["ok"]:
         return "down"
+    # Windows clocks may give successive completions identical timestamps.
+    # Preserve completion order instead of declaring a tied failure successful.
+    if st.get("last_outcome") in ("up", "down"):
+        return st["last_outcome"]
     last_ok, last_fail = st.get("last_success_at"), st.get("last_failure_at")
-    if last_ok and (not last_fail or last_ok >= last_fail):
+    if last_ok and (not last_fail or last_ok > last_fail):
         return "up"
     if last_fail:
         return "down"

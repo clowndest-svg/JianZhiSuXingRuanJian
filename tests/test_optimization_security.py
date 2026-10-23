@@ -23,25 +23,22 @@ class Security(fixture.OpsApi):
     # ---- A06 抬门闭环 ----
     def test_optimization_gate_refuses_a_release_nobody_can_install(self):
         """清单说 34，就得真有一个"对得上"的包：包不见、哈希被换、包内自报旧构建号，三种都要拒。"""
-        cases = {}
-        apk = fixture.write_fake_release(self.root, 34)
-        apk.unlink()
-        cases['包不在'] = None
-        fixture.write_fake_release(self.root, 34)
-        manifest = json.loads((self.root / 'WEB' / 'version.json').read_text(encoding='utf-8'))
-        manifest['sha256'] = 'deadbeef'
-        (self.root / 'WEB' / 'version.json').write_text(json.dumps(manifest), encoding='utf-8')
-        cases['哈希不符'] = None
-        fixture.write_fake_release(self.root, 34)
-        with zipfile.ZipFile(self.root / 'WEB' / 'qingsu.apk', 'w') as archive:
-            archive.writestr('assets/app.js', 'const APP_BUILD = 33;\n')
-        manifest = json.loads((self.root / 'WEB' / 'version.json').read_text(encoding='utf-8'))
-        blob = (self.root / 'WEB' / 'qingsu.apk').read_bytes()
-        manifest.update(size=len(blob), sha256=hashlib.sha256(blob).hexdigest())
-        (self.root / 'WEB' / 'version.json').write_text(json.dumps(manifest), encoding='utf-8')
-        cases['包内自报旧构建号'] = None
+        cases = ['包不在', '哈希不符', '包内自报旧构建号']
         for label in cases:
             with self.subTest(label):
+                apk = fixture.write_fake_release(self.root, 34)
+                manifest_path = self.root / 'WEB' / 'version.json'
+                manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+                if label == '包不在':
+                    apk.unlink()
+                elif label == '哈希不符':
+                    manifest['sha256'] = 'deadbeef'
+                else:
+                    with zipfile.ZipFile(apk, 'w') as archive:
+                        archive.writestr('assets/app.js', 'const APP_BUILD = 33;\n')
+                    blob = apk.read_bytes()
+                    manifest.update(size=len(blob), sha256=hashlib.sha256(blob).hexdigest())
+                manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
                 with patch.object(self.ops_mod, 'json_get', return_value=({'min_build': 0, 'gate': {}}, None)):
                     with self.assertRaises(Exception) as raised:
                         self.ops_mod.gate_set({'expect_current': 0, 'new': 34}, 'test')
@@ -478,6 +475,64 @@ class Security(fixture.OpsApi):
         self.assertFalse(avatar.exists())
         self.assertEqual(self.sql('PRAGMA foreign_key_check'), [])
 
+
+    def test_optimization_media_recall_scope_and_expiry(self):
+        import io
+        from PIL import Image
+        raw = io.BytesIO()
+        Image.new('RGB', (600,600), (30,60,90)).save(raw, format='JPEG')
+        up = self.app.post('/api/community/media', headers=self.auth(), files={'file':('test.jpg',raw.getvalue(),'image/jpeg')})
+        self.assertEqual(up.status_code, 200, up.text)
+        name = up.json()['name']
+        url = up.json()['url']
+        expiry = int(url.split('expires=')[1].split('&')[0])
+        with patch.object(self.app_mod.time, 'time', return_value=expiry-1):
+            near = self.app.get(url+'&thumb=1')
+        self.assertEqual(near.status_code, 200)
+        self.assertIn('max-age=1', near.headers['cache-control'])
+        uid,peer = self.signup['id'],self.other['id']
+        conn = self.app_mod.get_db()
+        try:
+            conn.executemany('INSERT INTO follows VALUES (?,?,?)',[(uid,peer,'test'),(peer,uid,'test')])
+            conn.commit()
+            message,_ = self.app_mod._deliver(conn,{'id':uid},peer,'','media-security',kind='image',media_name=name)
+        finally: conn.close()
+        media = message['media_url']
+        self.assertIn('no-store', self.app.get(media+'&thumb=1').headers['cache-control'])
+        self.assertEqual(self.app.get(media.replace('scope=message','scope=post')).status_code,404)
+        recalled = self.app.post('/api/chat/recall',headers=self.auth(),json={'message_id':message['id']})
+        self.assertEqual(recalled.status_code,200,recalled.text)
+        self.assertEqual(self.app.get(media).status_code,404)
+        self.assertEqual(self.app.get(media+'&thumb=1').status_code,404)
+        self.assertEqual(self.app.get(url).status_code,404)
+
+    def test_optimization_post_image_scope_follows_visibility(self):
+        import io
+        from PIL import Image
+        raw=io.BytesIO(); Image.new('RGB',(100,100)).save(raw,format='JPEG')
+        up=self.app.post('/api/community/media',headers=self.auth(),files={'file':('p.jpg',raw.getvalue(),'image/jpeg')})
+        name=up.json()['name']
+        conn=self.app_mod.get_db()
+        try:
+            pid=conn.execute("INSERT INTO posts(user_id,body,images,created_at) VALUES (?,'post',?,'test')",(self.signup['id'],json.dumps([name]))).lastrowid
+            conn.commit()
+            url=self.app_mod.signed_photo('/uploads/'+name,scope='post',ref=pid)
+            self.assertEqual(self.app.get(url).status_code,200)
+            conn.execute("UPDATE posts SET status='hidden' WHERE id=?",(pid,));conn.commit()
+            self.assertEqual(self.app.get(url).status_code,404)
+            self.assertEqual(self.app.get(url+'&thumb=1').status_code,404)
+        finally:conn.close()
+
+    def test_optimization_health_survives_private_backup_directory(self):
+        original = self.ops_mod.os.listdir
+        def restricted(path):
+            if str(path) == str(self.ops_mod.BACKUP_DIR): raise PermissionError('restricted')
+            return original(path)
+        with patch.object(self.ops_mod.os, 'listdir', side_effect=restricted), patch.object(self.ops_mod,'json_get',return_value=({'status':'ok'},None)), patch.object(self.ops_mod,'run_privileged',return_value={'stdout':'running','returncode':0}):
+            r=self.ops.get('/api/health',headers=self.bearer)
+        self.assertEqual(r.status_code,200,r.text)
+        self.assertIsNone(r.json()['recent_backups'])
+        self.assertEqual(r.json()['backup_listing'],'restricted')
 
 if __name__ == '__main__':
     suite = unittest.TestSuite(Security(name) for name in unittest.defaultTestLoader.getTestCaseNames(Security) if name.startswith('test_optimization_'))

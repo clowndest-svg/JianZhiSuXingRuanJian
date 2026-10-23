@@ -1,0 +1,13 @@
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+import {makeCtx,loadJs} from './dom-fixture.mjs';
+const h=makeCtx();loadJs(h.context,true);
+let finish;
+h.sandbox.postApi=()=>new Promise(resolve=>{finish=resolve;});
+vm.runInContext("state.user={id:1,username:'synthetic'};state.token='fixture';cm.thread={partner:{id:2}};cm.bubbles=[{id:42,kind:'audio',from_id:1,to_id:2}];dmIsVisible=()=>false;",h.context);
+const pending=vm.runInContext('dmTranscribe(42)',h.context);
+vm.runInContext('cm.bubbles=cm.bubbles.map(b=>Object.assign({},b,{read_at:"now"}))',h.context);
+finish({text:'合成转写'});await pending;
+assert.equal(vm.runInContext('cm.bubbles[0].asr_text',h.context),'合成转写');
+assert.equal(vm.runInContext('cm.bubbles[0].asr_pending',h.context),false);
+console.log('PASS: read receipt replacing a bubble does not discard an in-flight transcript');

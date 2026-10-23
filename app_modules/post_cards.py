@@ -33,7 +33,7 @@ def project(conn, rows, me, signed_photo):
     cards = []
     for row in rows:
         pid, author = int(row['id']), int(row['user_id'])
-        images = [signed_photo('/uploads/' + name) for name in read_images(row['images'])]
+        images = [signed_photo('/uploads/' + name, scope='post', ref=pid) for name in read_images(row['images'])]
         cards.append({
             'id': pid, 'title': row['title'] or '', 'body': row['body'],
             'images': images, 'image_thumbs': [url + '&thumb=1' for url in images],

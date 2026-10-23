@@ -1,0 +1,47 @@
+{
+  "title": "项目优化审核验收",
+  "read_scope": "Current session plus rewind ancestors and related side branch; visible text and tool calls/results read; opaque reasoning not decoded.",
+  "files": [
+    {
+      "session_id": "be7652e0-654e-46b6-99c9-dd00b700b917",
+      "bytes": 995589,
+      "lines": 138,
+      "sha256": "83fbc382618e68fa007fe849b38cd5dd4776d9acc3766c55614cdf5590162e4a",
+      "unchanged_at_document_packaging": true
+    },
+    {
+      "session_id": "cd42412f-26dd-4f53-b653-a121b103b65d",
+      "bytes": 764464,
+      "lines": 40,
+      "sha256": "d53c8f49d5378c8d449cd9283f9f20d17cebfc3dc23bb6baabd12d5154114009",
+      "unchanged_at_document_packaging": true
+    },
+    {
+      "session_id": "f713a372-ea5c-4555-979e-0697bad3d0f8",
+      "bytes": 1188629,
+      "lines": 211,
+      "sha256": "e62741c4a8d2b6cbe0f8c5eaf15b5a581d944fda6072a94f288b70f0ff78434d",
+      "unchanged_at_document_packaging": true
+    },
+    {
+      "session_id": "e7853cab-7f9a-44f2-b3b4-5bdd61c52333",
+      "bytes": 1170959,
+      "lines": 189,
+      "sha256": "b90d52c6451e3883be7cd908ae7413d7a24ff6e0109a89723ba59e7d850b9705",
+      "unchanged_at_document_packaging": true
+    },
+    {
+      "session_id": "d7572c7d-af55-45e9-b470-1bac6e68c627",
+      "bytes": 1211520,
+      "lines": 205,
+      "sha256": "deb1c7a156dc3f284d10cbc5e7e35a9ede8af3468a7e8371f298b78c7264361a",
+      "unchanged_at_document_packaging": true
+    }
+  ],
+  "raw_event_lines": 783,
+  "deduplicated_user_assistant_records": 120,
+  "visible_text_blocks": 32,
+  "tool_calls": 38,
+  "tool_results": 38,
+  "raw_transcript_exported_to_repository": false
+}

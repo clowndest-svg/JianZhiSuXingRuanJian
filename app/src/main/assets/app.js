@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 63;
+const APP_BUILD = 64;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -5295,12 +5295,13 @@ function openDialogs() {
 function topDialog() {
     const list = openDialogs();
     if (!list.length) return null;
-    // 原生 <dialog> 一 showModal 就进浏览器的 top layer，永远压在任何 fixed 遮罩上面，
-    // 所以「最上面那个」只能按渲染层判断，不能按清单顺序猜。
+    // Native dialogs occupy the browser top layer; ordinary overlays follow CSS.
     for (let i = list.length - 1; i >= 0; i--) {
         if (isNativeDialog(list[i])) return list[i];
     }
-    return list[list.length - 1];
+    if (typeof getComputedStyle !== "function") return list[list.length - 1];
+    return list.reduce((a,b) => (Number(getComputedStyle(a).zIndex)||0) >
+        (Number(getComputedStyle(b).zIndex)||0) ? a : b);
 }
 
 function dialogPanel(overlay) {
@@ -5330,7 +5331,8 @@ function syncDialogInert() {
     // 弹窗开着的时候，背景内容既不该被读屏念到，也不该被 Tab 走到。
     Array.prototype.forEach.call(document.body.children, node => {
         if (node.nodeType !== 1 || isAnnouncementNode(node)) return;
-        const inDialog = !!top && (node === top || node.contains(top));
+        const inDialog = !!top && (node === top || node.contains(top)
+            || (node.dataset.dialogOwner && node.dataset.dialogOwner === top.id));
         if (top && !inDialog) {
             node.setAttribute("aria-hidden", "true");
             try { node.inert = true; } catch (e) {}

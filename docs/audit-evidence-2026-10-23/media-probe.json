@@ -1,0 +1,27 @@
+{
+  "mode": "local-disposable-synthetic",
+  "original_before_recall": 200,
+  "recall": 200,
+  "original_after_recall": 200,
+  "original_cache_control": "private, no-store",
+  "same_bytes_after_recall": true,
+  "dm_image_with_thumb_parameter": {
+    "status": 200,
+    "cache_control": "private, max-age=300"
+  },
+  "signature_remaining_seconds": 1,
+  "near_expiry_thumb": {
+    "status": 200,
+    "cache_control": "private, max-age=300"
+  },
+  "findings": [
+    "Saved media URL still reads original bytes after recall.",
+    "thumb parameter selects cache policy without media classification.",
+    "max-age is not capped to remaining signature lifetime."
+  ],
+  "cleanup": "fixture temporary directory removed in finally",
+  "main_head": "838a284adadcfd8d2a9892f37c2009154ad6942d",
+  "status": "interim observation, final candidate not accepted",
+  "browser_cache_tested": false,
+  "production_tested": false
+}

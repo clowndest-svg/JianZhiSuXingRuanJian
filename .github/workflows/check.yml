@@ -74,7 +74,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: clowndest-svg/JianZhiSuXingRuanJianHouTai
-          ref: main
+          ref: 5c2e059b48bc641100f70425d2a2e5280fac1032
           path: .admin-repo
       - uses: actions/setup-python@v5
         with:
@@ -130,6 +130,7 @@ jobs:
       - run: python tests/test_long_tasks.py
       - run: python tests/test_monitor_alerts.py
       - run: python tests/test_backup_verify.py
+      - run: python tests/test_backup_snapshot.py
       - run: node --check app/src/main/assets/app.js
       - run: node --check app/src/main/assets/features.js
       - run: node --check app/src/main/assets/sw.js
@@ -139,6 +140,8 @@ jobs:
       - run: node tests/pwa-cache-contract.mjs
       - run: node tests/frontend-budget.mjs
       - run: node tests/request-contract.mjs
+      - run: node tests/ai-status-ui.mjs
+      - run: node tests/dm-asr-race.mjs
       # 私信四态 / 单条重试复用 request_id / 重连补拉 / 通话失败分型
       - run: node tests/dm-state-call.mjs
       # B01：首屏三组的顺序、点击、状态机与"未知不画成 0"
@@ -158,6 +161,7 @@ jobs:
           QINGSU_TEST_PYTHON: python
         run: |
           node tests/chat-ui.mjs
+          node tests/media-cache-ui.mjs
           node tests/recovery-ui.mjs
           node tests/offline-day-ui.mjs
           node tests/a11y-dialog-contract.mjs

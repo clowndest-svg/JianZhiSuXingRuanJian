@@ -49,8 +49,9 @@ class FakeResponse:
 class FakeOpener:
     """按 URL 回不同内容；version-pairing 的内容由每条用例决定。"""
 
-    def __init__(self, pairing, html=b"<html>ops</html>"):
+    def __init__(self, pairing, html=b"<html>ops</html>", privileged=None):
         self.pairing = pairing
+        self.privileged = privileged if privileged is not None else {'gate':True,'backup':True,'health':True,'effective_uid':1001}
         self.html = html
         self.asked = []
 
@@ -61,6 +62,8 @@ class FakeOpener:
             return FakeResponse(json.dumps(HEALTH).encode())
         if "/api/version-pairing" in url:
             return FakeResponse(json.dumps(self.pairing).encode())
+        if "/api/privileged" in url:
+            return FakeResponse(json.dumps(self.privileged).encode())
         if "/ops/" in url:
             return FakeResponse(self.html)
         raise AssertionError("判据没预料到这一跳: " + url)
@@ -80,8 +83,8 @@ class PairingGate(unittest.TestCase):
         deploy.admin_credentials = self.saved_credentials
         deploy.PUBLIC_BASE = self.saved_base
 
-    def drive(self, pairing, html=b"<html>ops</html>"):
-        fake = FakeOpener(pairing, html)
+    def drive(self, pairing, html=b"<html>ops</html>", privileged=None):
+        fake = FakeOpener(pairing, html, privileged)
         deploy.urllib.request.build_opener = lambda *a, **k: fake
         import hashlib
         deploy.admin_smoke(hashlib.sha256(html).hexdigest())
@@ -102,6 +105,12 @@ class PairingGate(unittest.TestCase):
                         "app_schema_version": 11, "app_error": None})
         self.assertIn("users.reset_expires_at", str(raised.exception))
         self.assertIn("拒绝发布", str(raised.exception))
+
+    def test_unapplied_privilege_configuration_blocks_release(self):
+        for cfg in [{'gate':False,'backup':True,'health':True,'effective_uid':1001},
+                    {'gate':True,'backup':True,'health':True,'effective_uid':0}]:
+            with self.subTest(cfg=cfg),self.assertRaises(RuntimeError):
+                self.drive({'paired':True},privileged=cfg)
 
     def test_unreachable_app_blocks_instead_of_passing(self):
         """主应用答不出等于没验证过，不能当成"大概没问题"就放行。"""

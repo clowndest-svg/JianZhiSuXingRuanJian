@@ -335,6 +335,11 @@ def admin_smoke(expected_html_hash):
                            % (pairing.get("missing_app_columns") or ["(结构读不出)"],
                               pairing.get("app_schema_version"),
                               pairing.get("app_error") or "可达"))
+    privileged = json.loads(open_after_restart("http://172.17.0.1:8100/api/privileged", headers))
+    if not all(privileged.get(k) for k in ('gate', 'backup', 'health')) or not isinstance(privileged.get('effective_uid'), int) or privileged['effective_uid'] <= 0:
+        raise RuntimeError('后台降权或 helper 配置未生效，拒绝发布')
+    if not str(health['console_container']).startswith('running'):
+        raise RuntimeError('后台无法核验 Directus 容器，拒绝发布')
     body = open_after_restart(PUBLIC_BASE + "/ops/?ci=" + expected_html_hash[:12],
                               {"Authorization": auth})
     if hashlib.sha256(body).hexdigest() != expected_html_hash:

@@ -31,6 +31,7 @@ function mealConfirmHtml(){
             <p id="meal-portion-note" class="td-status" role="status">倍的是「${escapeHtml(p.basisLabel || ('那份 ' + Number(p.estimate) + ' kcal'))}」；选完还能在上面那格直接改数字。</p>
             <div class="td-actions td-ai-row"><button type="button" class="td-btn-quiet" id="meal-ai-btn" onclick="estimateMealByAi()">让服务器模型估一下</button></div>
             <p id="meal-ai-result" class="td-status" role="status"></p>
+            <p id="meal-ai-status" class="td-status" role="status">正在读取模型状态…</p>
             <div class="td-group-label">按包装称重换算（选填）</div>
             <div class="td-group">
               <label class="td-field-row"><span class="td-field-label">实际重量（g）</span><input id="meal-grams" type="number" min="0" step="0.1" inputmode="decimal" placeholder="例：260"></label>
@@ -46,7 +47,20 @@ function openMealConfirm(pending){
     pendingMeal=Object.assign({why:'按名称估算，非称重结果'},pending);
     if(!pendingMeal.log_date)Object.assign(pendingMeal,occurrenceNow());
     toolDialog('核对餐食与份量',mealConfirmHtml());
+    refreshMealAiStatus();
     return pendingMeal;
+}
+
+async function refreshMealAiStatus(){
+    const box=document.getElementById('meal-ai-status');
+    if(!box)return;
+    try{
+        const r=await getJson('/api/ai/status');
+        if(document.getElementById('meal-ai-status')!==box)return;
+        const when=value=>value?new Date(Number(value)*1000).toLocaleString():'暂无';
+        const status=!r.online_configured?'未配置':r.online_model==='untested'?'已配置，尚未跑通':r.online_model==='up'?'最近请求成功':'最近请求失败';
+        box.textContent=`模型状态：${status}；上次成功：${when(r.online_last_success_at)}；模型：${r.online_last_success_model||'暂无'}；耗时：${r.online_last_elapsed_ms==null?'暂无':r.online_last_elapsed_ms+'ms'}；最近失败：${when(r.online_last_failure_at)}（${r.online_last_failure_kind||'无'}）。`;
+    }catch(e){if(document.getElementById('meal-ai-status')===box)box.textContent='模型状态暂时读不到，尚未确认可用；可以手动填写热量。';}
 }
 
 /* 份量档只在"这一份有明确基准数字"时才折算；称重那两格填了就听称重的。 */
@@ -177,7 +191,8 @@ async function estimateMealByAi(){
     let r=null;
     try{
         r=await postApi('/api/food/estimate',{food_name:(pendingMeal&&pendingMeal.food_name)||document.getElementById('input-meal-text').value.trim(),grams:grams?Number(grams):null});
-    }catch(e){ if(out){out.dataset.err='1';out.textContent='估算请求没成功：'+((e&&e.message)||'未知原因');} return; }
+    }catch(e){ if(out){out.dataset.err='1';out.textContent='估算请求没成功：'+((e&&e.message)||'未知原因');} refreshMealAiStatus(); return; }
+    refreshMealAiStatus();
     if(!r||!r.ok){
         if(out){out.dataset.err='1';out.textContent=(r&&r.why)||'在线模型没给结果';}
         if(btn&&r&&r.status&&!r.status.ok)btn.textContent='模型通道不可用';
@@ -242,6 +257,9 @@ function toolDialog(title,html){
     d=document.createElement('dialog');d.id='account-tools-dialog';d.className='tool-dialog';
     d.innerHTML=`<header><h2>${escapeHtml(title)}</h2><button type="button" class="td-close" aria-label="关闭" onclick="document.getElementById('account-tools-dialog').close()">✕</button></header><div class="td-body">${html}</div>`;
     document.body.appendChild(d);
+    // Runtime native dialogs also need close/open observation: native focus
+    // restoration can occur before the close event, leaving our background inert.
+    if(typeof bindDialogAccessibility==='function')bindDialogAccessibility(d);
     // showModal 失败时（已有别的模态在场）必须退到 show()，绝不能留下一个
     // "在文档流里但关不掉"的裸 dialog——那正是机主说的"固定在那上面动都动不了"
     try{d.showModal();}catch(e){try{d.show();}catch(e2){d.remove();}}
@@ -3491,6 +3509,7 @@ function qsShowMenu(anchor, mid, x, y) {
     const menu = document.createElement("div");
     menu.id = "bubble-menu";
     menu.className = "bubble-menu";
+    menu.dataset.dialogOwner = "page-layer";
     const canRecall = mine && !m.recalled_at && qsWithin(m.created_at, 300);
     const isAudio = (m.kind || 'text') === 'audio' && !m.recalled_at;
     menu.innerHTML = (isAudio ? '<button type="button" onclick="dmTranscribe(' + Number(mid) + ')">转文字</button>' : '')
@@ -3517,7 +3536,8 @@ function qsWithin(stamp, seconds) {
 }
 async function dmTranscribe(mid) {
     qsHideMenu();
-    const m = qsFindBubble(Number(mid));
+    let m = qsFindBubble(Number(mid));
+    const scope = dmScope();
     if (!m || (m.kind || "text") !== "audio" || m.recalled_at) return;
     if (m.asr_text) { callNativeToast("这条语音已经转成文字了"); return; }
     if (m.asr_pending) return;
@@ -3525,16 +3545,23 @@ async function dmTranscribe(mid) {
     if (dmIsVisible()) paintThread();
     try {
         const r = await postApi("/api/chat/asr", { message_id: Number(mid) });
+        if (!dmScopeAlive(scope)) return;
+        // Read receipts can replace message objects while the request is pending.
+        m = qsFindBubble(Number(mid));
+        if (!m || m.recalled_at) return;
         m.asr_text = String(r.text || "");
         m.asr_empty = !m.asr_text;
         if (!m.asr_text) callNativeToast("没听清，再说一遍试试");
     } catch (e) {
+        if (!dmScopeAlive(scope)) return;
+        m = qsFindBubble(Number(mid));
+        if (!m || m.recalled_at) return;
         m.asr_failed = true;
         const message = String((e && e.message) || "");
         callNativeToast(/503|暂不可用/.test(message) ? "语音转文字暂不可用" : "转文字失败，长按重试");
     } finally {
-        m.asr_pending = false;
-        if (dmIsVisible()) paintThread();
+        if (m) m.asr_pending = false;
+        if (dmScopeAlive(scope) && dmIsVisible()) paintThread();
     }
 }
 function dmAsrHTML(m) {

@@ -576,6 +576,7 @@ def _community_schema(c):
         ("metadata", "TEXT NOT NULL DEFAULT '{}'"),
     ])
     c.execute("CREATE INDEX IF NOT EXISTS idx_media_owner ON media_uploads(user_id, name)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_messages_media ON messages(media_name)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status, id DESC)")
     taken = {r[0] for r in c.execute("SELECT public_id FROM users WHERE public_id != ''")}
     for row in c.execute("SELECT id FROM users ORDER BY id").fetchall():
@@ -3752,16 +3753,18 @@ def media_key():
 # 缓存活得比链接久，就等于浏览器手里有一张"过期还能看"的副本。
 COMMUNITY_THUMB_MAX_AGE = 300
 
-def signed_photo(url,share_user=None):
+def signed_photo(url,share_user=None,*,scope="",ref=0):
     name=os.path.basename(url.split("?",1)[0]); expiry=int(time.time())+900
     payload=f"{name}:{expiry}";audience=''
     if share_user:
         payload+=f":{share_user['id']}:{share_user['share_secret']}";audience=f"&audience={share_user['id']}"
+    context = f"&scope={scope}&ref={int(ref)}" if scope else ""
+    if scope: payload += f":{scope}:{int(ref)}"
     sig=hmac.new(media_key(),payload.encode(),hashlib.sha256).hexdigest()
-    return f"/uploads/{name}?expires={expiry}&signature={sig}{audience}"
+    return f"/uploads/{name}?expires={expiry}&signature={sig}{audience}{context}"
 
 @app.get("/uploads/{name}")
-def private_photo(name: str, expires: int=0, signature: str="",audience:int=0, thumb:int=0):
+def private_photo(name: str, expires: int=0, signature: str="",audience:int=0, thumb:int=0, scope:str="", ref:int=0):
     payload=f"{name}:{expires}"
     if audience:
         c=get_db()
@@ -3773,24 +3776,53 @@ def private_photo(name: str, expires: int=0, signature: str="",audience:int=0, t
         if not user or not owned or not settings['enabled'] or not settings['scope'].get('photos') or (settings['expires_at'] and settings['expires_at']<time.time()):
             raise HTTPException(404,'照片授权已失效')
         payload+=f":{audience}:{user['share_secret']}"
+    if scope: payload += f":{scope}:{ref}"
     expected=hmac.new(media_key(),payload.encode(),hashlib.sha256).hexdigest()
     if expires<int(time.time()) or expires>time.time()+901 or not secrets.compare_digest(signature,expected):
         raise HTTPException(status_code=404,detail="照片不存在或授权已失效")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp|gif|mp4|webm|m4a|ogg|aac)",name,re.I):
         raise HTTPException(status_code=404,detail="照片不存在")
+    community_cache = False
+    conn = get_db()
+    try:
+        # Saved bearer links must also obey current message state. This includes
+        # links issued by the previous release during its short expiry window.
+        messages = conn.execute("SELECT recalled_at FROM messages WHERE media_name=?", (name,)).fetchall()
+        if messages and all(row['recalled_at'] for row in messages):
+            raise HTTPException(404, '媒体授权已失效')
+        if scope == 'message':
+            row = conn.execute("SELECT recalled_at,media_name FROM messages WHERE id=?", (ref,)).fetchone()
+            if not row or row['recalled_at'] or row['media_name'] != name:
+                raise HTTPException(404, '媒体授权已失效')
+        elif scope in ('post', 'comment'):
+            table = 'posts' if scope == 'post' else 'comments'
+            row = conn.execute(f"SELECT images,status FROM {table} WHERE id=?", (ref,)).fetchone()
+            if not row or row['status'] != 'open' or name not in community.read_images(row['images']):
+                raise HTTPException(404, '媒体授权已失效')
+            if scope == 'comment':
+                parent = conn.execute("SELECT p.status FROM posts p JOIN comments c ON c.post_id=p.id WHERE c.id=?", (ref,)).fetchone()
+                if not parent or parent['status'] != 'open':
+                    raise HTTPException(404, '媒体授权已失效')
+            community_cache = not messages
+        elif scope:
+            raise HTTPException(404, '媒体授权已失效')
+        elif not messages and not audience:
+            # Compatibility for existing community-upload preview links. Private
+            # message/body-photo files never inherit this policy from thumb=1.
+            owned = conn.execute("SELECT kind FROM media_uploads WHERE name=?", (name,)).fetchone()
+            body = conn.execute("SELECT 1 FROM body_cycles WHERE photo_url=?", ('/uploads/'+name,)).fetchone()
+            community_cache = bool(owned and not owned['kind'] and not body)
+    finally:
+        conn.close()
     path=os.path.join(UPLOAD_DIR,name)
     if not os.path.isfile(path):raise HTTPException(status_code=404,detail="照片不存在")
     mime = "audio/ogg" if name.endswith(".audio.ogg") else (mimetypes.guess_type(name)[0] or "application/octet-stream")
-    # 缓存要按"撤销到底靠什么生效"分层，不是一刀切 no-store（方案 A14）：
-    #  · 身材照（带 audience）：分享设置一改就该立刻看不见，所以 no-store；
-    #  · 社区缩略图：这张图能不能拿到，本来就只由那条 15 分钟的签名决定，
-    #    路由不回查帖子状态——对这种链接 no-store 只买到重复下载，买不到撤销能力。
-    #    给它一个短 max-age，且必须明显短于签名有效期，别让缓存活过链接本身。
-    #  · 私信媒体与原图：仍然 no-store，收件人换设备/被撤回时不该被缓存兜住。
+    # Authorization above controls fresh requests; no-store alone cannot revoke
+    # a bearer URL. Only community thumbnails get a bounded cache window.
     if audience:
         cache = "private, no-store"
-    elif thumb and mime.startswith("image/"):
-        cache = "private, max-age=%d" % COMMUNITY_THUMB_MAX_AGE
+    elif community_cache and thumb and mime.startswith("image/"):
+        cache = "private, max-age=%d" % max(0, min(COMMUNITY_THUMB_MAX_AGE, expires-int(time.time())))
     else:
         cache = "private, no-store"
     if thumb and mime.startswith("image/"):
@@ -4614,7 +4646,7 @@ def community_post_detail(post_id: int, user: dict = Depends(get_current_user)):
                                   % ",".join("?" * len(all_ids)), all_ids).fetchall():
                 named[int(r["id"])] = (r["nickname"] or r["username"] or "").strip()
         items = [{"id": int(c["id"]), "body": c["body"], "region": c["region"] or "",
-                  "images": [signed_photo("/uploads/" + n) for n in community.clean_images(
+                  "images": [signed_photo("/uploads/" + n, scope='comment', ref=int(c['id'])) for n in community.clean_images(
                       c["images"], limit=community.COMMENT_IMAGES_MAX)],
                   "like_count": int(c["like_count"] or 0), "liked_by_me": int(c["id"]) in liked,
                   "mentions": [{"id": u, "name": named.get(u, "")} for u in ment.get(int(c["id"]), [])],
@@ -4740,7 +4772,7 @@ def create_comment(post_id: int, req: CommentReq, request: Request,
         conn.commit()
         return {"code": 0, "duplicate": False,
                 "comment": {"id": int(cur.lastrowid), "body": body, "region": region,
-                            "images": [signed_photo("/uploads/" + n) for n in images],
+                            "images": [signed_photo("/uploads/" + n, scope='comment', ref=int(cur.lastrowid)) for n in images],
                             "like_count": 0, "liked_by_me": False,
                             "mentions": [{"id": int(m["id"]),
                                           "name": (m["nickname"] or m["username"] or "").strip()}
@@ -5206,7 +5238,7 @@ def _message_dict(row):
             # 撤回之后正文与媒体都不再外发，只留一个时间戳让两端都能显示"撤回了一条消息"
             "body": "" if recalled else row["body"], "recalled_at": recalled,
             "kind": kind,
-            "media_url": signed_photo("/uploads/" + media) if (media and not recalled) else "",
+            "media_url": signed_photo("/uploads/" + media, scope='message', ref=int(row['id'])) if (media and not recalled) else "",
             "media_mime": (row["media_mime"] or "") if "media_mime" in names else "",
             "media_size": int(row["media_size"] or 0) if "media_size" in names else 0,
             "asr_text": "" if recalled else ((row["asr_text"] or "") if "asr_text" in names else ""),

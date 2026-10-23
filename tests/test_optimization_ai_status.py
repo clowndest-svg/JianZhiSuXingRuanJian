@@ -136,6 +136,15 @@ class AiStatus(unittest.TestCase):
         self.assertIn(st["source"], ("本机模型", "外部接口", "无"))
         self.assertIn("configured", st)
 
+    def test_equal_clock_ticks_preserve_completion_order(self):
+        with patch.object(self.ai.time, 'time', return_value=1000):
+            self.ai._note_ok('model', 1000)
+            self.assertEqual(self.ai.online_state(), 'up')
+            self.ai._note_fail('http_503', 1000)
+            self.assertEqual(self.ai.online_state(), 'down')
+            self.ai._note_ok('model', 1000)
+            self.assertEqual(self.ai.online_state(), 'up')
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
