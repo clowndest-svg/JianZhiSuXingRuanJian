@@ -127,7 +127,6 @@ jobs:
           QINGSU_REDIS_URL: redis://127.0.0.1:6379/0
         run: python tests/test_multiprocess.py
       - run: python tests/legacy-backend.py
-      - run: python tests/admin-pagination-server.py
       - run: python tests/test_long_tasks.py
       - run: python tests/test_monitor_alerts.py
       - run: python tests/test_backup_verify.py
@@ -153,11 +152,17 @@ jobs:
       - name: Verify chat with real Chromium and isolated API
         env:
           NODE_PATH: ${{ runner.temp }}/chat-ui/node_modules
+          # 后台翻页那条会 spawn 一个起服务的夹具，夹具按这两个变量找仓库与解释器
+          QINGSU_ADMIN_REPO: ${{ github.workspace }}/.admin-repo
+          QINGSU_APP_REPO: ${{ github.workspace }}
+          QINGSU_TEST_PYTHON: python
         run: |
           node tests/chat-ui.mjs
           node tests/recovery-ui.mjs
           node tests/offline-day-ui.mjs
           node tests/a11y-dialog-contract.mjs
+          # 后台四个工作台的真翻页（它自己 spawn admin-pagination-server.py 当夹具）
+          node tests/admin-pagination-ui.mjs
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
