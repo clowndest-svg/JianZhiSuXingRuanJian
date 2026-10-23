@@ -1,0 +1,21 @@
+{
+  "checked_at": 1792739572.141309,
+  "removed": [
+    "/opt/qingsu/releases/admin-config-r180",
+    "/tmp/admin-config-r180.tar",
+    "/tmp/qingsu-admin-config-r180.tar",
+    "/tmp/qingsu-backup-test-r180.tar",
+    "/tmp/prepare-admin-r180.py",
+    "/tmp/load-r180.py",
+    "/tmp/load-r180-5.py",
+    "/tmp/load-probe-r180.py",
+    "/tmp/verify-admin-r180.py",
+    "/tmp/media-cleanup-r180.py",
+    "/tmp/final-config-r180.py",
+    "/tmp/cleanup-server-r180.py",
+    "/tmp/qingsu-backup-test.u3oqE9",
+    "/tmp/qingsu-backup-test.l9oUzC"
+  ],
+  "load_active": false,
+  "preserved": "current r180, previous r178, production data, key directories, all retained backups"
+}

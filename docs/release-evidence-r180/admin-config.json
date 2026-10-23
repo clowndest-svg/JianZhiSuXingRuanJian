@@ -1,0 +1,20 @@
+{
+  "phase": "applied and service restarted",
+  "app_source": "f8af43d15df7e234bfe33723d1bbff494ee7fe54",
+  "backup": "/opt/qingsu/backups/admin-config-r180-20261023-144126",
+  "config_sha256": {
+    "bootstrap.sh": "58178ff5adf4be4e8c8a6d9f32b75579dbda1ae3369338a08a40fb619be5a2f2",
+    "verify-ops.sh": "520bece60ba5c28dcbd8b90fb5add08a7823db0a647c9fad35481b78f05a3c98",
+    "docker-compose.yml": "18bbe009a4983e043f89399953710edbd22a606f19f4ca54b542988b92e2e47d",
+    "qingsu-ops.service": "78cbf905ccdf5cb539278addad9847fcdd98550079da551ab3abc19ee4de197a",
+    "qingsu-ops-sudoers": "2baa39129be9dc67adbd0dec39e87bdcac35d4497fc910866b416b8588b636e2",
+    "seed_policies.py": "4203089afa92bc7e7e498d11ddaddab6a9b4995597dfa0b8fa408de947557440",
+    "qingsu-ops-helpers/qingsu-backup": "3d65c5169f951d7ed352b24bf5694465e6dc7280f1e400495c26a92e4e13146e",
+    "qingsu-ops-helpers/qingsu-set-gate": "7b7f0a27e492f13cb20b7d7bf9cef5288141f0de24d6484c94c93609225e1609",
+    "qingsu-ops-helpers/qingsu-container-health": "3b7e37d64c6b56bbf01ee89b50b61d4aab474e82415646c7950b5fa472185e0c"
+  },
+  "image": "directus/directus@sha256:eb326f679ae847c0a776f93b972761dc2ebe84980e0b9d274a6bc31cd62809f7",
+  "admin_source": "6335e3a105aea4374479c96b6063225d52ca55c3",
+  "applied_at": 1792738872.8140676,
+  "revision_dropin_sha256": "cd96dd8163a86f1d3f79f7595f8a1c65b515a5c66cc9828e8fde76be8f0a56b5"
+}

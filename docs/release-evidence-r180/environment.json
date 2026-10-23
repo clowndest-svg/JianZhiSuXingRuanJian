@@ -1,0 +1,16 @@
+{
+  "local_python": "3.12.14",
+  "local_node": "24.14.1",
+  "local_chrome": "155.0.8059.85",
+  "local_java": "OpenJDK17",
+  "timezone": "Asia/Taipei",
+  "qa_limits": {
+    "cpu_quota_percent": 100,
+    "memory_max_bytes": 536870912,
+    "memory_swap_max": 0
+  },
+  "production_host": "124.220.54.64",
+  "production_cpus": 4,
+  "production_mem_mib": 3655,
+  "android_device_connected": false
+}

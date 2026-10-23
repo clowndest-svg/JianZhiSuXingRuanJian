@@ -1,0 +1,17 @@
+{
+  "synthetic_uid": 524,
+  "original_users": 2,
+  "remaining_users": 2,
+  "foreign_key_violations": 0,
+  "original_and_thumbnail_removed": true,
+  "delete_result": {
+    "code": 0,
+    "media_cleanup": {
+      "removed": 1,
+      "pending": 0
+    },
+    "deleted_tables": 1,
+    "deleted_rows": 1,
+    "dependents": []
+  }
+}

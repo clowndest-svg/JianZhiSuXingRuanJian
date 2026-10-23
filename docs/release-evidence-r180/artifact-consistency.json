@@ -1,0 +1,66 @@
+{
+  "manifest": {
+    "version_code": 64,
+    "version_name": "2.2.19",
+    "min_version_code": 64,
+    "apk_url": "https://124.220.54.64/qingsu.apk",
+    "size": 5488150,
+    "md5": "11c49b47b3e23c44240754ca5e625630",
+    "sha256": "9ef404e2ce37dfd1e4d3c9c19b23ce176a05973d7ef3fba10bd04e71a4834b5e",
+    "notes": "r180 / 2.2.19 (64)\n继续完成首页、记录与私信优化，并补齐媒体隐私边界。\n\n更新内容：\n• 私信媒体撤回后，已取得的旧链接也会拒绝新的读取；私信缩略图继续禁止缓存，社区缩略图缓存不超过链接剩余有效时间。\n• 社区图片链接绑定帖子或评论，下架后拒绝新请求。\n• 餐食确认页展示模型是否配置、是否跑通过、最近成功与失败；状态读取失败时明确提示尚未确认可用。\n• 包含此前 r179 尚未上线的首页任务、餐食快捷记录、档案分组、离线跨日和私信状态改进。"
+  },
+  "certificate_sha256": "c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f",
+  "v2": true,
+  "v3": true,
+  "assets": {
+    "app.js": {
+      "apk_sha256": "f5c16b6e303d000d14a20ac1c6b2a8a8a71fe53e0dc00fe20f1654f08a57b19e",
+      "http_status": 200,
+      "http_equal_apk": true,
+      "http_sha256": "f5c16b6e303d000d14a20ac1c6b2a8a8a71fe53e0dc00fe20f1654f08a57b19e",
+      "note": ""
+    },
+    "features.js": {
+      "apk_sha256": "e410c212f7edc55516b493fcfc3c2f4c8c4592e19e219caedfa11ddb637bd4c2",
+      "http_status": 200,
+      "http_equal_apk": true,
+      "http_sha256": "e410c212f7edc55516b493fcfc3c2f4c8c4592e19e219caedfa11ddb637bd4c2",
+      "note": ""
+    },
+    "companion.js": {
+      "apk_sha256": "18e96316987732b9c1adba3dd0838c818ec8e11fd44981c79e191045f65f04d3",
+      "http_status": 200,
+      "http_equal_apk": true,
+      "http_sha256": "18e96316987732b9c1adba3dd0838c818ec8e11fd44981c79e191045f65f04d3",
+      "note": ""
+    },
+    "sw.js": {
+      "apk_sha256": "55aded965eed0ecdff349358fc0869eeb119ff1820d99dd8ad8897fa2bd57029",
+      "http_status": 200,
+      "http_equal_apk": true,
+      "http_sha256": "55aded965eed0ecdff349358fc0869eeb119ff1820d99dd8ad8897fa2bd57029",
+      "note": ""
+    },
+    "index.html": {
+      "apk_sha256": "563fe2cbe4c3825f99e64a9e9c6f15e24de1246f2617fc8e4cb33ef25220164c",
+      "http_status": 200,
+      "http_equal_apk": false,
+      "http_sha256": "2b8546e9b3eb8da33c8396324b19069d8afe862945c8017bd6ea53cbd0f4ae6a",
+      "note": "root HTML intentionally has hashed asset URLs"
+    },
+    "style.css": {
+      "apk_sha256": "51e76c12cd7a5154c48f84e8d45fecec8f018b0876f722c2a3b8db0fe933ea93",
+      "http_status": 200,
+      "http_equal_apk": true,
+      "http_sha256": "51e76c12cd7a5154c48f84e8d45fecec8f018b0876f722c2a3b8db0fe933ea93",
+      "note": ""
+    },
+    "features.css": {
+      "apk_sha256": "d923fbd161cfbb33ff4abb073e99e930b1db5fa9451a74db8752a3f5520e6acf",
+      "http_status": 200,
+      "http_equal_apk": true,
+      "http_sha256": "d923fbd161cfbb33ff4abb073e99e930b1db5fa9451a74db8752a3f5520e6acf",
+      "note": ""
+    }
+  }
+}

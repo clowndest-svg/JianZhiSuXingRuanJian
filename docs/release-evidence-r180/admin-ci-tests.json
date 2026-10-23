@@ -1,0 +1,26 @@
+{
+  "run": 39914786564,
+  "candidate": "6335e3a105aea4374479c96b6063225d52ca55c3",
+  "suites": [
+    {
+      "tests": 42,
+      "seconds": 16.367,
+      "result": "OK"
+    },
+    {
+      "tests": 24,
+      "seconds": 28.121,
+      "result": "OK"
+    },
+    {
+      "tests": 7,
+      "seconds": 2.314,
+      "result": "OK"
+    },
+    {
+      "tests": 10,
+      "seconds": 3.047,
+      "result": "OK"
+    }
+  ]
+}

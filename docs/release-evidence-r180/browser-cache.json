@@ -1,0 +1,12 @@
+{
+  "test": "tests/media-cache-ui.mjs",
+  "result": "PASS",
+  "ci_run": 39911006231,
+  "checks": [
+    "Chromium real cache hit",
+    "private no-store second request reaches server",
+    "saved private URL returns 404 after recall",
+    "expired cached community URL returns 404"
+  ],
+  "fixture": "localhost synthetic server, not a production private photo"
+}

@@ -1,0 +1,112 @@
+{
+  "main_candidate": "f8af43d15df7e234bfe33723d1bbff494ee7fe54",
+  "suites": [
+    {
+      "suite": "test_integration",
+      "exit": 0,
+      "seconds": 98.49
+    },
+    {
+      "suite": "test_ai_contract",
+      "exit": 0,
+      "seconds": 7.45
+    },
+    {
+      "suite": "test_optimization_ai_status",
+      "exit": 0,
+      "seconds": 0.36,
+      "initial_exit": 1,
+      "final_tests": 9,
+      "final_seconds": 0.044,
+      "reason": "equal timestamp regression fixed; initial failure retained"
+    },
+    {
+      "suite": "test_optimization_weekly",
+      "exit": 0,
+      "seconds": 9.4
+    },
+    {
+      "suite": "test_update_copy",
+      "exit": 0,
+      "seconds": 1.51
+    },
+    {
+      "suite": "test_companion",
+      "exit": 0,
+      "seconds": 13.36
+    },
+    {
+      "suite": "test_chat_media",
+      "exit": 0,
+      "seconds": 15.04
+    },
+    {
+      "suite": "test_r173_contracts",
+      "exit": 0,
+      "seconds": 6.09
+    },
+    {
+      "suite": "test_deploy_pairing",
+      "exit": 0,
+      "seconds": 0.34
+    },
+    {
+      "suite": "test_calls",
+      "exit": 0,
+      "seconds": 3.31
+    },
+    {
+      "suite": "test_native_media_contract",
+      "exit": 0,
+      "seconds": 5.59
+    },
+    {
+      "suite": "test_consistency",
+      "exit": 0,
+      "seconds": 6.09
+    },
+    {
+      "suite": "test_long_tasks",
+      "exit": 0,
+      "seconds": 1.15
+    },
+    {
+      "suite": "test_monitor_alerts",
+      "exit": 0,
+      "seconds": 0.45
+    },
+    {
+      "suite": "test_backup_verify",
+      "exit": 0,
+      "seconds": 1.7
+    },
+    {
+      "suite": "test_optimization_security",
+      "exit": 0,
+      "seconds": 56.94
+    },
+    {
+      "suite": "test_optimization_data",
+      "exit": 0,
+      "seconds": 13.29
+    },
+    {
+      "suite": "test_optimization_ux",
+      "exit": 0,
+      "seconds": 14.09
+    }
+  ],
+  "additional": {
+    "security": 24,
+    "data": 7,
+    "admin_final_ci": 42,
+    "legacy_backend": 623,
+    "legacy_frontend": 355,
+    "chat_browser": 30,
+    "records_profile_permissions": 49,
+    "a11y": 134,
+    "linux_snapshot": 3,
+    "helper_shell": 67
+  },
+  "device_connected": false
+}

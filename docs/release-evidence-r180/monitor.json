@@ -1,0 +1,84 @@
+{
+  "checked_at": 1792739572,
+  "qingsu": "active",
+  "qingsu-llama": "active",
+  "qingsu-backup.timer": "active",
+  "qingsu-cert-renew.timer": "active",
+  "coturn": "active",
+  "qingsu-asr": "active",
+  "ready": 200,
+  "turn": true,
+  "asr_http": 200,
+  "cpu_percent": 0.8,
+  "memory_percent": 59.2,
+  "memory_available_mb": 1492,
+  "swap_percent": 16.8,
+  "load1": 0.13,
+  "load_per_core": 0.03,
+  "free_disk_mb": 26354,
+  "disk_percent": 35.6,
+  "thresholds": {
+    "cpu_percent": 85.0,
+    "memory_percent": 85.0,
+    "swap_percent": 25.0,
+    "load_per_core": 1.5,
+    "disk_percent": 85.0
+  },
+  "backup_age_hours": 0.2,
+  "certificate_hours_left": 84.0,
+  "requests": 3,
+  "errors_5xx": 0,
+  "p95_ms": 3.7,
+  "sqlite_lock_errors": 0,
+  "cache_degraded": 0,
+  "qingsu-ops": "active",
+  "slow_endpoints": [
+    {
+      "endpoint": "/health",
+      "requests": 3,
+      "p95_ms": 3.8
+    }
+  ],
+  "categories": {
+    "api": {
+      "requests": 3,
+      "errors_5xx": 0,
+      "p95_ms": 3.8,
+      "readout": "ok"
+    },
+    "ai": {
+      "requests": null,
+      "errors_5xx": null,
+      "p95_ms": null,
+      "readout": "\u65e0\u8bfb\u6570"
+    },
+    "media": {
+      "requests": null,
+      "errors_5xx": null,
+      "p95_ms": null,
+      "readout": "\u65e0\u8bfb\u6570"
+    },
+    "ws": {
+      "requests": null,
+      "errors_5xx": null,
+      "p95_ms": null,
+      "readout": "\u65e0\u8bfb\u6570",
+      "connected": 0,
+      "handshake_rejected": 0,
+      "redis": true
+    },
+    "admin": {
+      "requests": null,
+      "errors_5xx": null,
+      "p95_ms": null,
+      "readout": "\u65e0\u8bfb\u6570"
+    }
+  },
+  "error_types": {},
+  "alerts": {
+    "new": [],
+    "recovered": [],
+    "ongoing": []
+  },
+  "problems": []
+}

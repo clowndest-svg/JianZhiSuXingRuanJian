@@ -1,0 +1,37 @@
+{
+  "users": 100,
+  "days_per_user": 365,
+  "seeded_rows": 109500,
+  "concurrency": 5,
+  "requests": 92400,
+  "elapsed_s": 901.85,
+  "p50_ms": 42.8,
+  "p95_ms": 89.4,
+  "p99_ms": 98.4,
+  "status_counts": {
+    "200": 92400
+  },
+  "5xx": 0,
+  "4xx": 0,
+  "business_code_failures": 0,
+  "slowest_by_path": {
+    "/api/charts": {
+      "n": 23100,
+      "p95_ms": 94.1
+    },
+    "/api/dashboard": {
+      "n": 23100,
+      "p95_ms": 92.3
+    },
+    "/api/habits": {
+      "n": 23100,
+      "p95_ms": 70.7
+    },
+    "/api/water/update": {
+      "n": 23100,
+      "p95_ms": 65.1
+    }
+  },
+  "sqlite_lock_errors": 0,
+  "water_rows_written": 25
+}

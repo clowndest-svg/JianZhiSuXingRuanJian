@@ -1,0 +1,131 @@
+{
+  "checked_at": 1792738909.6637247,
+  "health": {
+    "app": {
+      "release": "r39911006231",
+      "source_revision": "f8af43d15df7e234bfe33723d1bbff494ee7fe54",
+      "status": "ok",
+      "site_base": "https://124.220.54.64",
+      "min_build": 0,
+      "schema_version": 12,
+      "schema_required": 12,
+      "build_override": true,
+      "gate": {
+        "blocked": 0,
+        "builds": {
+          "64": 55,
+          "62": 89
+        }
+      },
+      "geoip": {
+        "ok": true,
+        "version": 3,
+        "bytes": 11122642
+      },
+      "keys": {
+        "isolated": true,
+        "regenerated": [],
+        "present": {
+          "media-signing.key": true,
+          "ws-secret.key": true
+        }
+      },
+      "chat": {
+        "online": 1,
+        "sockets": 1,
+        "rejected": 0,
+        "redis": true,
+        "turn": true,
+        "calls": 0,
+        "asr": true
+      },
+      "rate": {
+        "store": "redis",
+        "degraded": false,
+        "last_error": "",
+        "memory_buckets": 0
+      }
+    },
+    "console_container": "running exit=0 restarts=0",
+    "disk_free_mb": 26346,
+    "mem_mb": {
+      "memtotal": 3655,
+      "memfree": 470,
+      "memavailable": 1414
+    },
+    "recent_backups": null,
+    "backup_listing": "restricted",
+    "ops_time": "2026-10-23T15:01:49"
+  },
+  "privileged": {
+    "gate": true,
+    "backup": true,
+    "health": true,
+    "effective_uid": 990,
+    "service_user": "qingsu-ops",
+    "missing_helpers": [],
+    "note": "\u914d\u4e86 helper \u65f6\u8fd9\u4e09\u4ef6\u4e8b\u7ecf sudo \u8d70\u53c2\u6570\u767d\u540d\u5355\u811a\u672c\uff1b\u6ca1\u914d\u5219\u672c\u8fdb\u7a0b\u76f4\u63a5\u505a\uff0c\u90a3\u8981\u6c42\u8fdb\u7a0b\u672c\u8eab\u6709 root \u4f4d\u2014\u2014\u751f\u4ea7 unit \u4e0d\u8be5\u518d\u662f root"
+  },
+  "version-pairing": {
+    "admin_revision": "6335e3a105aea4374479c96b6063225d52ca55c3",
+    "app_release": "r39911006231",
+    "app_schema_version": 12,
+    "app_schema_required": 12,
+    "app_version": null,
+    "app_error": null,
+    "paired": true,
+    "missing_app_columns": [],
+    "note": "paired \u4e3a\u5047\u65f6\u4e0d\u8981\u53d1\u540e\u53f0\uff1a\u4e24\u4ed3\u5171\u7528\u4e00\u4e2a\u5e93\uff0c\u540e\u53f0\u5148\u4e0a\u4f1a\u8ba9\u9ad8\u5371\u64cd\u4f5c\u5199\u5230\u8fd8\u4e0d\u5b58\u5728\u7684\u5217\u4e0a"
+  },
+  "gate": {
+    "override": 0,
+    "manifest_min": 64,
+    "manifest_code": 64,
+    "override_status": "ok",
+    "manifest_error": "",
+    "effective": 0,
+    "brake_on": true,
+    "seen_builds": {
+      "64": 55,
+      "62": 89
+    },
+    "blocked_since_restart": 0,
+    "min_build_reported_by_app": 0,
+    "app_error": null,
+    "release": {
+      "manifest_ok": true,
+      "version_code": 64,
+      "apk_present": true,
+      "apk_size_ok": true,
+      "apk_sha_ok": null,
+      "apk_build_ok": true,
+      "installable": true,
+      "reason": ""
+    },
+    "note": "seen_builds \u53ea\u8986\u76d6\u4e3b\u5e94\u7528\u81ea\u4e0a\u6b21\u91cd\u542f\u4ee5\u6765\u89c1\u8fc7\u7684\u6784\u5efa\u53f7\uff0c\u4e0d\u662f\u88c5\u673a\u603b\u91cf\uff1b\u62ac\u95e8\u524d\u5148\u770b\u8fd9\u4e2a\u6570\u548c\u88ab\u6321\u8ba1\u6570\uff0c\u522b\u628a\u5b83\u5f53\u7528\u6237\u603b\u91cf\u3002release.installable \u4e3a\u5047\u65f6\u62ac\u95e8\u4f1a\u88ab\u62d2\u7edd\u2014\u2014\u95e8\u62ac\u5230\u88c5\u4e0d\u4e0a\u7684\u7248\u672c\uff0c\u7528\u6237\u8fde\u5347\u7ea7\u90fd\u5347\u4e0d\u4e86"
+  },
+  "auth_status": {
+    "no_basic": 401,
+    "basic_only": 401
+  },
+  "backup": {
+    "status": 200,
+    "result": {
+      "code": 0,
+      "snapshot": "20261023-150149",
+      "integrity": "ok",
+      "new_files": 0,
+      "directory_readable": false
+    }
+  },
+  "ops_uid": "990",
+  "ops_groups": [
+    "qingsu-ops",
+    "qingsu"
+  ],
+  "file_modes": {
+    "/opt/qingsu/backups": "0o700",
+    "/opt/qingsu/uploads": "0o2770",
+    "/opt/qingsu/data": "0o2770"
+  }
+}
