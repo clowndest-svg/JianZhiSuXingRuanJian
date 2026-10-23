@@ -96,3 +96,7 @@ html[data-bubble-motion="off"] .skin-art{animation:none!important}
 
 .skin-dialog .skin-card{border-radius:18px}
 .skin-legacy .theme-dot{min-height:28px;width:28px;height:28px}
+
+/* Tall text uses an adaptive outline: SVG curves must not stretch across text/status. */
+.cm-bubble.me.skin-long[data-skin]{outline:1.5px solid var(--skin-line);outline-offset:-2px}
+.cm-bubble.me.skin-long[data-skin]>.skin-frame{display:none}

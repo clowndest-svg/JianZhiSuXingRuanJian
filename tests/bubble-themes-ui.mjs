@@ -57,6 +57,7 @@ try{
   assert.equal(await page.locator('.cm-bubble.them[data-skin]').count(),0);
   assert.equal(await page.locator('.cm-bubble.me[data-skin] .dm-status').count(),2);
   assert.equal(await page.locator('#dm-input').isEditable(),true);
+  assert.ok(await page.locator('.cm-bubble.me.skin-long[data-skin]').evaluate(el=>getComputedStyle(el).outlineStyle==='solid'&&getComputedStyle(el.querySelector('.skin-frame')).display==='none'),'long messages use adaptive outline without stretched curves crossing text or status');
  }
  assert.equal(shapes.size,20);assert.equal(palettes.size,20);checks.push('all 20 save through API, update actual short/long messages and keep peer bubbles/status unchanged');
  await page.reload();await page.waitForFunction(()=>window.QSBubbles&&typeof openDM==='function');await page.evaluate(id=>openDM(id),b.id);

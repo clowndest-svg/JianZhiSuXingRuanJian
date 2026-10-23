@@ -3466,6 +3466,7 @@ function cmBubbleHTML(m, me, st) {
     const statusCls = failed ? "dm-status-fail" : pending ? "dm-status-wait" : "dm-status-ok";
     const bubble = '<div class="cm-bubble ' + (mine ? "me" : "them")
         + (kind === "sticker" ? " sticker" : "") + (isMedia ? " media" : "")
+        + (kind === "text" && String(m.body || "").length > 100 ? " skin-long" : "")
         + (pending ? " pending" : "") + (failed ? " failed" : "") + '"'
         + (mine && cm.myTheme && cm.myTheme !== "green" ? ' data-t="' + escapeHtml(cm.myTheme) + '"' : "")
         + (mine && kind !== 'sticker' && window.QSBubbles && window.QSBubbles.has(cm.myTheme) ? ' data-skin="' + escapeHtml(cm.myTheme) + '"' : '')
