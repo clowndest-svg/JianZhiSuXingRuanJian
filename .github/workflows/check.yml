@@ -105,7 +105,8 @@ jobs:
             # Only the disposable runner is changed; use Ubuntu's own HTTPS mirror.
             sudo python3 - <<'PY'
           from pathlib import Path
-          for path in (Path('/etc/apt/sources.list'), Path('/etc/apt/sources.list.d/ubuntu.sources')):
+          # Hosted runners may use mirror+file: lists rather than direct source URLs.
+          for path in (Path('/etc/apt/sources.list'), Path('/etc/apt/sources.list.d/ubuntu.sources'), Path('/etc/apt/apt-mirrors.txt'), Path('/etc/apt/apt-mirrors-security.txt')):
               if path.is_file():
                   path.write_text(path.read_text().replace('http://azure.archive.ubuntu.com/ubuntu', 'https://archive.ubuntu.com/ubuntu').replace('https://azure.archive.ubuntu.com/ubuntu', 'https://archive.ubuntu.com/ubuntu'))
           PY
