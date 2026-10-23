@@ -1,0 +1,77 @@
+{
+  "manifest": {
+    "version_code": 69,
+    "version_name": "2.2.24",
+    "min_version_code": 69,
+    "apk_url": "https://124.220.54.64/qingsu.apk",
+    "size": 9392189,
+    "md5": "83d60be9e431c21f708835ff39f0cacc",
+    "sha256": "7320555eb3dba12524c2f3335bdaafc017413aa90d6b07f75e76a2390243fcb1",
+    "notes": "r185 / 2.2.24 (69)\n- 补齐私聊分页并发保护：加载旧消息时返回最新，迟到的旧分页不会再把页面拉回历史。\n\n更新内容：\n• 补齐私聊分页并发保护：加载旧消息时返回最新，迟到的旧分页不会再把页面拉回历史。\n• 保留上一版的气泡与背景细化、编辑、个人删除、转写取消、搜索和可见消息已读。"
+  },
+  "ready": {
+    "release": "r39984028956",
+    "source_revision": "49759def05cf238d17ca29b17afddf435462ce56",
+    "status": "ok",
+    "site_base": "https://124.220.54.64",
+    "min_build": 0,
+    "schema_version": 13,
+    "schema_required": 13,
+    "build_override": true,
+    "gate": {
+      "blocked": 0,
+      "builds": {
+        "69": 30
+      }
+    },
+    "geoip": {
+      "ok": true,
+      "version": 3,
+      "bytes": 11122642
+    },
+    "keys": {
+      "isolated": true,
+      "regenerated": [],
+      "present": {
+        "media-signing.key": true,
+        "ws-secret.key": true
+      }
+    },
+    "chat": {
+      "online": 0,
+      "sockets": 0,
+      "rejected": 0,
+      "redis": true,
+      "turn": true,
+      "calls": 0,
+      "asr": true
+    },
+    "rate": {
+      "store": "redis",
+      "degraded": false,
+      "last_error": "",
+      "memory_buckets": 0
+    }
+  },
+  "source": "49759def05cf238d17ca29b17afddf435462ce56",
+  "fifteen_apk_assets_equal_workspace": true,
+  "fourteen_online_static_assets_equal_workspace": true,
+  "index_serves_versioned_wardrobe_resources": true,
+  "asset_sha256": {
+    "app.js": "00e0f14a2f015488e66ea1dfd15e33fa7f7539d29bf6daf95f5866b8f12e15f3",
+    "features.js": "a4399493a6112e001e10fe6fda4384c23d7c89bcb2a7eb819f8fdb32d441a536",
+    "companion.js": "18e96316987732b9c1adba3dd0838c818ec8e11fd44981c79e191045f65f04d3",
+    "sw.js": "11b87bd9082bf336f021a0702dd6883dc700f7e164663e49efa98c34be282c00",
+    "index.html": "754683b1ddcf5c85fba8ee4c70f8204f282fcaa7f0ab4fbed9603f6409eb9bee",
+    "style.css": "51e76c12cd7a5154c48f84e8d45fecec8f018b0876f722c2a3b8db0fe933ea93",
+    "features.css": "d923fbd161cfbb33ff4abb073e99e930b1db5fa9451a74db8752a3f5520e6acf",
+    "bubble-themes.js": "6bda13513835307e14dba38671ea6d60e3f7206a2347c1f87907880fd8e1dfbb",
+    "bubble-themes.css": "3dfea92f5fc66e7aef2bc73d19da1117f9aea0c95e80feaf23b1be50c3a7c6e4",
+    "bubble-ai.png": "3fbee4c2a8a3fc07f058feb5492f2d37a136b9c6912e0a478f38c5b3d62abaa6",
+    "bubble-moon.png": "9dede84885f7252468677d4f5d225a813fe63986063fb214c05ffd29fc454266",
+    "chat-backgrounds.js": "9cee335349c69cb0dbc83d29be1c4ce0285875290f9a4effa86be4ea267b4960",
+    "chat-backgrounds.css": "8acdd1845b3df9a574ebf7c98061d0362e009792343ea41eb3d81eb1eb2eb232",
+    "chat-tools.js": "d4d95409cddb33a52a767d085b4492a15a46a9c74a4aadf01fbde752ccb9cd37",
+    "chat-tools.css": "cd181c20111bcc37019ffefd73c055893eb4180f5bda32ed6455dc2a7643ce9c"
+  }
+}

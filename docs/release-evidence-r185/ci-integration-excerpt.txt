@@ -1,0 +1,16 @@
+CI run 39984028956, integration job 120519360666, success.
+2026-10-23T16:10:32.3384052Z 10000-message fixture: two keyset pages/context/legacy receipt 0.042s
+2026-10-23T16:10:45.2470719Z PASS: 26 条全绿
+2026-10-23T16:11:32.6907968Z STEP desktop right-click edits own text; API peer sees revision and edited marker
+2026-10-23T16:11:33.4420792Z STEP mobile long press offers personal deletion; peer keeps original and cannot edit incoming
+2026-10-23T16:11:33.5382905Z STEP personal deletion persists across reload
+2026-10-23T16:11:34.7810796Z STEP only visible foreground incoming messages get read receipts; offscreen history stays unread
+2026-10-23T16:11:36.5034959Z STEP reverse pagination across 420 records keeps both memory and DOM at 120 messages
+2026-10-23T16:11:36.8384890Z STEP incoming websocket messages preserve history window and show return-latest badge
+2026-10-23T16:11:36.9833824Z STEP server-backed history search jumps to bounded surrounding context
+2026-10-23T16:11:37.0484946Z STEP return latest fetches newest cursor window
+2026-10-23T16:11:37.3796489Z STEP late older-page response cannot replace an explicit latest window
+2026-10-23T16:11:37.3986306Z STEP targeted read event repaints sender status immediately
+2026-10-23T16:11:37.9610761Z STEP cancel ASR dismisses pending state and discards late transcription
+2026-10-23T16:11:38.0732188Z STEP refined theme/background panels stay within 320/393/1200 widths
+
