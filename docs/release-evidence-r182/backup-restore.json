@@ -1,0 +1,10 @@
+{
+  "backup": "/opt/qingsu/backups/release-20261023-182439",
+  "database_restored_to": "isolated in-memory SQLite",
+  "database_integrity": "ok",
+  "foreign_key_violations": 0,
+  "restored_users": 2,
+  "previous_android_build": 65,
+  "previous_apk_sha256_matches_backup_manifest": true,
+  "production_files_modified": false
+}

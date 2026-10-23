@@ -1,0 +1,78 @@
+{
+  "manifest": {
+    "version_code": 66,
+    "version_name": "2.2.21",
+    "min_version_code": 66,
+    "apk_url": "https://124.220.54.64/qingsu.apk",
+    "size": 9379623,
+    "md5": "8f136ec6e8e9c6f7f2867e272aa42ee0",
+    "sha256": "98894770eaf42bedb80de1d0b4984f41ee323518c8a1dc9bb20a20bcac62918f",
+    "notes": "r182 / 2.2.21 (66)\n- 私聊新增20款原创气泡：AI娘、动漫、科幻、浪漫、萌趣、自然与梦幻，独立轮廓、插画角饰、多彩底纹与轻动效。\n\n更新内容：\n• 私聊新增20款原创气泡：AI娘、动漫、科幻、浪漫、萌趣、自然与梦幻，独立轮廓、插画角饰、多彩底纹与轻动效。\n• 新装扮面板提供分类、真实预览、确认应用和动效开关，保留5款经典纯色。刷新私聊直接恢复服务器主题，不必先打开“我的”。\n• 动效遵循系统减少动态设置，离屏和后台暂停；两款原创AI插画按需加载，避免加入首页安装预缓存。"
+  },
+  "ready": {
+    "release": "r39937860003",
+    "source_revision": "0f93b669e2443528dee217a64d1d8e6813464ba4",
+    "status": "ok",
+    "site_base": "https://124.220.54.64",
+    "min_build": 0,
+    "schema_version": 12,
+    "schema_required": 12,
+    "build_override": true,
+    "gate": {
+      "blocked": 0,
+      "builds": {
+        "66": 49,
+        "0": 1,
+        "65": 4
+      }
+    },
+    "geoip": {
+      "ok": true,
+      "version": 3,
+      "bytes": 11122642
+    },
+    "keys": {
+      "isolated": true,
+      "regenerated": [],
+      "present": {
+        "media-signing.key": true,
+        "ws-secret.key": true
+      }
+    },
+    "chat": {
+      "online": 0,
+      "sockets": 0,
+      "rejected": 0,
+      "redis": true,
+      "turn": true,
+      "calls": 0,
+      "asr": true
+    },
+    "rate": {
+      "store": "redis",
+      "degraded": false,
+      "last_error": "",
+      "memory_buckets": 0
+    }
+  },
+  "source": "0f93b669e2443528dee217a64d1d8e6813464ba4",
+  "eleven_apk_assets_equal_workspace": true,
+  "ten_online_static_assets_equal_workspace": true,
+  "index_serves_versioned_wardrobe_resources": true,
+  "asset_sha256": {
+    "app.js": "ad9fc45a26f58276bb5263909170c2fbd7b54ffc5a3e0e3410005702bcc9117c",
+    "features.js": "4d4d664bed3a004bcd01465e0f18040004fa31045ed6171dead1d8da47ff6be9",
+    "companion.js": "18e96316987732b9c1adba3dd0838c818ec8e11fd44981c79e191045f65f04d3",
+    "sw.js": "09f16df9ed6b9bc5223c4dd59b7f8de61540108871819e3755e0c6a3b8f52285",
+    "index.html": "9bf8fa4a637ffa1fd34026ba83bfa77352065955296fa85afcef4dcb7b13b62c",
+    "style.css": "51e76c12cd7a5154c48f84e8d45fecec8f018b0876f722c2a3b8db0fe933ea93",
+    "features.css": "d923fbd161cfbb33ff4abb073e99e930b1db5fa9451a74db8752a3f5520e6acf",
+    "bubble-themes.js": "b7b4f167dccb1838e6714a1f587fdfbf758d0be4c274aa6949317646919957cf",
+    "bubble-themes.css": "60ce272a47d9e84ef75faf183a4fa8bc2d8db6d9aea1431acedfbb8489179e62",
+    "bubble-ai.png": "3fbee4c2a8a3fc07f058feb5492f2d37a136b9c6912e0a478f38c5b3d62abaa6",
+    "bubble-moon.png": "9dede84885f7252468677d4f5d225a813fe63986063fb214c05ffd29fc454266"
+  },
+  "apk_signature_v2": true,
+  "apk_signature_v3": true,
+  "certificate_sha256": "c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f"
+}

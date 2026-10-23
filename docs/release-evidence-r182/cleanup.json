@@ -1,0 +1,10 @@
+{
+  "local_disposable_test_directories": "retained",
+  "reason": "automatic approval review rejected recursive removal: blocked by policy",
+  "production_synthetic_users": {
+    "removed": 2,
+    "remaining_real_users": 2,
+    "foreign_key_violations": 0,
+    "total_removed_across_two_attempts": 4
+  }
+}

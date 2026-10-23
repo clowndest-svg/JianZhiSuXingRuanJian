@@ -1,0 +1,26 @@
+{
+  "release": {
+    "release": "r39937860003",
+    "source_revision": "0f93b669e2443528dee217a64d1d8e6813464ba4",
+    "backup": "/opt/qingsu/backups/release-20261023-182439"
+  },
+  "backup_exists": true,
+  "backup_files": [
+    "server.py",
+    "app_modules",
+    "web",
+    "qingsu.service",
+    "qingsu-ci-deploy",
+    "nginx-tls.conf",
+    "nginx-http.conf",
+    "qingsu.db"
+  ],
+  "users": 2,
+  "foreign_key_violations": 0,
+  "integrity": "ok",
+  "units": {
+    "qingsu": "active",
+    "qingsu-ops": "active"
+  },
+  "qa_config_absent": true
+}

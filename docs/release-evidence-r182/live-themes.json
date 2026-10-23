@@ -1,0 +1,29 @@
+{
+  "source": "0f93b669e2443528dee217a64d1d8e6813464ba4",
+  "checked_at": 1792758662.500138,
+  "checks": [
+    "all 20 themes persist and hydrate chat without altering peer",
+    "unknown rejected without mutation; legacy blue remains compatible"
+  ],
+  "original_users": 2,
+  "remaining_users": 2,
+  "foreign_key_violations": 0,
+  "synthetic_users_cleaned": 2,
+  "admin_pairing": {
+    "admin_revision": "6335e3a105aea4374479c96b6063225d52ca55c3",
+    "app_release": "r39937860003",
+    "app_schema_version": 12,
+    "app_schema_required": 12,
+    "app_version": null,
+    "app_error": null,
+    "paired": true,
+    "missing_app_columns": [],
+    "note": "paired 为假时不要发后台：两仓共用一个库，后台先上会让高危操作写到还不存在的列上"
+  },
+  "earlier_fixture_attempt": {
+    "result": "fixture assertion failed before theme changes",
+    "reason": "manual synthetic user lacked community_profile created by normal registration",
+    "cleanup": "both earlier synthetic accounts deleted in finally; original count restored",
+    "resolution": "seed the same community_profile as register, rerun all 20 themes successfully"
+  }
+}
