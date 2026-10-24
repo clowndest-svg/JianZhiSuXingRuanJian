@@ -1,0 +1,86 @@
+2026-10-24T04:14:27.0363553Z   update-environment: true
+2026-10-24T04:16:02.3535941Z BUILD SUCCESSFUL in 1m 22s
+2026-10-24T04:16:03.9487355Z Uploaded bytes 16893415
+2026-10-24T04:16:41.1911447Z release artifacts agree: version_code=71 size=9325691 sha256=c25ab5ad50ce
+2026-10-24T04:16:51.8162384Z [36;1mffprobe -version[0m
+2026-10-24T04:17:16.9135567Z Get:60 https://archive.ubuntu.com/ubuntu noble/main amd64 libasyncns0 amd64 0.8-6build4 [11.3 kB]
+2026-10-24T04:17:28.2813552Z Unpacking libva-drm2:amd64 (2.20.0-2ubuntu0.2) ...
+2026-10-24T04:17:28.3555823Z Selecting previously unselected package libvpl2.
+2026-10-24T04:17:29.3378355Z Preparing to unpack .../16-libshine3_3.1.1-2build1_amd64.deb ...
+2026-10-24T04:17:30.6235215Z Preparing to unpack .../48-libflite1_2.2-6build3_amd64.deb ...
+2026-10-24T04:17:32.3355941Z Setting up libva-drm2:amd64 (2.20.0-2ubuntu0.2) ...
+2026-10-24T04:17:32.3535535Z Setting up libva-x11-2:amd64 (2.20.0-2ubuntu0.2) ...
+2026-10-24T04:17:32.3550989Z Setting up libopenmpt0t64:amd64 (0.7.3-1.1build3) ...
+2026-10-24T04:17:53.8726230Z 计数与明细必须自洽：like_count == COUNT(post_likes)，comment_count 同理。 ... ok
+2026-10-24T04:17:59.3455933Z Ran 64 tests in 17.658s
+2026-10-24T04:18:02.1101273Z Ran 6 tests in 1.273s
+2026-10-24T04:18:02.2835587Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+2026-10-24T04:18:02.4592321Z Ran 9 tests in 0.012s
+2026-10-24T04:18:04.3168600Z Ran 6 tests in 1.588s
+2026-10-24T04:18:07.4204275Z Ran 3 tests in 2.853s
+2026-10-24T04:18:09.9439585Z Ran 8 tests in 2.268s
+2026-10-24T04:18:14.0727984Z Ran 18 tests in 3.637s
+2026-10-24T04:18:15.1924249Z Ran 6 tests in 0.793s
+2026-10-24T04:18:15.3395932Z Ran 5 tests in 0.001s
+2026-10-24T04:18:16.1345919Z Ran 5 tests in 0.540s
+2026-10-24T04:18:17.0532790Z Ran 10 tests in 0.601s
+2026-10-24T04:18:18.0905803Z Ran 10 tests in 0.726s
+2026-10-24T04:18:18.8659187Z Ran 6 tests in 0.470s
+2026-10-24T04:18:19.9635503Z test_prompt_failure (__main__.NativeMediaContractTest.test_prompt_failure) ... ok
+2026-10-24T04:18:20.3161614Z Ran 21 tests in 1.289s
+2026-10-24T04:18:20.8535515Z Ran 2 tests in 0.476s
+2026-10-24T04:18:27.5966881Z === 当前源码：623 条，绿 623，红 0 ===
+2026-10-24T04:18:27.6039355Z   绿 在线模型配置文件不进仓库
+2026-10-24T04:18:27.6047623Z   绿 对应的服务端模型都收 request_id
+2026-10-24T04:18:27.8311164Z Ran 15 tests in 0.113s
+2026-10-24T04:18:27.9119630Z Ran 15 tests in 0.002s
+2026-10-24T04:18:28.1886434Z Ran 15 tests in 0.165s
+2026-10-24T04:18:29.1402624Z Ran 3 tests in 0.873s
+2026-10-24T04:18:30.6978133Z === 当前源码：355 条，绿 355，红 0 ===
+2026-10-24T04:18:30.7062329Z   绿 访客接口不被当成待更新客户端
+2026-10-24T04:18:30.7632751Z PASS: share, checklist, water, concurrent writes, offline refresh, logout, browser/APK routing
+2026-10-24T04:18:30.7826646Z PASS: persistent request IDs, offline sync, account isolation, malformed storage, logout cleanup, static-only PWA cache
+2026-10-24T04:18:30.7831220Z PASS: late responses and failed writes cannot cross account changes
+2026-10-24T04:18:30.7833467Z PASS: never-submitted drafts remain editable without duplicating uncertain cloud writes
+2026-10-24T04:18:30.7877958Z PASS: offline occurrence metadata survives replay; undated legacy drafts require confirmation
+2026-10-24T04:18:31.0358639Z PASS: pwa cache key keeps query string, static-only whitelist, 64-entry trim, build-derived cache name, offline replay
+2026-10-24T04:18:31.1274623Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.17/x64/lib
+2026-10-24T04:18:31.1953674Z {"app.js":{"raw":275876,"gzip":92130},"features.js":{"raw":268602,"gzip":79109},"index.html":{"raw":122749,"gzip":29934},"style.css":{"raw":84602,"gzip":19202},"features.css":{"raw":77685,"gzip":20538},"bubble-themes.js":{"raw":17813,"gzip":6925},"bubble-themes.css":{"raw":16237,"gzip":4722},"chat-backgrounds.js":{"raw":14179,"gzip":5937},"chat-backgrounds.css":{"raw":2179,"gzip":868},"chat-tools.js":{"raw":15420,"gzip":5544},"chat-tools.css":{"raw":4002,"gzip":1532},"training.js":{"raw":29152,"gzip":10101},"training.css":{"raw":8287,"gzip":2307}}
+2026-10-24T04:18:31.1960911Z   绿 bubble-themes.css 原始体积没越过预算  -> 实测 16237 B / 预算 24576 B
+2026-10-24T04:18:31.1971073Z PASS: 30 条全绿
+2026-10-24T04:18:31.2527170Z PASS: GET 15s 超时会被中止，错误形状 status/code/message 齐全
+2026-10-24T04:18:31.2564197Z PASS: 超时分级 read=15s / write=30s / upload=120s
+2026-10-24T04:18:31.2611741Z PASS: 上传失败有明确错误结果，界面不会静默播报成功
+2026-10-24T04:18:31.2652569Z PASS: 旧账号迟到响应被 409 丢弃，同账号响应正常接受
+2026-10-24T04:18:31.2689990Z PASS: 403 按机器码分成强更门/封号/普通拒绝三条互不串路
+2026-10-24T04:18:31.2723863Z PASS: 封号清会话、原因原样播报、几秒内不重复轰炸
+2026-10-24T04:18:31.2762997Z PASS: 409 单次请求、统一形状、不改本机状态
+2026-10-24T04:18:31.2797744Z PASS: 响应丢失后的重试复用 request_id；并发点击合并成一条
+2026-10-24T04:18:31.2835072Z PASS: 同 tag 后发取消先发，在途表随落定清空
+2026-10-24T04:18:31.2868935Z PASS: 断网错误形状统一且不破坏离线草稿判定
+2026-10-24T04:18:31.2907973Z PASS: publicPost 走底座——无鉴权头、有超时、错误形状统一
+2026-10-24T04:18:31.2908511Z PASS: request-contract 全部判据通过
+2026-10-24T04:18:31.3557645Z PASS: AI status UI distinguishes unconfigured, untested, success, failure and offline; zero latency preserved
+2026-10-24T04:18:31.4092357Z PASS: read receipt replacing a bubble does not discard an in-flight transcript
+2026-10-24T04:18:31.4658836Z PASS: 气泡常驻状态 发送中/已发送/已读 三条分开，对方气泡不串状态
+2026-10-24T04:18:31.4718162Z PASS: 失败常驻 + 单条重试入口在，重进会话不丢、切账号清干净
+2026-10-24T04:18:31.4765809Z PASS: 单条重试复用 request_id、界面只留一条、状态转成已发送
+2026-10-24T04:18:31.4813825Z PASS: 重连后自动补拉遗漏消息且不重复
+2026-10-24T04:18:31.4865487Z PASS: 通话失败分成 拒绝/未接/忙线/不在线/没权限/网络-TURN 六种可读原因
+2026-10-24T04:18:31.4906698Z PASS: 取消/重试不留忙线僵尸态，失败面板停留够久且能自动收回
+2026-10-24T04:18:31.4951814Z PASS: ws 已读回执能把气泡状态从已发送翻到已读
+2026-10-24T04:18:31.4994971Z PASS: 非互关按钮禁用，直接调用也在申请麦克风前拒绝
+2026-10-24T04:18:31.4995417Z PASS: dm-state-call 全部判据通过
+2026-10-24T04:18:31.5490339Z PASS: desktop Douyin video search, native search bridge, old APK web fallback, invalid exercise
+2026-10-24T04:18:31.6230243Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.17/x64
+2026-10-24T04:18:31.6230536Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.17/x64/lib
+2026-10-24T04:18:31.6230795Z ##[endgroup]
+2026-10-24T04:18:49.6944355Z |                                                                                |   0% of 120 MiB
+2026-10-24T04:19:08.1029076Z   "errors": [],
+2026-10-24T04:19:17.8213882Z   "errors": []
+2026-10-24T04:19:28.1035041Z   "errors": []
+2026-10-24T04:19:38.0062160Z   "errors": []
+2026-10-24T04:19:38.0062374Z }
+2026-10-24T04:19:43.1931272Z PASS: real Chromium cache hit, private no-store, recall revocation and expiry
+2026-10-24T04:19:51.0435568Z   绿 观察器同时盯 class / hidden / open 三种开合属性
+2026-10-24T04:19:53.6623878Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url

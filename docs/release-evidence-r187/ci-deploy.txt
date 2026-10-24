@@ -1,0 +1,10 @@
+2026-10-24T04:20:03.9497976Z Complete job name: deploy
+2026-10-24T04:20:11.1238230Z Successfully set up CPython (3.11.17)
+2026-10-24T04:20:24.5417775Z Artifact download completed successfully.
+2026-10-24T04:20:24.5420534Z Download artifact has finished successfully
+2026-10-24T04:20:27.5740674Z Release signed with rotation proof; Android <9 retains the legacy signer for compatibility.
+2026-10-24T04:20:27.7141029Z release artifacts agree: version_code=71 size=9408702 sha256=b5f26e60b11f
+2026-10-24T04:20:28.0210825Z Release archive created; keys, database, backups and scratch files excluded.
+2026-10-24T04:20:28.0292007Z [36;1minstall -m 600 .github/deploy_known_hosts "$RUNNER_TEMP/qingsu-ssh/known_hosts"[0m
+2026-10-24T04:20:28.0295451Z [36;1m  sudo -n /usr/local/sbin/qingsu-ci-deploy main "$GITHUB_RUN_ID" "$ARCHIVE_SHA" "$GITHUB_SHA"[0m
+2026-10-24T04:29:22.7261381Z {"target":"main","release":"r40061547783","revision":"36fcccca1654aaeb52327ffdbb4c26241dd7a166","backup":"/opt/qingsu/backups/release-20261024-122849"}

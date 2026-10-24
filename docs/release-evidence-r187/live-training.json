@@ -1,0 +1,26 @@
+{
+  "source": "36fcccca1654aaeb52327ffdbb4c26241dd7a166",
+  "checked_at": "2026-10-24T04:30:53.357Z",
+  "checks": [
+    "workout entry opens private notebook with records/calendar/templates/progress and an honest empty state",
+    "current workout imports as uncompleted targets, not fabricated completed sets",
+    "unfinished form gives a clear local validation message without writing a workout",
+    "future plan saves privately without creating a workout or calories",
+    "calendar marks plans and opens a day-filtered record list",
+    "completing checked groups writes one linked workout and updates existing dashboard statistics without invented calorie burn",
+    "factual action progress uses only this account completed sets",
+    "editing a completed session updates its linked summary instead of making another workout",
+    "personal template reuses actions and targets while clearing completed flags",
+    "lost save response keeps the same request ID; retry creates no second session or workout",
+    "private training CSV downloads in browser with a UTF-8 BOM",
+    "account-specific local draft survives reload when training API is unavailable",
+    "local rest countdown ticks and cancels without creating training data",
+    "editor fits 320/393/1200 widths",
+    "switching account does not reveal another account records or draft",
+    "deleting notebook session removes only its linked workout and recalculates statistics"
+  ],
+  "remaining_users": 2,
+  "foreign_key_violations": 0,
+  "cleaned": 2,
+  "remaining_training_rows": 0
+}
