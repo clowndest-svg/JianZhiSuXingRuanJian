@@ -1,0 +1,23 @@
+CI run 39992664029, integration job 120548926425, success.
+2026-10-23T17:12:11.3100786Z 30 conversations: 2 SQL statements, 1 Redis MGET; per-viewer previews/unread/block flags preserved
+2026-10-23T17:12:11.3101789Z 10000-message fixture: two keyset pages/context/legacy receipt 0.066s
+2026-10-23T17:12:22.4595164Z === 当前源码：623 条，绿 623，红 0 ===
+2026-10-23T17:12:25.2370303Z === 当前源码：355 条，绿 355，红 0 ===
+2026-10-23T17:12:25.5894358Z PASS: 26 条全绿
+2026-10-23T17:13:18.1580491Z STEP centered full server timestamps, cross-day/five-minute grouping and UTC conversion stay correct in Los Angeles browser timezone
+2026-10-23T17:13:19.5681040Z STEP 100 message-list refresh signals coalesce into one conversations/stats request pair
+2026-10-23T17:13:21.0300194Z STEP background refresh signals issue no list requests until foreground resumes once
+2026-10-23T17:13:21.1848451Z STEP desktop right-click edits own text; API peer sees revision and edited marker
+2026-10-23T17:13:21.8476088Z STEP mobile long press offers personal deletion; peer keeps original and cannot edit incoming
+2026-10-23T17:13:21.9791139Z STEP personal deletion persists across reload
+2026-10-23T17:13:22.8843428Z STEP only visible foreground incoming messages get read receipts; offscreen history stays unread
+2026-10-23T17:13:24.6626460Z STEP reverse pagination across 420 records keeps both memory and DOM at 120 messages
+2026-10-23T17:13:24.6805664Z STEP incoming websocket messages preserve history window and show return-latest badge
+2026-10-23T17:13:24.8455900Z STEP server-backed history search jumps to bounded surrounding context
+2026-10-23T17:13:24.9074454Z STEP return latest fetches newest cursor window
+2026-10-23T17:13:24.9508329Z STEP HTTP snapshot preserves websocket messages that arrive while refresh is pending
+2026-10-23T17:13:25.2826106Z STEP late older-page response cannot replace an explicit latest window
+2026-10-23T17:13:25.2990622Z STEP targeted read event repaints sender status immediately
+2026-10-23T17:13:25.8515322Z STEP cancel ASR dismisses pending state and discards late transcription
+2026-10-23T17:13:26.0499689Z STEP refined theme/background panels stay within 320/393/1200 widths
+
