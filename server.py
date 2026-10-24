@@ -269,6 +269,8 @@ def render_index_html():
         ('src="features.js"', 'src="features.js?v=%s"', "features.js"),
         ('href="features.css"', 'href="features.css?v=%s"', "features.css"),
         ('src="bubble-themes.js"', 'src="bubble-themes.js?v=%s"', "bubble-themes.js"),
+        ('src="training.js"', 'src="training.js?v=%s"', "training.js"),
+        ('href="training.css"', 'href="training.css?v=%s"', "training.css"),
         ('src="chat-tools.js"', 'src="chat-tools.js?v=%s"', "chat-tools.js"),
         ('href="chat-tools.css"', 'href="chat-tools.css?v=%s"', "chat-tools.css"),
         ('src="chat-backgrounds.js"', 'src="chat-backgrounds.js?v=%s"', "chat-backgrounds.js"),
@@ -419,6 +421,8 @@ def migrate_db():
     c.execute("CREATE TABLE IF NOT EXISTS record_changes (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT NOT NULL, record_id INTEGER NOT NULL, previous_json TEXT NOT NULL, operation TEXT NOT NULL, created_at TEXT NOT NULL)")
     _ensure_columns(c,"food_logs",[("source","TEXT DEFAULT 'legacy_estimate'"),("estimate_reason","TEXT")])
     _community_schema(c)
+    from app_modules.training import migrate as migrate_training
+    migrate_training(c)
     migrations.record(c, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     conn.commit()
     conn.close()
@@ -3989,6 +3993,8 @@ def change_record(kind, record_id, req, user, deleting=False):
         table=tables[kind]
         row=conn.execute(f"SELECT * FROM {table} WHERE id=? AND user_id=?",(record_id,user["id"])).fetchone()
         if not row:raise HTTPException(status_code=404,detail="记录不存在")
+        if kind=="workout" and conn.execute("SELECT 1 FROM training_sessions WHERE user_id=? AND workout_log_id=? AND deleted=0",(user["id"],record_id)).fetchone():
+            raise HTTPException(409,"这条记录关联训练手账，请在训练手账中一起修改或删除")
         affected_date=row["log_date"]
         affected_label=_record_label(kind,row)
         before=_day_totals(conn,user["id"],affected_date)
@@ -4055,6 +4061,8 @@ from app_modules.companion import install as install_companion
 install_companion(app, globals())
 from app_modules.weekly_review import install as install_weekly_review
 install_weekly_review(app, globals())
+from app_modules.training import install as install_training
+install_training(app, globals())
 from app_modules.webpush import install as install_webpush
 install_webpush(app, globals())
 
@@ -4074,7 +4082,7 @@ ASSET_MEDIA = {"js": "application/javascript", "css": "text/css", "svg": "image/
                "png": "image/png", "webmanifest": "application/manifest+json",
                "json": "application/json"}
 PUBLIC_ASSETS = ("features.js", "features.css", "companion.js", "sw.js", "manifest.webmanifest",
-                 "app-icon.png", "guidance.json", "bubble-themes.js", "bubble-themes.css", "bubble-ai.png", "bubble-moon.png", "chat-backgrounds.js", "chat-backgrounds.css", "chat-tools.js", "chat-tools.css")
+                 "app-icon.png", "guidance.json", "bubble-themes.js", "bubble-themes.css", "bubble-ai.png", "bubble-moon.png", "chat-backgrounds.js", "chat-backgrounds.css", "chat-tools.js", "chat-tools.css", "training.js", "training.css")
 # 扩展名没登记类型就要在启动时炸，不能等到用户请求才发现是 500：
 # app-icon.png 换图标那次正是这么静默上线的，页面只是不显示图标，没人会去点它。
 for asset in PUBLIC_ASSETS:

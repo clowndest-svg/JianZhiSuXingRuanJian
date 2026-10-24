@@ -316,6 +316,7 @@ async function openRecordManager(kind='food',offset=0){
 }
 async function editHistoryRecord(id){
     const row=recordRows.find(x=>x.id===id);if(!row)return;
+    if(row.training_session_id&&window.QSTraining){QSTraining.edit(row.training_session_id);return;}
     const field=recordKind==='food'?'cal':recordKind==='weight'?'weight_jin':'duration_minutes';
     const label={cal:'餐食热量（kcal，修正后宏量未知）',weight_jin:'体重（斤）',duration_minutes:'训练时长（分钟）'}[field];
     const text=window.prompt(label,String(row[field]));if(text===null)return;
@@ -327,6 +328,7 @@ async function editHistoryRecord(id){
     catch(e){callNativeToast(e.message);}
 }
 async function deleteHistoryRecord(id){
+    const linked=recordRows.find(x=>x.id===id);if(linked?.training_session_id&&window.QSTraining){QSTraining.edit(linked.training_session_id);return;}
     if(!window.confirm('删除此记录并重新计算统计？'))return;
     try{const r=await postApi(`/api/records/${recordKind}/${id}/delete`,{});showRecordImpact(r,'已删除');
         await syncRemoteDashboard();await syncRemoteCharts();await openRecordManager(recordKind,recordOffset);}

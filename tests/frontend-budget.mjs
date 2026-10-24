@@ -34,6 +34,9 @@ const BUDGET = {
   // r184: paging, editing, personal deletion, search and visible read receipts.
   "chat-tools.js": { raw: 20_480, gzip: 8_192 },
   "chat-tools.css": { raw: 6_144, gzip: 2_048 },
+  // r187: notebook, reusable plans, calendar and factual training progress.
+  "training.js": { raw: 32_768, gzip: 10_240 },
+  "training.css": { raw: 12_288, gzip: 4_096 },
 };
 
 const results = [];

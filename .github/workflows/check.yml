@@ -134,6 +134,7 @@ jobs:
       - run: python tests/test_deploy_pairing.py
       - run: python tests/test_bubble_themes.py
       - run: python tests/test_chat_history.py
+      - run: python tests/test_training.py
       - run: python tests/test_calls.py
       - run: python tests/test_native_media_contract.py
       - run: python tests/test_douyin_bridge.py
@@ -153,6 +154,7 @@ jobs:
       - run: node --check app/src/main/assets/app.js
       - run: node --check app/src/main/assets/chat-backgrounds.js
       - run: node --check app/src/main/assets/chat-tools.js
+      - run: node --check app/src/main/assets/training.js
       - run: node --check app/src/main/assets/bubble-themes.js
       - run: node --check app/src/main/assets/features.js
       - run: node --check app/src/main/assets/sw.js
@@ -186,6 +188,7 @@ jobs:
           node tests/bubble-themes-ui.mjs
           node tests/chat-ui.mjs
           node tests/chat-history-ui.mjs
+          node tests/training-ui.mjs
           node tests/media-cache-ui.mjs
           node tests/recovery-ui.mjs
           node tests/offline-day-ui.mjs
