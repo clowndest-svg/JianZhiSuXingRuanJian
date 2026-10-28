@@ -1,4 +1,5 @@
 """Disposable 100-user/year workload against a real local Uvicorn process."""
+import argparse
 import urllib.error
 import concurrent.futures,hashlib,importlib.util,json,os,sqlite3,subprocess,sys,tempfile,time,urllib.error,urllib.request
 from datetime import date,timedelta
@@ -6,6 +7,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 def main():
+    parser=argparse.ArgumentParser();parser.add_argument('--seconds',type=int,default=0);parser.add_argument('--concurrency',type=int,default=20);args=parser.parse_args()
+    if not 0<=args.seconds<=1800 or not 1<=args.concurrency<=50:raise ValueError('Invalid isolated workload limits')
     (ROOT/'_audit_sandbox').mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=ROOT/'_audit_sandbox') as temp:
         env=os.environ.copy()
@@ -18,7 +21,7 @@ def main():
         c=m.get_db();start=date.today()-timedelta(days=364);stamp=start.isoformat()+' 00:00:00'
         c.executemany('INSERT INTO users(id,username,password_hash,nickname,created_at) VALUES (?,?,?,?,?)',[(i,'synthetic'+str(i),'not-a-login-hash','synthetic',stamp) for i in range(1,101)])
         c.executemany('INSERT INTO profiles(user_id,gender,age,height,weight_jin,target_weight_jin,goal_type,cycle_started_at) VALUES (?,?,?,?,?,?,?,?)',[(i,'female',30,170,160,140,'tone',stamp) for i in range(1,101)])
-        c.executemany('INSERT INTO sessions(user_id,token_hash,expires_at) VALUES (?,?,?)',[(i,hashlib.sha256(('perf-'+str(i)).encode()).hexdigest(),int(time.time())+600) for i in range(1,101)])
+        c.executemany('INSERT INTO sessions(user_id,token_hash,expires_at) VALUES (?,?,?)',[(i,hashlib.sha256(('perf-'+str(i)).encode()).hexdigest(),int(time.time())+args.seconds+600) for i in range(1,101)])
         for uid in range(1,101):
             rows=[(uid,(start+timedelta(days=d)).isoformat()) for d in range(365)]
             c.executemany("INSERT INTO food_logs(user_id,log_date,slot,food_name,cal,created_at) VALUES (?,?,'午餐','synthetic',600,'synthetic')",rows)
@@ -50,7 +53,12 @@ def main():
                     except Exception:status=599
                     return path,status,(time.perf_counter()-t)*1000,code
                 started=time.perf_counter()
-                with concurrent.futures.ThreadPoolExecutor(max_workers=20) as pool:results=list(pool.map(call,range(400)))
+                results=[];batch=0
+                with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+                    while True:
+                        results.extend(pool.map(call,range(batch*400,(batch+1)*400)));batch+=1
+                        if time.perf_counter()-started>=args.seconds:break
+
                 latency=sorted(x[2] for x in results)
                 server_errors=sum(x[1]>=500 for x in results)
                 client_errors=sum(400<=x[1]<500 for x in results)
@@ -63,7 +71,7 @@ def main():
                 slow={path:{'n':slot['n'],
                             'p95_ms':round(sorted(slot['ms'])[int(len(slot['ms'])*.95)-1],1)}
                       for path,slot in sorted(by_path.items())}
-                report={'users':100,'days_per_user':365,'seeded_rows':109500,'concurrency':20,'requests':len(results),
+                report={'users':100,'days_per_user':365,'seeded_rows':109500,'concurrency':args.concurrency,'requests':len(results),
                         'elapsed_s':round(time.perf_counter()-started,2),
                         'p50_ms':round(latency[len(latency)//2],1),
                         'p95_ms':round(latency[int(len(latency)*.95)-1],1),
@@ -90,6 +98,6 @@ def main():
         # 只把 5xx 当错误的话，"接口全 200 但一个数都没存进去"照样是绿的。
         failed=(server_errors>0 or client_errors>0 or business_errors>0
                 or report['sqlite_lock_errors']>0 or report['p95_ms']>=500
-                or written==0)
+                or any(path['p95_ms']>=500 for path in slow.values()) or written!=25)
         return int(failed)
 if __name__=='__main__':sys.exit(main())

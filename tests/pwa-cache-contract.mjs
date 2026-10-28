@@ -29,7 +29,7 @@ class FakeCache{
     const hit=this.entries.find(entry=>entry.url===href);
     return hit?new Response(hit.body,{status:200}):undefined;
   }
-  async keys(){return this.entries.map(entry=>({request:{url:entry.url}}));}
+  async keys(){return this.entries.map(entry=>new Request(entry.url));}
   async addAll(urls){for(const url of urls)await this.put(url,new Response('bundled:'+url,{status:200}));}
 }
 
@@ -77,7 +77,7 @@ function boot(source,{seed=[]}={}){
   };
   return {install:()=>fire('install'),activate:()=>fire('activate'),request,stores,current,
     goOffline:()=>{offline=true;},
-    urls:async()=>(await current().keys()).map(entry=>entry.request.url),fetchCount:()=>fetches,cacheName};
+    urls:async()=>(await current().keys()).map(entry=>entry.url),fetchCount:()=>fetches,cacheName};
 }
 
 const swSource=fs.readFileSync(path.join(root,'app/src/main/assets/sw.js'),'utf8');
@@ -117,6 +117,12 @@ assert.ok(!urls.includes(ORIGIN+'/app.js?v=p0'),'超限时最旧的条目没被�
 assert.ok(!urls.includes(ORIGIN+'/app.js?v=p5'),'超限后第 6 旧的条目还在，淘汰位置不对');
 assert.ok(urls.includes(ORIGIN+'/app.js?v=p6'),'被淘汰的不是最旧的 6 条');
 assert.ok(urls.includes(ORIGIN+'/app.js?v=p'+(MAX_ENTRIES+5)),'最新条目被淘汰了（顺序反了）');
+
+const simultaneous=boot(swSource);
+await simultaneous.install();
+await Promise.all(Array.from({length:80},(_,i)=>simultaneous.request('/app.js?v=parallel'+i)));
+assert.equal((await simultaneous.urls()).length,MAX_ENTRIES);
+assert.ok((await simultaneous.urls()).includes(ORIGIN+'/'),'静态外壳不能被查询串淘汰');
 
 const replay=boot(swSource);
 await replay.install();

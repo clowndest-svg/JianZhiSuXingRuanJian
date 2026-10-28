@@ -29,6 +29,9 @@ public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST_CODE = 1001;
     private ValueCallback<Uri[]> filePathCallback;
     private WebView webView;
+    private WebAppInterface androidBridge;
+    private final java.util.concurrent.ExecutorService exports = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private boolean exportBusy;
     private long backPressedTime = 0;
     private Uri cameraUri;
     private String pendingExport;
@@ -42,7 +45,7 @@ public class MainActivity extends Activity {
         catch (IllegalArgumentException e) { return; }
         if (png.length < 8 || png[0] != (byte)137 || png[1] != 80 || png[2] != 78 || png[3] != 71) return;
         runOnUiThread(() -> {
-            if (pendingPng != null) return;
+            if (isFinishing() || isDestroyed() || exportBusy || pendingPng != null || pendingExport != null) return;
             pendingPng = png;
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
                     .setType("image/png").putExtra(Intent.EXTRA_TITLE, "轻塑记录回顾.png");
@@ -55,6 +58,7 @@ public class MainActivity extends Activity {
     public void saveCsv(String content) {
         if(content==null || content.length()>5*1024*1024) return;
         runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed() || exportBusy || pendingExport != null || pendingPng != null) return;
             pendingExport=content;
             Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
                     .setType("text/csv").putExtra(Intent.EXTRA_TITLE,"轻塑记录.csv");
@@ -96,7 +100,8 @@ public class MainActivity extends Activity {
         settings.setGeolocationEnabled(true);
 
         // Bridge interface for native notifications, vibration and audio cues
-        webView.addJavascriptInterface(new WebAppInterface(this, webView), "AndroidBridge");
+        androidBridge = new WebAppInterface(this, webView);
+        webView.addJavascriptInterface(androidBridge, "AndroidBridge");
 
         // HTTPS assets and API share the secure transport policy.
         final WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
@@ -512,22 +517,14 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == PNG_EXPORT_REQUEST) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingPng != null) {
-                try (java.io.OutputStream out = getContentResolver().openOutputStream(data.getData())) {
-                    if (out == null) throw new java.io.IOException("No output stream");
-                    out.write(pendingPng);
-                    Toast.makeText(this, "回顾图片已保存", Toast.LENGTH_LONG).show();
-                } catch (Exception e) { Toast.makeText(this, "图片没保存，请重新选择位置", Toast.LENGTH_LONG).show(); }
+                writeExport(data.getData(), pendingPng, "回顾图片已保存", "图片没保存，请重新选择位置");
             }
             pendingPng = null;
             return;
         }
         if(requestCode==SAVE_CSV_REQUEST){
             if(resultCode==RESULT_OK && data!=null && data.getData()!=null && pendingExport!=null){
-                try(java.io.OutputStream out=getContentResolver().openOutputStream(data.getData())){
-                    if(out==null)throw new java.io.IOException("No output stream");
-                    out.write(pendingExport.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                    Toast.makeText(this,"记录文件已保存",Toast.LENGTH_LONG).show();
-                }catch(Exception e){Toast.makeText(this,"文件未保存，请重试",Toast.LENGTH_LONG).show();}
+                writeExport(data.getData(), pendingExport.getBytes(java.nio.charset.StandardCharsets.UTF_8), "记录文件已保存", "文件未保存，请重试");
             }
             pendingExport=null;return;
         }
@@ -553,6 +550,23 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void writeExport(Uri uri, byte[] bytes, String success, String failure) {
+        exportBusy = true;
+        final android.content.ContentResolver resolver = getApplicationContext().getContentResolver();
+        exports.execute(() -> {
+            String message = success;
+            try (java.io.OutputStream out = resolver.openOutputStream(uri)) {
+                if (out == null) throw new java.io.IOException("No output stream");
+                out.write(bytes);
+            } catch (Exception error) { message = failure; }
+            final String result = message;
+            runOnUiThread(() -> {
+                exportBusy = false;
+                if (!isFinishing() && !isDestroyed()) Toast.makeText(this, result, Toast.LENGTH_LONG).show();
+            });
+        });
+    }
+
     @Override
     public void onBackPressed() {
         if(webView!=null){webView.evaluateJavascript("(function(){if(window.handleNativeBack)return window.handleNativeBack();return false;})()",value->{if(!"true".equals(value))exitOrNavigate();});return;}
@@ -575,6 +589,8 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         mediaPermissionDestroyed = true;
         denyPendingMediaRequest();
+        exports.shutdown();
+        if (androidBridge != null) androidBridge.release();
         if(filePathCallback!=null){filePathCallback.onReceiveValue(null);filePathCallback=null;}
         if (webView != null) {
             webView.destroy();

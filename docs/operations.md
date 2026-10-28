@@ -144,6 +144,14 @@ Windows 任务 `QingsuEncryptedBackup` 每日04:00运行 `scripts/pull-backup.py
 `COMMUNITY_THUMB_MAX_AGE=300` 必须明显短于签名 900 秒，判据钉住这个大小关系。
 **已被用户保存到设备的内容无法远程收回**，这句要如实写在对外说明里。
 
+## r188 迁移、回退与本机全量测试
+
+候选结构版本15：基础表与扩展表统一在显式事务中迁移，最后登记版本；已有轻塑号不重分配。服务进程的 `QINGSU_SKIP_MIGRATE=1` 和 `migrate.py --check` 不创建/回填业务结构。当前代码落盘后 `/opt/qingsu/migrate.py` 能从应用根目录正确导入服务。
+
+发布前 `release-state.json` 登记旧发布标记、维护脚本、helper、主服务与监控/推送单元是否存在；回退恢复文件和原本不存在的状态，数据库保持前向兼容，绝不以旧库覆盖新数据。加密备份完成后才原子发布 `.p7m`；本机拉取/验证不再隐式生成替换密钥，仅显式 `--prepare` 可在空目录初始化。
+
+全量测试入口为 `scripts/test-all.py --kind python|node|browser`，逐套保存退出码、耗时与日志至被忽略的 `_audit_sandbox/full-*`。浏览器仍需要固定版本 Playwright/Chromium；媒体测试需要ffmpeg/ffprobe；Redis缺失时多进程判据不能当作通过。Linux备份快照测试和实体Android验收分别记录，不能用Windows跳过或编译结果代替。
+
 ## 容量与性能
 
 `python tests/performance.py` 只创建临时数据库与本机18001端口，结束后清理。基准为100个模拟用户、每人365天、109500条记录、20并发400次普通读写；AI推理不混入普通接口指标。它验证服务端应用与 SQLite，不代表公网时延、浏览器 LCP/CLS 或未来所有负载。

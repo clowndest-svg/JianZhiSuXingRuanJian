@@ -1,0 +1,70 @@
+[
+  {
+    "checks": [
+      "poses lazy load",
+      "queued writes never change new account",
+      "truncated receipt retains draft",
+      "late estimate cannot overwrite another meal",
+      "call layer minimize and restore stays interactive",
+      "real CacheStorage concurrent trim",
+      "real SW install activates current build only",
+      "offline shell loads without caching private API"
+    ],
+    "passed": 8,
+    "synthetic_only": true
+  },
+  {
+    "app.js": {
+      "raw": 276119,
+      "gzip": 92142
+    },
+    "features.js": {
+      "raw": 268952,
+      "gzip": 79229
+    },
+    "index.html": {
+      "raw": 122749,
+      "gzip": 29934
+    },
+    "style.css": {
+      "raw": 84602,
+      "gzip": 19202
+    },
+    "features.css": {
+      "raw": 77685,
+      "gzip": 20538
+    },
+    "bubble-themes.js": {
+      "raw": 17813,
+      "gzip": 6925
+    },
+    "bubble-themes.css": {
+      "raw": 16237,
+      "gzip": 4722
+    },
+    "chat-backgrounds.js": {
+      "raw": 14179,
+      "gzip": 5937
+    },
+    "chat-backgrounds.css": {
+      "raw": 2179,
+      "gzip": 868
+    },
+    "chat-tools.js": {
+      "raw": 15420,
+      "gzip": 5544
+    },
+    "chat-tools.css": {
+      "raw": 4002,
+      "gzip": 1532
+    },
+    "training.js": {
+      "raw": 29152,
+      "gzip": 10101
+    },
+    "training.css": {
+      "raw": 8287,
+      "gzip": 2307
+    }
+  }
+]

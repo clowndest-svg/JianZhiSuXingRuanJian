@@ -1,0 +1,28 @@
+[
+  {
+    "kind": "baseline",
+    "extra": [],
+    "exit": 1,
+    "output": "{\"users\": 100, \"days_per_user\": 365, \"seeded_rows\": 109500, \"concurrency\": 20, \"requests\": 400, \"elapsed_s\": 5.41, \"p50_ms\": 203.7, \"p95_ms\": 559.9, \"p99_ms\": 623.5, \"5xx\": 0, \"4xx\": 0, \"business_code_failures\": 0, \"slowest_by_path\": {\"/api/charts\": {\"n\": 100, \"p95_ms\": 616.3}, \"/api/dashboard\": {\"n\": 100, \"p95_ms\": 540.7}, \"/api/habits\": {\"n\": 100, \"p95_ms\": 264.7}, \"/api/water/update\": {\"n\": 100, \"p95_ms\": 125.1}}, \"sqlite_lock_errors\": 0, \"water_rows_written\": 25}",
+    "stderr": ""
+  },
+  {
+    "kind": "candidate",
+    "extra": [],
+    "exit": 1,
+    "output": "{\"users\": 100, \"days_per_user\": 365, \"seeded_rows\": 109500, \"concurrency\": 20, \"requests\": 400, \"elapsed_s\": 5.15, \"p50_ms\": 199.3, \"p95_ms\": 515.7, \"p99_ms\": 582.8, \"5xx\": 0, \"4xx\": 0, \"business_code_failures\": 0, \"slowest_by_path\": {\"/api/charts\": {\"n\": 100, \"p95_ms\": 577.8}, \"/api/dashboard\": {\"n\": 100, \"p95_ms\": 484.2}, \"/api/habits\": {\"n\": 100, \"p95_ms\": 206.0}, \"/api/water/update\": {\"n\": 100, \"p95_ms\": 100.6}}, \"sqlite_lock_errors\": 0, \"water_rows_written\": 25}",
+    "stderr": ""
+  },
+  {
+    "kind": "candidate",
+    "extra": [
+      "--seconds",
+      "90",
+      "--concurrency",
+      "5"
+    ],
+    "exit": 0,
+    "output": "{\"users\": 100, \"days_per_user\": 365, \"seeded_rows\": 109500, \"concurrency\": 5, \"requests\": 9600, \"elapsed_s\": 92.46, \"p50_ms\": 40.1, \"p95_ms\": 87.0, \"p99_ms\": 95.9, \"5xx\": 0, \"4xx\": 0, \"business_code_failures\": 0, \"slowest_by_path\": {\"/api/charts\": {\"n\": 2400, \"p95_ms\": 91.6}, \"/api/dashboard\": {\"n\": 2400, \"p95_ms\": 89.7}, \"/api/habits\": {\"n\": 2400, \"p95_ms\": 71.9}, \"/api/water/update\": {\"n\": 2400, \"p95_ms\": 66.4}}, \"sqlite_lock_errors\": 0, \"water_rows_written\": 25}",
+    "stderr": ""
+  }
+]

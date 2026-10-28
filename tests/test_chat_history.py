@@ -78,7 +78,7 @@ class ChatHistory(unittest.TestCase):
         self.assertEqual(self.c.post('/api/chat/read',headers=self.headers,json={'with_user':self.b}).status_code,200)
         print('10000-message fixture: two keyset pages/context/legacy receipt %.3fs'%(time.monotonic()-start))
     def test_schema_and_public_modules(self):
-        self.assertEqual(self.s.migrations.SCHEMA_VERSION,14)
+        self.assertEqual(self.s.migrations.SCHEMA_VERSION,15)
         for name in ['chat-tools.js','chat-tools.css']:self.assertEqual(self.c.get('/'+name).status_code,200)
     def test_server_time_explicit_offset_and_legacy_unchanged(self):
         with patch.object(self.s,'_now',return_value='2026-10-24 00:00:01'):m=self.send('server timestamp')

@@ -1,0 +1,23 @@
+{
+  "sha256": "eada4e95fca9848ded7224661b38a7a355f4422f4d909c5b3d937a6237cb5e23",
+  "bytes": 9408702,
+  "assets": {
+    "about.html": true,
+    "app.js": true,
+    "bubble-themes.css": true,
+    "bubble-themes.js": true,
+    "chat-backgrounds.css": true,
+    "chat-backgrounds.js": true,
+    "chat-tools.css": true,
+    "chat-tools.js": true,
+    "companion.js": true,
+    "features.css": true,
+    "features.js": true,
+    "index.html": true,
+    "offline.html": true,
+    "style.css": true,
+    "sw.js": true,
+    "training.css": true,
+    "training.js": true
+  }
+}

@@ -1,0 +1,347 @@
+{
+  "python": [
+    {
+      "suite": "test_ai_contract.py",
+      "exit": 0,
+      "seconds": 10.14,
+      "skipped": [],
+      "unittest_cases": 6
+    },
+    {
+      "suite": "test_backup_snapshot.py",
+      "exit": 0,
+      "seconds": 0.26,
+      "skipped": [
+        "3"
+      ],
+      "unittest_cases": 3
+    },
+    {
+      "suite": "test_backup_verify.py",
+      "exit": 0,
+      "seconds": 1.38,
+      "skipped": [],
+      "unittest_cases": 15
+    },
+    {
+      "suite": "test_bubble_themes.py",
+      "exit": 0,
+      "seconds": 5.33,
+      "skipped": [],
+      "unittest_cases": 5
+    },
+    {
+      "suite": "test_calls.py",
+      "exit": 0,
+      "seconds": 4.72,
+      "skipped": [],
+      "unittest_cases": 6
+    },
+    {
+      "suite": "test_chat_history.py",
+      "exit": 0,
+      "seconds": 6.25,
+      "skipped": [],
+      "unittest_cases": 10
+    },
+    {
+      "suite": "test_chat_media.py",
+      "exit": 0,
+      "seconds": 21.48,
+      "skipped": [],
+      "unittest_cases": 18
+    },
+    {
+      "suite": "test_companion.py",
+      "exit": 0,
+      "seconds": 20.52,
+      "skipped": [],
+      "unittest_cases": 8
+    },
+    {
+      "suite": "test_consistency.py",
+      "exit": 0,
+      "seconds": 8.97,
+      "skipped": []
+    },
+    {
+      "suite": "test_deploy_pairing.py",
+      "exit": 0,
+      "seconds": 0.56,
+      "skipped": [],
+      "unittest_cases": 5
+    },
+    {
+      "suite": "test_douyin_bridge.py",
+      "exit": 0,
+      "seconds": 1.91,
+      "skipped": [],
+      "unittest_cases": 2
+    },
+    {
+      "suite": "test_integration.py",
+      "exit": 0,
+      "seconds": 135.49,
+      "skipped": [],
+      "unittest_cases": 64
+    },
+    {
+      "suite": "test_long_tasks.py",
+      "exit": 0,
+      "seconds": 1.11,
+      "skipped": [],
+      "unittest_cases": 15
+    },
+    {
+      "suite": "test_migration_contract.py",
+      "exit": 0,
+      "seconds": 12.77,
+      "skipped": [],
+      "unittest_cases": 9
+    },
+    {
+      "suite": "test_monitor_alerts.py",
+      "exit": 0,
+      "seconds": 0.38,
+      "skipped": [],
+      "unittest_cases": 15
+    },
+    {
+      "suite": "test_multiprocess.py",
+      "exit": 0,
+      "seconds": 5.2,
+      "skipped": []
+    },
+    {
+      "suite": "test_native_media_contract.py",
+      "exit": 0,
+      "seconds": 5.19,
+      "skipped": [],
+      "unittest_cases": 21
+    },
+    {
+      "suite": "test_optimization_ai_status.py",
+      "exit": 0,
+      "seconds": 0.47,
+      "skipped": [],
+      "unittest_cases": 9
+    },
+    {
+      "suite": "test_optimization_data.py",
+      "exit": 0,
+      "seconds": 13.3,
+      "skipped": [],
+      "unittest_cases": 7
+    },
+    {
+      "suite": "test_optimization_runtime.py",
+      "exit": 0,
+      "seconds": 10.83,
+      "skipped": [],
+      "unittest_cases": 7
+    },
+    {
+      "suite": "test_optimization_security.py",
+      "exit": 0,
+      "seconds": 71.62,
+      "skipped": [],
+      "unittest_cases": 24
+    },
+    {
+      "suite": "test_optimization_ux.py",
+      "exit": 0,
+      "seconds": 20.22,
+      "skipped": [],
+      "unittest_cases": 10
+    },
+    {
+      "suite": "test_optimization_weekly.py",
+      "exit": 0,
+      "seconds": 11.08,
+      "skipped": [],
+      "unittest_cases": 6
+    },
+    {
+      "suite": "test_r173_contracts.py",
+      "exit": 0,
+      "seconds": 6.69,
+      "skipped": [],
+      "unittest_cases": 6
+    },
+    {
+      "suite": "test_release_state.py",
+      "exit": 0,
+      "seconds": 1.66,
+      "skipped": [],
+      "unittest_cases": 7
+    },
+    {
+      "suite": "test_training.py",
+      "exit": 0,
+      "seconds": 5.66,
+      "skipped": [],
+      "unittest_cases": 10
+    },
+    {
+      "suite": "test_update_copy.py",
+      "exit": 0,
+      "seconds": 1.78,
+      "skipped": [],
+      "unittest_cases": 3
+    },
+    {
+      "suite": "legacy-backend.py",
+      "exit": 0,
+      "seconds": 26.73,
+      "skipped": []
+    }
+  ],
+  "node": [
+    {
+      "suite": "legacy-frontend.mjs",
+      "exit": 0,
+      "seconds": 0.98,
+      "skipped": []
+    },
+    {
+      "suite": "frontend-integration.mjs",
+      "exit": 0,
+      "seconds": 0.22,
+      "skipped": []
+    },
+    {
+      "suite": "pwa-cache-contract.mjs",
+      "exit": 0,
+      "seconds": 0.28,
+      "skipped": []
+    },
+    {
+      "suite": "frontend-budget.mjs",
+      "exit": 0,
+      "seconds": 0.17,
+      "skipped": []
+    },
+    {
+      "suite": "request-contract.mjs",
+      "exit": 0,
+      "seconds": 0.39,
+      "skipped": []
+    },
+    {
+      "suite": "ai-status-ui.mjs",
+      "exit": 0,
+      "seconds": 0.17,
+      "skipped": []
+    },
+    {
+      "suite": "dm-asr-race.mjs",
+      "exit": 0,
+      "seconds": 0.16,
+      "skipped": []
+    },
+    {
+      "suite": "dm-state-call.mjs",
+      "exit": 0,
+      "seconds": 0.3,
+      "skipped": []
+    },
+    {
+      "suite": "exercise-video.mjs",
+      "exit": 0,
+      "seconds": 0.12,
+      "skipped": []
+    },
+    {
+      "suite": "home-first-screen.mjs",
+      "exit": 0,
+      "seconds": 0.14,
+      "skipped": []
+    }
+  ],
+  "browser": [
+    {
+      "suite": "runtime-ui.mjs",
+      "exit": 0,
+      "seconds": 7.41,
+      "skipped": []
+    },
+    {
+      "suite": "bubble-themes-ui.mjs",
+      "exit": 0,
+      "seconds": 31.34,
+      "skipped": []
+    },
+    {
+      "suite": "chat-ui.mjs",
+      "exit": 0,
+      "seconds": 19.73,
+      "skipped": []
+    },
+    {
+      "suite": "chat-history-ui.mjs",
+      "exit": 0,
+      "seconds": 19.28,
+      "skipped": []
+    },
+    {
+      "suite": "training-ui.mjs",
+      "exit": 0,
+      "seconds": 15.11,
+      "skipped": []
+    },
+    {
+      "suite": "media-cache-ui.mjs",
+      "exit": 0,
+      "seconds": 9.72,
+      "skipped": []
+    },
+    {
+      "suite": "recovery-ui.mjs",
+      "exit": 0,
+      "seconds": 7.48,
+      "skipped": []
+    },
+    {
+      "suite": "offline-day-ui.mjs",
+      "exit": 0,
+      "seconds": 6.25,
+      "skipped": []
+    },
+    {
+      "suite": "a11y-dialog-contract.mjs",
+      "exit": 0,
+      "seconds": 11.91,
+      "skipped": []
+    },
+    {
+      "suite": "records-profile-permission.mjs",
+      "exit": 0,
+      "seconds": 46.27,
+      "skipped": []
+    },
+    {
+      "suite": "admin-pagination-ui.mjs",
+      "exit": 0,
+      "seconds": 8.17,
+      "skipped": []
+    }
+  ],
+  "additional": {
+    "monitor_failures": {
+      "cases": 3,
+      "passed": true
+    },
+    "deployment_failure_scenarios": {
+      "cases": 3,
+      "passed": true
+    },
+    "linux_backup_snapshot": {
+      "cases": 4,
+      "passed": true
+    },
+    "linux_release_state": {
+      "cases": 7,
+      "passed": true
+    }
+  }
+}

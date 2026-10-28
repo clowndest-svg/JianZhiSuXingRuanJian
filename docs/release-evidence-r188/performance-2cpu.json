@@ -1,0 +1,18 @@
+[
+  {
+    "kind": "baseline",
+    "cpu_quota_percent": 200,
+    "memory_mib": 512,
+    "exit": 0,
+    "output": "{\"users\": 100, \"days_per_user\": 365, \"seeded_rows\": 109500, \"concurrency\": 20, \"requests\": 400, \"elapsed_s\": 3.51, \"p50_ms\": 128.1, \"p95_ms\": 390.6, \"p99_ms\": 427.5, \"5xx\": 0, \"4xx\": 0, \"business_code_failures\": 0, \"slowest_by_path\": {\"/api/charts\": {\"n\": 100, \"p95_ms\": 427.4}, \"/api/dashboard\": {\"n\": 100, \"p95_ms\": 353.6}, \"/api/habits\": {\"n\": 100, \"p95_ms\": 130.8}, \"/api/water/update\": {\"n\": 100, \"p95_ms\": 56.1}}, \"sqlite_lock_errors\": 0, \"water_rows_written\": 25}",
+    "stderr": ""
+  },
+  {
+    "kind": "candidate",
+    "cpu_quota_percent": 200,
+    "memory_mib": 512,
+    "exit": 0,
+    "output": "{\"users\": 100, \"days_per_user\": 365, \"seeded_rows\": 109500, \"concurrency\": 20, \"requests\": 400, \"elapsed_s\": 2.72, \"p50_ms\": 109.6, \"p95_ms\": 261.3, \"p99_ms\": 289.0, \"5xx\": 0, \"4xx\": 0, \"business_code_failures\": 0, \"slowest_by_path\": {\"/api/charts\": {\"n\": 100, \"p95_ms\": 288.2}, \"/api/dashboard\": {\"n\": 100, \"p95_ms\": 237.2}, \"/api/habits\": {\"n\": 100, \"p95_ms\": 105.0}, \"/api/water/update\": {\"n\": 100, \"p95_ms\": 50.3}}, \"sqlite_lock_errors\": 0, \"water_rows_written\": 25}",
+    "stderr": ""
+  }
+]

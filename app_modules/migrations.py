@@ -15,7 +15,7 @@ import os
 import sqlite3
 
 # 生产库当前应该处在的结构版本。加一条 MIGRATIONS 就 +1。
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 # (版本, 名称, 所有者, 说明)。名称要和 server.py 里那段动作对得上，
 # 不然半年后没人知道第 7 版到底改了什么。
@@ -34,6 +34,7 @@ MIGRATIONS = (
     (12, "schema_version", "app", "结构版本登记表本身"),
     (13, "私信编辑与个人可见性", "app", "messages.edited_at/edit_version；message_preferences 删除和转写可见状态"),
     (14, "训练手账", "app", "training_sessions/training_sets/training_templates；个人模板、日历与逐组训练"),
+    (15, "显式事务迁移与查询索引", "app", "统一扩展表迁移；稳定轻塑号；周期照片、会话参与者与训练列表索引"),
 )
 
 # 后台仓库自己拥有的表：主应用既不建也不改，只在此登记，避免出现"两张表谁都在写"。
@@ -41,6 +42,18 @@ ADMIN_OWNED_TABLES = ("ops_sessions", "ops_media_cleanup")
 
 TABLE = "CREATE TABLE IF NOT EXISTS schema_version (" \
         "id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL, updated_at TEXT NOT NULL)"
+
+
+def execute_schema(conn, script):
+    """逐条执行DDL，不像executescript那样提前提交调用方事务。"""
+    pending = ''
+    for character in script:
+        pending += character
+        if character == ';' and sqlite3.complete_statement(pending):
+            conn.execute(pending)
+            pending = ''
+    if pending.strip():
+        conn.execute(pending)
 
 
 def migration_allowed() -> bool:

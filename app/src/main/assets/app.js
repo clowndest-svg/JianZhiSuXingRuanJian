@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 71;
+const APP_BUILD = 72;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -82,6 +82,7 @@ function showUpdateWall(policy) {
     const original = global.fetch;
     if (typeof original !== "function") return;
     const wrapped = function (input, init) {
+        const generation = sessionGeneration;
         let url = typeof input === "string" ? input : (input && input.url) || "";
         if (!isGatedApi(url)) return original.call(global, input, init);
         const base = (typeof input === "object" && input) ? input : {};
@@ -99,6 +100,7 @@ function showUpdateWall(policy) {
             try {
                 if (res && res.status === 403 && typeof res.clone === "function") {
                     res.clone().json().then(policy => {
+                        if (generation !== sessionGeneration) return;
                         if (policy && policy.code === "update_required") showUpdateWall(policy);
                         else if (policy && policy.code === "account_banned") handleAccountBanned(policy.detail);
                     }).catch(() => {});
@@ -380,7 +382,6 @@ window.addEventListener("DOMContentLoaded", () => {
     initViewMode();
     bindProfileSectionActions();
     // 开 App 先查通知权限；外卖真实使用情况读一次
-    loadExercisePoses();
     initWebWorkbench();
     paintAiEngineBar();
     probeLocalAi(false).then(function () { paintAiEngineBar(); });
@@ -590,8 +591,7 @@ async function requestBase(path, options) {
             if (prev.ctl) try { prev.ctl.abort(); } catch (e) {}
         }
     }
-    // 旧 WebView 可能没有 AbortController：与 fetchWithTimeout 同一口径，
-    // 没有就宁可不超时，也不要在拿不到取消能力时误报失败。
+    // 缺少取消能力的旧WebView不伪报超时。
     let ctl = null, timer = null, timedOut = false;
     if (typeof AbortController !== "undefined") {
         ctl = new AbortController();
@@ -606,6 +606,7 @@ async function requestBase(path, options) {
     } catch (e) {
         if (timer !== null) clearTimeout(timer);
         if (slot && inflightByTag.get(o.tag) === slot) inflightByTag.delete(o.tag);
+        if (generation !== sessionGeneration) throw requestError(409, "stale_session", "账号已切换，忽略旧请求");
         // 被后发的同 tag 请求取消：由对方把 slot.superseded 置真，这里只认领。
         if (slot && slot.superseded) { const ce = requestError(0, "cancelled", "这个请求已被更新的一次刷新取代（未确认结果）"); ce.name = "AbortError"; throw ce; }
         if (timedOut) { const te = requestError(0, "timeout", "请求超时（" + Math.round(timeout / 1000) + " 秒），请检查网络"); te.name = "AbortError"; throw te; }
@@ -633,6 +634,11 @@ async function requestBase(path, options) {
         }
         throw requestError(res.status, code || (res.status === 401 ? "unauthorized" : res.status === 409 ? "conflict" : ""),
             (data && data.detail) ? data.detail : "HTTP " + res.status);
+    }
+    if (res.status !== 204 && (!data || typeof data !== "object")) {
+        const error = requestError(0, "invalid_response", "响应不完整，尚未确认云端结果；请核对或重试");
+        error.name = "TypeError";
+        throw error;
     }
     return data || {};
 }
@@ -672,7 +678,13 @@ function postApi(path, body, opts) {
 /** 档案写入按调用顺序排队：先选的场景不能反过来把后保存的身高体重覆盖掉。 */
 function queueProfileUpdate(body) {
     profileWriteSeq++;
-    const run = () => postApi("/api/profile/update", body).finally(() => { profileWriteSeq++; });
+    // 返回后在新账号下执行的排队写入必须被丢弃。
+    const generation = sessionGeneration;
+    const payload = Object.assign({}, body);
+    const run = () => {
+        if (generation !== sessionGeneration) throw requestError(409, "stale_session", "账号已切换，未发送旧档案");
+        return postApi("/api/profile/update", payload).finally(() => { profileWriteSeq++; });
+    };
     profileSaveChain = profileSaveChain.catch(() => {}).then(run);
     return profileSaveChain;
 }
@@ -4228,36 +4240,27 @@ let exAnim = null;
 let exActivePoseKey = null;
 let exActiveArch = "";
 
-// 真数据优先：仓库里带了一份 32 动作 × 4 关键帧的姿态表（按固定骨长生成，
-// 已核过骨长恒定与肘膝不反折）。取不到时回落到上面的程序化原型，而不是画一张静图。
+// 详情按需读取关键帧表，失败可重试；不可用时保留程序化示意。
 let EX_POSES = null;
-let exPosesTried = false;
+let exPosesLoading = null;
 
 function loadExercisePoses() {
-    if (exPosesTried) return Promise.resolve(EX_POSES);
-    exPosesTried = true;
-    return new Promise(function (resolve) {
-        let done = false;
-        const finish = function (v) { if (!done) { done = true; EX_POSES = v; resolve(v); } };
+    if (EX_POSES) return Promise.resolve(EX_POSES);
+    if (exPosesLoading) return exPosesLoading;
+    exPosesLoading = new Promise(resolve => {
         try {
             const xhr = new XMLHttpRequest();
             xhr.open("GET", "exercise_poses.json", true);
-            xhr.onreadystatechange = function () {
-                if (xhr.readyState !== 4) return;
-                if (xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300)) {
-                    try { finish(JSON.parse(xhr.responseText)); } catch (e) { finish(null); }
-                } else {
-                    finish(null);
-                }
+            xhr.timeout = 2500;
+            xhr.onload = () => {
+                try { if (xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300)) EX_POSES = JSON.parse(xhr.responseText); } catch (e) {}
+                resolve(EX_POSES);
             };
-            xhr.onerror = function () { finish(null); };
-            xhr.send(null);
-            // 2.5 秒还没回来就先按程序化画，不让用户对着空白等
-            setTimeout(function () { finish(EX_POSES); }, 2500);
-        } catch (e) {
-            finish(null);
-        }
-    });
+            xhr.onerror = xhr.ontimeout = () => resolve(null);
+            xhr.send();
+        } catch (e) { resolve(null); }
+    }).finally(() => { exPosesLoading = null; });
+    return exPosesLoading;
 }
 
 /** 线性插值两帧，得到连续动作而不是四张幻灯。 */
@@ -4302,6 +4305,7 @@ function openExerciseDetail(idx) {
     const list = window.__currentExercises || [];
     const item = list[idx];
     if (!item) { callNativeToast("这个动作还没载入，先回到训练计划再点"); return; }
+    loadExercisePoses();
     const fallbackKey = (state.profile && state.profile.goalType ? state.profile.goalType : "female_hourglass") + ":" + idx;
     const itemKey = item.stepsKey || fallbackKey;
     const meta = exerciseSteps(itemKey);

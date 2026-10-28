@@ -6,7 +6,7 @@ import math
 import uuid
 import logging
 from app_modules.features import share_settings, public_projection, DEFAULT_SCOPE
-from app_modules import mailer, geo, geoip, community, chat, audio, stickers, asr, migrations
+from app_modules import mailer, geo, geoip, community, chat, audio, stickers, asr, migrations, media
 import io
 import mimetypes
 import os
@@ -35,10 +35,11 @@ DB_DIR = os.environ.get("QINGSU_DB_DIR", "/opt/qingsu/data")
 KEY_DIR = os.environ.get("QINGSU_KEY_DIR", DB_DIR)
 UPLOAD_DIR = os.environ.get("QINGSU_UPLOAD_DIR", "/opt/qingsu/uploads")
 WEB_DIR = os.environ.get("QINGSU_WEB_DIR", "/opt/qingsu/web")
-os.makedirs(DB_DIR, exist_ok=True)
-os.makedirs(KEY_DIR, exist_ok=True)
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(WEB_DIR, exist_ok=True)
+if migrations.migration_allowed():
+    os.makedirs(DB_DIR, exist_ok=True)
+    os.makedirs(KEY_DIR, exist_ok=True)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    os.makedirs(WEB_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(DB_DIR, "qingsu.db")
 SITE_BASE = os.environ.get("QINGSU_SITE_BASE", "https://124.220.54.64").rstrip("/")
@@ -63,7 +64,8 @@ async def response_policy(request: Request, call_next):
     response.headers["X-Frame-Options"]="DENY"
     if request.url.path.startswith(("/api/", "/u/")) or (request.url.path.startswith("/uploads/") and "cache-control" not in response.headers):
         response.headers["Cache-Control"]="private, no-store"
-    logging.getLogger("uvicorn.error").info("request id=%s path=%s status=%s elapsed_ms=%.1f",request_id,request.url.path.split("/")[1:2],response.status_code,(time.monotonic()-started)*1000)
+    route = getattr(request.scope.get('route'), 'path', '/unmatched')
+    logging.getLogger("uvicorn.error").info("request id=%s path=%s status=%s elapsed_ms=%.1f",request_id,route,response.status_code,(time.monotonic()-started)*1000)
     return response
 
 app.add_middleware(
@@ -95,6 +97,14 @@ def get_db():
 
 def init_db():
     conn = get_db()
+    try:
+        _base_schema(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _base_schema(conn):
     c = conn.cursor()
     # Users table
     c.execute("""
@@ -205,10 +215,6 @@ def init_db():
         FOREIGN KEY(user_id) REFERENCES users(id)
     )
     """)
-    conn.commit()
-    conn.close()
-
-init_db()
 
 # Mount uploaded photos
 # Photos are served by the authenticated/signed media route below.
@@ -301,8 +307,29 @@ def _ensure_columns(c, table, cols):
 
 
 def migrate_db():
-    """补安全列与每日语义列，并给老账号回填公开链接密钥。"""
+    """所有业务schema和回填同事务，最后才登记完成的结构版本。"""
     conn = get_db()
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        applied = migrations.read(conn)
+        if applied is not None and applied > migrations.SCHEMA_VERSION:
+            raise RuntimeError('数据库结构高于当前代码，拒绝反向迁移')
+        _base_schema(conn)
+        _migrate_schema(conn)
+        from app_modules import features, companion, webpush
+        features.migrate(conn)
+        companion.migrate(conn)
+        webpush.migrate(conn)
+        migrations.record(conn, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _migrate_schema(conn):
     c = conn.cursor()
     _ensure_columns(c, "users", [
         ("pw_salt", "TEXT"),
@@ -423,9 +450,10 @@ def migrate_db():
     _community_schema(c)
     from app_modules.training import migrate as migrate_training
     migrate_training(c)
-    migrations.record(c, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    conn.commit()
-    conn.close()
+    c.execute('CREATE INDEX IF NOT EXISTS idx_body_cycles_user_cycle ON body_cycles(user_id,cycle_num DESC)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_body_cycles_photo ON body_cycles(photo_url)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_conversations_a_last ON conversations(a_id,last_at DESC)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_conversations_b_last ON conversations(b_id,last_at DESC)')
 
 
 def _community_schema(c):
@@ -597,7 +625,7 @@ def _community_schema(c):
     c.execute("CREATE INDEX IF NOT EXISTS idx_messages_media ON messages(media_name)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status, id DESC)")
     taken = {r[0] for r in c.execute("SELECT public_id FROM users WHERE public_id != ''")}
-    for row in c.execute("SELECT id FROM users ORDER BY id").fetchall():
+    for row in c.execute("SELECT id FROM users WHERE public_id IS NULL OR public_id='' ORDER BY id").fetchall():
         pid = community.new_public_id(taken)
         if not pid:
             break
@@ -612,13 +640,23 @@ def _community_schema(c):
 
 
 
+def get_readonly_db():
+    from pathlib import Path
+    conn = sqlite3.connect(Path(DB_PATH).resolve().as_uri() + '?mode=ro', uri=True, timeout=5)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def guard_schema_version():
     """QINGSU_SKIP_MIGRATE=1 时 import 不动结构，但必须答得出"库够不够新"。
 
     只核对不改：库比代码旧就拒绝启动。让进程带着旧结构上线，第一条业务请求
     才会以"某个列不存在"的样子炸出来，那时已经分不清是发布顺序错还是库被谁动过。
     """
-    conn = get_db()
+    try:
+        conn = get_readonly_db()
+    except sqlite3.Error as error:
+        raise RuntimeError('结构版本未知：数据库不存在或不可读，先跑 scripts/migrate.py') from error
     try:
         applied = migrations.read(conn)
     finally:
@@ -634,7 +672,10 @@ def guard_schema_version():
 
 def schema_version_report():
     """健康接口里的结构版本读数：读不出就说"不知道"，不报 0。"""
-    conn = get_db()
+    try:
+        conn = get_readonly_db()
+    except sqlite3.Error:
+        return None
     try:
         return migrations.read(conn)
     except sqlite3.Error:
@@ -1657,8 +1698,7 @@ async def upload_avatar(photo: UploadFile = File(None), user: dict = Depends(get
     raw = await photo.read(4 * 1024 * 1024 + 1)
     if len(raw) > 4 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="头像请小于 4MB")
-    from starlette.concurrency import run_in_threadpool
-    url = await run_in_threadpool(_store_avatar, user["id"], raw)
+    url = await media.process(_store_avatar, user['id'], raw)
     conn = get_db()
     try:
         _ensure_profile_row(conn, user["id"])
@@ -1855,9 +1895,10 @@ def compute_dashboard_data(user: dict) -> dict:
     today_f = round(f_sum["total_f"] or 0, 1)
 
     # Real today workout burned
-    c.execute("SELECT SUM(cal_burned) as total_burned FROM workout_logs WHERE user_id = ? AND log_date = ?", (user["id"], today))
+    c.execute("SELECT SUM(cal_burned) as total_burned, COUNT(*) AS n FROM workout_logs WHERE user_id = ? AND log_date = ?", (user["id"], today))
     w_sum = c.fetchone()
     today_burned = round(w_sum["total_burned"] or 0, 1)
+    today_workout_done = bool(w_sum['n'])
 
     # Real today water cups
     c.execute("SELECT cups_count FROM water_logs WHERE user_id = ? AND log_date = ?", (user["id"], today))
@@ -1911,11 +1952,12 @@ def compute_dashboard_data(user: dict) -> dict:
     consecutive_slacking = 0
     cur_d = date.today() - timedelta(days=1)
     joined=date.fromisoformat(user["created_at"][:10])
+    trained_days = {row[0] for row in c.execute('SELECT DISTINCT log_date FROM workout_logs WHERE user_id=? AND log_date BETWEEN ? AND ?',
+        (user['id'], (date.today()-timedelta(days=7)).isoformat(), today))}
     for _ in range(7):
         if cur_d < joined: break
         ds = cur_d.isoformat()
-        c.execute("SELECT id FROM workout_logs WHERE user_id = ? AND log_date = ?", (user["id"], ds))
-        if not c.fetchone():
+        if ds not in trained_days:
             consecutive_slacking += 1
             cur_d -= timedelta(days=1)
         else:
@@ -1953,8 +1995,6 @@ def compute_dashboard_data(user: dict) -> dict:
     wk = c.fetchone()
 
     # 每日状态：今天练没练、连续几天有记录、上次测量距今几天、清单勾选
-    c.execute("SELECT COUNT(*) AS n FROM workout_logs WHERE user_id = ? AND log_date = ?", (user["id"], today))
-    today_workout_done = bool(c.fetchone()["n"])
     c.execute("SELECT log_date FROM (SELECT log_date FROM food_logs WHERE user_id=? "
               "UNION SELECT log_date FROM weight_logs WHERE user_id=? "
               "UNION SELECT log_date FROM workout_logs WHERE user_id=? "
@@ -1988,9 +2028,7 @@ def compute_dashboard_data(user: dict) -> dict:
                 last_meas["log_date"], "%Y-%m-%d").date()).days
         except ValueError:
             pass
-    c.execute("SELECT cycle_started_at FROM profiles WHERE user_id = ?", (user["id"],))
-    pr_row = c.fetchone()
-    cycle_day = _cycle_day(pr_row["cycle_started_at"] if pr_row else None)
+    cycle_day = _cycle_day(p.get('cycle_started_at'))
     c.execute("SELECT state_json FROM checklist_state WHERE user_id = ? AND log_date = ?", (user["id"], today))
     cl = c.fetchone()
     try:
@@ -2388,8 +2426,7 @@ async def _new_cycle(user, weight_jin, waist_cm, photo, label):
     if photo and getattr(photo,"filename",None):
         raw=await photo.read(8*1024*1024+1)
         if len(raw)>8*1024*1024:raise HTTPException(413,"照片请小于8MB")
-    from starlette.concurrency import run_in_threadpool
-    return await run_in_threadpool(_persist_cycle,user,weight_jin,waist_cm,raw,label)
+    return await media.process(_persist_cycle,user,weight_jin,waist_cm,raw,label)
 
 
 def _persist_cycle(user,weight_jin,waist_cm,raw,label):
@@ -3889,8 +3926,9 @@ def delete_latest_photo(user:dict=Depends(get_current_user)):
     finally:c.close()
     name=os.path.basename(url)
     if re.fullmatch(r'[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp)',name,re.I):
-        try:os.unlink(os.path.join(UPLOAD_DIR,name))
-        except FileNotFoundError:pass
+        for stored in (name, name+'.thumb.jpg'):
+            try:os.unlink(os.path.join(UPLOAD_DIR,stored))
+            except FileNotFoundError:pass
     return {'code':0,'msg':'当前照片已删除；加密备份中的历史副本按保留期轮换'}
 def release_identity():
     """上报"现在跑的是哪一版"，取自部署脚本落盘的 release.json。
@@ -4360,12 +4398,8 @@ def _gif_checks(raw):
             raise ValueError("动图帧数不能超过 %d 帧" % GIF_MAX_FRAMES)
 
 
-@app.post("/api/community/media")
-async def community_media(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
-    """发帖与评论的配图：静图沿用打卡照那套真校验（格式、像素上限、去 EXIF、重编码），
-    动图（GIF）单独一条路——原样存，保住帧序列。两条都登记归属：
-    不登记就没法挡住有人把别人的身材照文件名拼进帖子。"""
-    raw = await file.read()
+def _store_community_media(raw, user):
+    """格式校验、重编码、写文件在有界后台槽位中执行。"""
     from PIL import Image, ImageOps
     if raw[:6] in (b"GIF87a", b"GIF89a"):
         if len(raw) > GIF_MAX:
@@ -4403,6 +4437,12 @@ async def community_media(file: UploadFile = File(...), user: dict = Depends(get
         conn.close()
     return {"code": 0, "name": name, "kind": "gif" if name.endswith(".gif") else "image",
             "url": signed_photo("/uploads/" + name)}
+
+
+@app.post('/api/community/media')
+async def community_media(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    raw = await media.read_upload(file, GIF_MAX, '图片或动图不能超过8MB')
+    return await media.process(_store_community_media, raw, user)
 
 
 @app.get("/api/community/stickers")
@@ -5364,6 +5404,22 @@ def _valid_audio(path: str) -> str:
     return ""
 
 
+def _store_chat_image(raw):
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(io.BytesIO(raw)) as image:
+            if image.format not in ('JPEG','PNG','WEBP') or image.width*image.height>20000000:
+                raise ValueError('格式或尺寸不支持')
+            image = ImageOps.exif_transpose(image).convert('RGB')
+            image.thumbnail((1600,1600));width,height=image.size
+            out=io.BytesIO();image.save(out,format='JPEG',quality=85);blob=out.getvalue()
+    except Exception:
+        raise HTTPException(400,'请选择有效的 JPEG、PNG 或 WebP 图片')
+    name=uuid.uuid4().hex+'.jpg'
+    with open(os.path.join(UPLOAD_DIR,name),'wb') as handle:handle.write(blob)
+    return name, 'image/jpeg', len(blob), width, height
+
+
 @app.post("/api/chat/media")
 async def chat_media(to: int = Form(...), file: UploadFile = File(...),
                      user: dict = Depends(get_current_user)):
@@ -5393,26 +5449,8 @@ async def chat_media(to: int = Form(...), file: UploadFile = File(...),
         conn.close()
 
     if kind == "image":
-        raw = await file.read()
-        if len(raw) > DM_IMAGE_MAX:
-            raise HTTPException(status_code=413, detail="图片不能超过 8MB")
-        try:
-            from PIL import Image, ImageOps
-            with Image.open(io.BytesIO(raw)) as image:
-                if image.format not in ("JPEG", "PNG", "WEBP") or image.width * image.height > 20000000:
-                    raise ValueError("格式或尺寸不支持")
-                image = ImageOps.exif_transpose(image).convert("RGB")
-                image.thumbnail((1600, 1600))
-                width, height = image.size
-                out = io.BytesIO()
-                image.save(out, format="JPEG", quality=85)
-                blob = out.getvalue()
-        except Exception:
-            raise HTTPException(status_code=400, detail="请选择有效的 JPEG、PNG 或 WebP 图片")
-        name = uuid.uuid4().hex + ".jpg"
-        with open(os.path.join(UPLOAD_DIR, name), "wb") as handle:
-            handle.write(blob)
-        mime, size = "image/jpeg", len(blob)
+        raw = await media.read_upload(file, DM_IMAGE_MAX, '图片不能超过8MB')
+        name, mime, size, width, height = await media.process(_store_chat_image, raw)
     elif kind == "audio":
         name = uuid.uuid4().hex + ".audio.part"
         path = os.path.join(UPLOAD_DIR, name)
@@ -5440,7 +5478,7 @@ async def chat_media(to: int = Form(...), file: UploadFile = File(...),
             raise
         name = uuid.uuid4().hex + ".audio.ogg"
         try:
-            duration, mime = await asyncio.to_thread(audio.normalize, path, os.path.join(UPLOAD_DIR, name), mime, DM_AUDIO_SEC_MAX)
+            duration, mime = await media.process(audio.normalize, path, os.path.join(UPLOAD_DIR, name), mime, DM_AUDIO_SEC_MAX)
         except audio.AudioUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error))
         except audio.InvalidAudio as error:

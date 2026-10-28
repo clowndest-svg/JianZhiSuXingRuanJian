@@ -184,14 +184,21 @@ function bindMealQuickAndPermissionActions(){
 
 /* 在线模型估热量。没配置时按钮上就写着没配置，不点出一个"看起来像答案"的数。 */
 async function estimateMealByAi(){
+    const meal=pendingMeal,generation=sessionGeneration;
     const out=document.getElementById('meal-ai-result');
+    const live=()=>generation===sessionGeneration&&meal===pendingMeal&&document.getElementById('meal-ai-result')===out&&out?.isConnected;
+    if(!meal||!out)return;
     const btn=document.getElementById('meal-ai-btn');
     const grams=document.getElementById('meal-grams').value;
     if(out){out.dataset.err='0';out.textContent='在算，稍一下…';}
+    if(meal.estimating)return;
+    meal.estimating=true;
     let r=null;
     try{
-        r=await postApi('/api/food/estimate',{food_name:(pendingMeal&&pendingMeal.food_name)||document.getElementById('input-meal-text').value.trim(),grams:grams?Number(grams):null});
-    }catch(e){ if(out){out.dataset.err='1';out.textContent='估算请求没成功：'+((e&&e.message)||'未知原因');} refreshMealAiStatus(); return; }
+        r=await postApi('/api/food/estimate',{food_name:meal.food_name,grams:grams?Number(grams):null});
+    }catch(e){ if(live()){out.dataset.err='1';out.textContent='估算请求没成功：'+((e&&e.message)||'未知原因');refreshMealAiStatus();} return; }
+    finally{meal.estimating=false;}
+    if(!live())return;
     refreshMealAiStatus();
     if(!r||!r.ok){
         if(out){out.dataset.err='1';out.textContent=(r&&r.why)||'在线模型没给结果';}
@@ -3808,6 +3815,7 @@ function dmCallLayer() {
         layer.setAttribute("role", "dialog");
         layer.setAttribute("aria-modal", "true");
         document.body.appendChild(layer);
+        bindDialogAccessibility(layer);
     }
     return layer;
 }
@@ -3833,6 +3841,7 @@ function dmCallMiniRender() {
         mini = document.createElement("div");
         mini.id = "dm-call-mini";
         mini.className = "dm-call-mini";
+        mini.dataset.dialogOwner = "page-layer";
         document.body.appendChild(mini);
     }
     mini.hidden = false;

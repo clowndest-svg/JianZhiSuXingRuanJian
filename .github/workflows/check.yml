@@ -74,7 +74,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: clowndest-svg/JianZhiSuXingRuanJianHouTai
-          ref: 5c2e059b48bc641100f70425d2a2e5280fac1032
+          ref: 6335e3a105aea4374479c96b6063225d52ca55c3
           path: .admin-repo
       - uses: actions/setup-python@v5
         with:
@@ -117,6 +117,19 @@ jobs:
           ffprobe -version
       - run: mkdir -p _audit_sandbox
       - run: python tests/test_integration.py
+      - name: Verify optimization and release-safety contracts
+        env:
+          QINGSU_ADMIN_REPO: ${{ github.workspace }}/.admin-repo
+          QINGSU_APP_REPO: ${{ github.workspace }}
+        run: |
+          python tests/test_migration_contract.py
+          python tests/test_optimization_runtime.py
+          python tests/test_release_state.py
+          python tests/test_deployment_failures.py
+          python tests/test_monitor_failures.py
+          python tests/test_optimization_security.py
+          python tests/test_optimization_data.py
+          python tests/test_optimization_ux.py
       - run: python tests/test_ai_contract.py
       # B06：配置在 / 真跑通过 / 最后一次成功时间必须分开答，且状态里不许带提示词
       - run: python tests/test_optimization_ai_status.py
@@ -194,6 +207,8 @@ jobs:
           node tests/offline-day-ui.mjs
           node tests/a11y-dialog-contract.mjs
           # 后台四个工作台的真翻页（它自己 spawn admin-pagination-server.py 当夹具）
+          node tests/runtime-ui.mjs
+          node tests/records-profile-permission.mjs
           node tests/admin-pagination-ui.mjs
 
   deploy:

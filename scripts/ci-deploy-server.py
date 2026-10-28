@@ -204,6 +204,12 @@ def production_verify(stage, release, revision):
 
 def restore_main(backup, previous_release):
     run("stop service before rollback", "systemctl", "stop", "qingsu")
+    helper=ROOT/'release_state.py'
+    if (backup/'release-state.json').is_file() and helper.is_file():
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('rollback_state',helper)
+        state=importlib.util.module_from_spec(spec);spec.loader.exec_module(state)
+        state.restore(ROOT,backup,Path('/etc/systemd/system'),Path('/usr/local/sbin/qingsu-ci-deploy'))
     shutil.copy2(backup / "server.py", ROOT / "server.py")
     old_modules = ROOT / "app_modules"
     if old_modules.exists():
@@ -231,13 +237,15 @@ def restore_main(backup, previous_release):
     run("restore HTTP nginx configuration", "docker", "cp", str(http_temp), "xiaoye-release:/etc/nginx/conf.d/default.conf")
     run("test restored HTTP nginx configuration", "docker", "exec", "xiaoye-release", "nginx", "-t")
     run("reload restored HTTP nginx", "docker", "exec", "xiaoye-release", "nginx", "-s", "reload")
+    metadata = ROOT / "release.json"
+    if previous_release is None:metadata.unlink(missing_ok=True)
+    else:atomic_write(metadata, previous_release, 0o644)
     run("reload systemd during rollback", "systemctl", "daemon-reload")
     run("restart restored service", "systemctl", "restart", "qingsu")
-    metadata = ROOT / "release.json"
-    if previous_release is None:
-        metadata.unlink(missing_ok=True)
-    else:
-        atomic_write(metadata, previous_release, 0o600)
+    if (backup/'timer-state.json').is_file():
+        for name, timer in json.loads((backup/'timer-state.json').read_text()).items():
+            run('restore timer enablement','systemctl','enable' if timer['enabled']=='enabled' else 'disable',name)
+            run('restore timer activity','systemctl','start' if timer['active']=='active' else 'stop',name)
     http_temp.unlink(missing_ok=True)
 
 

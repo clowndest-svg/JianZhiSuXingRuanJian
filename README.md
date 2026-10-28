@@ -1,6 +1,6 @@
 # 轻塑：Android 与网页记录工具
 
-当前仓库版本：r183 / Android **2.2.22（67）**。线上版本与下载指纹以 [version.json](https://124.220.54.64/version.json) 为准。
+当前仓库候选版本：r188 / Android **2.3.1（72）**。是否已部署与下载指纹以 [version.json](https://124.220.54.64/version.json) 为准；本轮范围和放行条件见 [完整优化方案](docs/optimization-plan-2026-10-27.md)。
 
 r183 将气泡压紧为横向内容尺寸，时间/状态移至框外，细化边缘装饰。新增20款聊天背景与相册图片背景，按本机账号及聊天保存。详见 [r183发布记录](docs/release-r183.md)。
 

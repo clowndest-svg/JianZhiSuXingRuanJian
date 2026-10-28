@@ -43,6 +43,19 @@ tarfile.open=hooked
         self.assertIn('Unexpected media symlink',result.stderr)
         self.assertFalse(list((self.root/'backups/scheduled').glob('qingsu-*.db')))
 
+    def test_encryption_failure_never_publishes_partial_bundle(self):
+        (self.root/'backup-recipient.pem').write_text('synthetic recipient')
+        hook='''import subprocess
+from unittest.mock import patch
+def fail(command,**kwargs):
+    pathlib.Path(command[command.index('-out')+1]).write_bytes(b'partial')
+    raise subprocess.CalledProcessError(1,command)
+subprocess.run=fail
+'''
+        r=self.run_backup(hook);self.assertNotEqual(r.returncode,0)
+        folder=self.root/'backups/scheduled'
+        self.assertFalse(list(folder.glob('bundle-*.p7m')));self.assertFalse(list(folder.glob('.bundle-*.part')))
+
     def test_repeated_backups_do_not_overwrite_snapshots(self):
         for _ in range(2):
             r=self.run_backup();self.assertEqual(r.returncode,0,r.stderr)

@@ -249,4 +249,72 @@ function hanging(h) {
     console.log('PASS: publicPost 走底座——无鉴权头、有超时、错误形状统一');
 }
 
+// ===== 11. HTTP 200但回执截断不能报成功，重试仍用原来的幂等键 =====
+{
+    const { h, run } = fresh();
+    let firstId;
+    h.sandbox.__fetchHandler = (_url, opts) => {
+        firstId = JSON.parse(opts.body).request_id;
+        return Promise.resolve({ok:true,status:200,json:async()=>{throw new SyntaxError('truncated JSON');}});
+    };
+    const error = await run('postApi("/api/food/log",{slot:"午餐",food_name:"truncated-receipt"})').then(()=>null,e=>e);
+    assert.equal(error?.code, 'invalid_response', '没有有效回执却被当成保存成功');
+    assert.equal(run('readDrafts().length'), 1, '未确认的写入应保留本机草稿');
+    h.sandbox.__fetchHandler = (_url, opts) => {
+        assert.equal(JSON.parse(opts.body).request_id, firstId);
+        return Promise.resolve(ok({code:0,duplicate:true}));
+    };
+    await run('postApi("/api/food/log",{slot:"午餐",food_name:"truncated-receipt"})');
+    console.log('PASS: 截断回执保留草稿和幂等ID，不报告假成功');
+}
+
+// ===== 12. 旧账号排队的写操作绝不借新账号的token发出 =====
+{
+    const { h, run } = fresh();
+    const seen = hanging(h);
+    const first = run('queueProfileUpdate({height:175})').catch(e=>e);
+    const queued = run('queueProfileUpdate({age:31})').catch(e=>e);
+    await new Promise(r=>setImmediate(r));
+    assert.equal(seen.length, 1);
+    run('sessionGeneration++;state.user={username:"bob"};state.token="bob-token";');
+    seen[0].resolve(ok({code:0}));
+    await new Promise(r=>setImmediate(r));
+    // 旧代码会再发一次；结掉它只为让反例不挂住，不算期望行为。
+    if(seen[1])seen[1].resolve(ok({code:0}));
+    const result = await queued;await first;
+    assert.equal(seen.length, 1, '排队的旧档案被发给了新账号');
+    assert.equal(result.code, 'stale_session');
+    console.log('PASS: 档案队列绑定入队时的账号代次');
+}
+
+// ===== 13. 旧账号的迟到403与网络失败不能操作新会话 =====
+{
+    const { h, run } = fresh();
+    const seen = hanging(h);
+    run('banCalls=[];handleAccountBanned=function(d){banCalls.push(d);};');
+    const old = run('getJson("/api/account")').catch(e=>e);
+    run('sessionGeneration++;state.user={username:"bob"};state.token="bob-token";');
+    const body={code:'account_banned',detail:'synthetic old ban'};
+    seen[0].resolve({ok:false,status:403,clone(){return this;},json:async()=>body});
+    const error=await old;await new Promise(r=>setImmediate(r));
+    assert.equal(error.code,'stale_session');
+    assert.equal(run('banCalls.length'),0,'全局fetch封装处理了旧账号的封号');
+    const failed=run('getJson("/api/account")').catch(e=>e);
+    run('sessionGeneration++;state.user={username:"carol"};state.token="carol-token";');
+    seen[1].reject(new TypeError('Failed to fetch'));
+    assert.equal((await failed).code,'stale_session','旧账号断网响应未按账号代次隔离');
+    console.log('PASS: 迟到403与网络失败都先核对会话归属');
+}
+
+// ===== 14. HTML错误页保留HTTP错误；显式204是有效无正文回应 =====
+{
+    const { h, run } = fresh();
+    h.sandbox.__fetchHandler=async()=>({ok:false,status:502,json:async()=>{throw new SyntaxError('HTML');}});
+    const error=await run('getJson("/api/account")').catch(e=>e);
+    assert.equal(error.status,502);
+    h.sandbox.__fetchHandler=async()=>({ok:true,status:204,json:async()=>{throw new SyntaxError('empty');}});
+    assert.equal(JSON.stringify(await run('deleteJson("/api/community/posts/1")')),'{}');
+    console.log('PASS: 无效成功回执与真实HTTP错误、204各自处理');
+}
+
 console.log('PASS: request-contract 全部判据通过');

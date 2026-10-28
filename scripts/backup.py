@@ -48,10 +48,16 @@ if recipient.is_file():
         archive.add(out/f'media-{stamp}.tar.gz',arcname='media.tar.gz')
         for original in (root/'backups').glob('orphan-archive-*.db'):
             if original.is_file() and not original.is_symlink():archive.add(original,arcname='quarantine/'+original.name)
+    encrypted=out/f'bundle-{stamp}.p7m'
+    partial=out/f'.bundle-{stamp}.p7m.part'
     try:
-        subprocess.run(['openssl','cms','-encrypt','-binary','-aes-256-cbc','-in',str(bundle),'-out',str(out/f'bundle-{stamp}.p7m'),'-outform','DER',str(recipient)],check=True)
-        (out/f'bundle-{stamp}.p7m').chmod(0o600)
-    finally:bundle.unlink(missing_ok=True)
+        subprocess.run(['openssl','cms','-encrypt','-binary','-aes-256-cbc','-in',str(bundle),'-out',str(partial),'-outform','DER',str(recipient)],check=True)
+        if not partial.is_file() or partial.stat().st_size==0:raise RuntimeError('Empty encrypted backup')
+        partial.chmod(0o600)
+        with partial.open('rb') as handle:os.fsync(handle.fileno())
+        os.replace(partial,encrypted)
+    finally:
+        partial.unlink(missing_ok=True);bundle.unlink(missing_ok=True)
 for old in out.iterdir():
     if re.fullmatch(r'(qingsu|media|bundle)-\d{8}-\d{6}\.(db|tar\.gz|p7m)',old.name) and old.is_file() and not old.is_symlink() and time.time()-old.stat().st_mtime>14*86400:
         if old.resolve().parent==out.resolve():old.unlink()

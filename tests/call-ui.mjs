@@ -55,10 +55,12 @@ try{
  if(await A.page.locator('.dm-call-down').count()!==1)throw new Error('call page minimize button missing');
  await A.page.locator('.dm-call-down').click();
  await A.page.waitForSelector('#dm-call-mini:not([hidden])');
+ assert.equal(await A.page.evaluate(()=>document.getElementById('dm-call-mini').inert),false,'chat modal must not make the live call bar inert');
  await A.page.screenshot({path:path.join(folder,'call-mini.png')});
  if(await A.page.locator('#dm-call-layer').isVisible())throw new Error('call page should hide when minimized');
  await A.page.locator('#dm-call-mini-main').click();
  await A.page.waitForSelector('#dm-call-layer:not([hidden])');
+ assert.equal(await A.page.evaluate(()=>document.getElementById('dm-call-layer').inert),false,'restored call layer must clear inert');
  checks.push('call page minimizes to a floating bar and restores');
  const stats=await A.page.evaluate(async()=>{
   const pc=dmCall.pc;if(!pc)return null;const rows=[];const all=[];const report=await pc.getStats();

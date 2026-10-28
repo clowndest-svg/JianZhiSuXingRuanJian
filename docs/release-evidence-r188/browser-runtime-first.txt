@@ -1,0 +1,1 @@
+{"checks":["poses lazy load","queued writes never change new account","truncated receipt retains draft","late estimate cannot overwrite another meal","real CacheStorage concurrent trim","real SW install activates current build only","offline shell loads without caching private API"],"passed":7,"synthetic_only":true}

@@ -461,6 +461,9 @@ class NativeMediaContractTest(unittest.TestCase):
         ))
         mic_result = java_block(cls.source, "if (requestCode == MIC_PERM_REQUEST)")
         fixture = STUBS + "\nclass MainActivity extends TestActivity {\n" + media_logic + callbacks + """
+    java.util.concurrent.ExecutorService exports = java.util.concurrent.Executors.newSingleThreadExecutor();
+    static class Bridge { void release() {} }
+    Bridge androidBridge;
     ValueCallback<Uri[]> filePathCallback;
     WebView webView;
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {

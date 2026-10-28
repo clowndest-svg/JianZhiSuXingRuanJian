@@ -67,7 +67,7 @@ class Training(unittest.TestCase):
         r=self.c.get('/api/training/export.csv',headers=self.headers);self.assertEqual(r.status_code,200);self.assertTrue(r.content.startswith(b'\xef\xbb\xbf'));self.assertIn("'=1+2",r.text);self.assertIn("'@private",r.text);self.assertNotIn('other-user-never-export',r.text);self.assertIn('no-store',r.headers['cache-control'])
     def test_keyset_page_and_schema(self):
         for _ in range(3):self.create()
-        a=self.c.get('/api/training/sessions?limit=2',headers=self.headers).json();b=self.c.get('/api/training/sessions?limit=2&cursor='+str(a['next_cursor']),headers=self.headers).json();self.assertTrue(a['more']);self.assertFalse({x['id'] for x in a['items']}&{x['id'] for x in b['items']});self.assertEqual(a['me_id'],self.a);self.assertEqual(self.s.migrations.SCHEMA_VERSION,14)
+        a=self.c.get('/api/training/sessions?limit=2',headers=self.headers).json();b=self.c.get('/api/training/sessions?limit=2&cursor='+str(a['next_cursor']),headers=self.headers).json();self.assertTrue(a['more']);self.assertFalse({x['id'] for x in a['items']}&{x['id'] for x in b['items']});self.assertEqual(a['me_id'],self.a);self.assertEqual(self.s.migrations.SCHEMA_VERSION,15)
         self.assertEqual(self.c.get('/api/training/sessions?limit=51',headers=self.headers).status_code,400)
         c=self.s.get_db();training.migrate(c);training.migrate(c);c.close()
     def test_z_template_quota_does_not_consume_existing_retry(self):

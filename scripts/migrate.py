@@ -1,44 +1,57 @@
 # -*- coding: utf-8 -*-
-"""显式跑一次结构迁移（方案 C05）。
-
-部署时先跑这个，再启动服务：迁移失败要停在部署步骤里，而不是藏在服务日志中，
-等第一条业务请求撞上"某个列不存在"才发现。
-
-用法：
-    python3 scripts/migrate.py            # 迁移到代码要求的版本并打印
-    python3 scripts/migrate.py --check    # 只核对，不改结构（退出码非零＝落后）
-"""
+"""显式迁移；--check只用只读连接，不导入服务或创建运行目录。"""
 import argparse
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent if HERE.name == 'scripts' else HERE
 sys.path.insert(0, str(ROOT))
+sys.dont_write_bytecode = True
+
+
+def read_version():
+    from app_modules import migrations
+    path = Path(os.environ.get('QINGSU_DB_DIR', '/opt/qingsu/data')) / 'qingsu.db'
+    conn = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=5)
+    try:
+        return migrations.read(conn)
+    finally:
+        conn.close()
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="轻塑结构迁移")
-    parser.add_argument("--check", action="store_true", help="只核对版本，不改结构")
+    parser = argparse.ArgumentParser(description='轻塑结构迁移')
+    parser.add_argument('--check', action='store_true', help='只核对版本，不改结构')
     args = parser.parse_args()
+    from app_modules import migrations
 
     if args.check:
-        os.environ["QINGSU_SKIP_MIGRATE"] = "1"
-    import server  # 迁移在 import 期完成，与生产启动走同一条代码路径
+        try:
+            applied = read_version()
+        except sqlite3.Error:
+            print('CHECK_FAILED 数据库不存在或不可读，未创建或修改数据库')
+            return 1
+    else:
+        # 显式迁移不能被服务进程继承的SKIP_MIGRATE开关变成只检查。
+        os.environ['QINGSU_SKIP_MIGRATE'] = '0'
+        import server
+        applied = server.schema_version_report()
 
-    from app_modules import migrations
-    applied = server.schema_version_report()
-    print("结构版本：库 %s / 代码要求 %d" % (applied, migrations.SCHEMA_VERSION))
-    print("登记表：")
-    for version, name, owner, detail in migrations.MIGRATIONS:
-        print("  %2d  [%s] %s —— %s" % (version, owner, name, detail))
-    print("后台自有表（主应用不建不改）：%s" % ", ".join(migrations.ADMIN_OWNED_TABLES))
+    print('结构版本：库 %s / 代码要求 %d' % (applied, migrations.SCHEMA_VERSION))
+    if not args.check:
+        print('登记表：')
+        for version, name, owner, detail in migrations.MIGRATIONS:
+            print('  %2d  [%s] %s —— %s' % (version, owner, name, detail))
+        print('后台自有表（主应用不建不改）：%s' % ', '.join(migrations.ADMIN_OWNED_TABLES))
     if applied != migrations.SCHEMA_VERSION:
-        print("MIGRATE_FAILED 版本没对上" if not args.check else "CHECK_FAILED 库落后于代码")
+        print('CHECK_FAILED 结构版本不匹配' if args.check else 'MIGRATE_FAILED 结构版本不匹配')
         return 1
-    print("MIGRATE_OK" if not args.check else "CHECK_OK")
+    print('CHECK_OK' if args.check else 'MIGRATE_OK')
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     sys.exit(main())

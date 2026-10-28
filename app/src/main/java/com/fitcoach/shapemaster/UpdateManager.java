@@ -31,6 +31,7 @@ public final class UpdateManager {
     private static final String MANIFEST_URL = BuildConfig.API_BASE_URL + "/version.json";
     private static final String PREFS = "update_prompt";
     private static final Handler UI = new Handler(Looper.getMainLooper());
+    private static final java.util.Map<Activity, Boolean> CHECKS = new java.util.WeakHashMap<>();
 
     private UpdateManager() {
     }
@@ -39,6 +40,10 @@ public final class UpdateManager {
         if (act == null) {
             return;
         }
+        synchronized (CHECKS) {
+            if (CHECKS.containsKey(act)) { CHECKS.put(act, CHECKS.get(act) || manual); return; }
+            CHECKS.put(act, manual);
+        }
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -46,7 +51,9 @@ public final class UpdateManager {
                 UI.post(new Runnable() {
                     @Override
                     public void run() {
-                        decide(act, json, manual);
+                        boolean showManual;
+                        synchronized (CHECKS) { showManual = Boolean.TRUE.equals(CHECKS.remove(act)); }
+                        decide(act, json, showManual);
                     }
                 });
             }
@@ -70,6 +77,7 @@ public final class UpdateManager {
             byte[] buf = new byte[4096];
             int n;
             while ((n = in.read(buf)) > 0) {
+                if (bo.size() + n > 256 * 1024) { in.close(); return null; }
                 bo.write(buf, 0, n);
             }
             in.close();

@@ -7,6 +7,7 @@ from typing import Literal
 from fastapi import Depends,HTTPException,Query
 from fastapi.responses import Response
 from pydantic import BaseModel,ConfigDict,Field,model_validator
+from app_modules.migrations import execute_schema
 
 class SetEntry(BaseModel):
     model_config=ConfigDict(extra='forbid')
@@ -61,7 +62,7 @@ class Revision(BaseModel):
     expected_version:int=Field(ge=0)
 
 def migrate(c):
-    c.executescript('''
+    execute_schema(c, '''
     CREATE TABLE IF NOT EXISTS training_sessions(
       id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       request_id TEXT NOT NULL,payload_hash TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 1,
@@ -70,6 +71,7 @@ def migrate(c):
       workout_log_id INTEGER UNIQUE REFERENCES workout_logs(id) ON DELETE SET NULL,
       deleted INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(user_id,request_id));
     CREATE INDEX IF NOT EXISTS idx_training_sessions_user_day ON training_sessions(user_id,deleted,day,id);
+    CREATE INDEX IF NOT EXISTS idx_training_sessions_user_id ON training_sessions(user_id,deleted,id DESC);
     CREATE TABLE IF NOT EXISTS training_sets(
       session_id INTEGER NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,position INTEGER NOT NULL,

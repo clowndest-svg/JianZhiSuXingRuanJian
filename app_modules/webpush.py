@@ -46,19 +46,17 @@ def provision(path):
         handle.write(raw)
 
 
+def migrate(c):
+    c.execute('''CREATE TABLE IF NOT EXISTS push_subscriptions (
+        endpoint TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),
+        session_hash TEXT NOT NULL REFERENCES sessions(token_hash) ON DELETE CASCADE,
+        keys_json TEXT NOT NULL, last_notice INTEGER NOT NULL, last_message INTEGER NOT NULL,
+        failures INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id)')
+
+
 def install(app, env):
     get_db, current = env['get_db'], env['get_current_user']
-    c = get_db()
-    try:
-        c.execute('''CREATE TABLE IF NOT EXISTS push_subscriptions (
-            endpoint TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),
-            session_hash TEXT NOT NULL REFERENCES sessions(token_hash) ON DELETE CASCADE,
-            keys_json TEXT NOT NULL, last_notice INTEGER NOT NULL, last_message INTEGER NOT NULL,
-            failures INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)''')
-        c.execute('CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id)')
-        c.commit()
-    finally:
-        c.close()
     path = os.path.join(env['KEY_DIR'], 'webpush-vapid.pem')
 
     class SubReq(BaseModel):

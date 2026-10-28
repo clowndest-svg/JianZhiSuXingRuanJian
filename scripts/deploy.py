@@ -2,6 +2,7 @@
 import argparse,json,os,shutil,sqlite3,subprocess,time,urllib.request
 from datetime import datetime
 from pathlib import Path
+from release_state import capture, restore, restore_code, atomic_json
 p=argparse.ArgumentParser();p.add_argument('--stage',required=True);p.add_argument('--revision',required=True)
 p.add_argument('--release',default=None,help='发布标签；默认取 --stage 目录名（例如 releases/r132 -> r132）')
 args=p.parse_args()
@@ -11,9 +12,7 @@ if public_base not in ('https://124.220.54.64','https://scientificexploration.ar
 if os.geteuid()!=0 or stage.parent!=root/'releases' or not (stage/'server.py').is_file():raise SystemExit('Expected root and a prepared release directory')
 RELEASE=args.release or stage.name
 if not RELEASE.startswith('r'):raise SystemExit('无法确定发布标签，请显式传 --release')
-# 先落盘再重启：服务必须能上报自己跑的是哪个提交，门禁才有东西可对账
-(root/'release.json').write_text(json.dumps({'release':RELEASE,'source_revision':args.revision}))
-def run(*cmd):return subprocess.run(cmd,check=True,capture_output=True,text=True).stdout.strip()
+def run(*cmd):return subprocess.run(cmd,check=True,capture_output=True,text=True,timeout=600).stdout.strip()
 backup=root/'backups'/('release-'+datetime.now().strftime('%Y%m%d-%H%M%S'));backup.mkdir(mode=0o700)
 for name in ('server.py','app_modules','web'):
     source=root/name
@@ -22,6 +21,11 @@ for name in ('server.py','app_modules','web'):
 unit=Path('/etc/systemd/system/qingsu.service');shutil.copy2(unit,backup/'qingsu.service')
 ci_gateway=Path('/usr/local/sbin/qingsu-ci-deploy')
 if ci_gateway.is_file():shutil.copy2(ci_gateway,backup/'qingsu-ci-deploy')
+capture(root,backup,unit.parent,ci_gateway)
+timer_states={}
+for name in ('qingsu-monitor.timer','qingsu-push.timer'):
+    timer_states[name]={k:subprocess.run(['systemctl',cmd,name],capture_output=True,text=True).stdout.strip() for k,cmd in (('active','is-active'),('enabled','is-enabled'))}
+atomic_json(backup/'timer-state.json',timer_states)
 tls=root/'tls/default.conf';old_tls=tls.read_text();(backup/'nginx-tls.conf').write_text(old_tls)
 old_http=run('docker','exec','xiaoye-release','cat','/etc/nginx/conf.d/default.conf');(backup/'nginx-http.conf').write_text(old_http)
 source=sqlite3.connect(root/'data/qingsu.db');dest=sqlite3.connect(backup/'qingsu.db')
@@ -65,9 +69,9 @@ try:
     shutil.copy2(stage/'server.py',root/'server.py.new');os.replace(root/'server.py.new',root/'server.py')
     if (root/'app_modules').exists():shutil.rmtree(root/'app_modules')
     shutil.copytree(stage/'app_modules',root/'app_modules');copy_files(stage/'web',root/'web')
-    for name in ('backup.py','monitor.py','set-min-build.py','push-worker.py'):shutil.copy2(stage/'scripts'/name,root/name)
+    for name in ('backup.py','monitor.py','set-min-build.py','push-worker.py','release_state.py'):shutil.copy2(stage/'scripts'/name,root/name)
     shutil.copy2(stage/'scripts'/'migrate.py',root/'migrate.py')
-    for name in ('server.py','app_modules','web','backup.py','monitor.py','set-min-build.py','push-worker.py','migrate.py'):protect_code(root/name)
+    for name in ('server.py','app_modules','web','backup.py','monitor.py','set-min-build.py','push-worker.py','migrate.py','release_state.py'):protect_code(root/name)
     # 迁移显式跑一次（方案 C05）：新代码已就位、库已备份，这一步失败就停在部署里，
     # 而不是等服务起来后由第一条业务请求以"某列不存在"的形状炸出来。
     print(run('python3',str(root/'migrate.py')))
@@ -87,6 +91,7 @@ try:
     if 'Environment=QINGSU_SITE_BASE=' in config:
         config=re.sub(r'Environment=QINGSU_SITE_BASE=.*', 'Environment=QINGSU_SITE_BASE='+public_base, config)
     else:config=config.replace('[Service]', '[Service]\nEnvironment=QINGSU_SITE_BASE='+public_base)
+    atomic_json(root/'release.json',{'release':RELEASE,'source_revision':args.revision,'backup':str(backup)},0o644)
     unit.write_text(config);restart()
     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
     for _ in range(20):
@@ -169,11 +174,14 @@ WantedBy=timers.target
     (root/'release.json').write_text(json.dumps({'release':RELEASE,'source_revision':args.revision,'backup':str(backup)}))
     print(json.dumps({'deployed':RELEASE,'backup':str(backup),'source_revision':args.revision}))
 except Exception:
-    if (backup/'qingsu-ci-deploy').is_file():shutil.copy2(backup/'qingsu-ci-deploy',ci_gateway)
-    shutil.copy2(backup/'server.py',root/'server.py')
-    if (backup/'app_modules').exists():
-        shutil.rmtree(root/'app_modules');shutil.copytree(backup/'app_modules',root/'app_modules')
-    copy_files(backup/'web',root/'web');shutil.copy2(backup/'qingsu.service',unit)
-    tls.write_text(old_tls);run('docker','exec','qingsu-tls','nginx','-s','reload')
+    for name in timer_states:subprocess.run(['systemctl','stop',name],capture_output=True)
+    run('systemctl','stop','qingsu')
+    restore_code(root,backup)
+    restore(root,backup,unit.parent,ci_gateway)
+    tls.write_text(old_tls);run('docker','exec','qingsu-tls','nginx','-t');run('docker','exec','qingsu-tls','nginx','-s','reload')
     (root/'tls-http.conf').write_text(old_http);run('docker','cp',str(root/'tls-http.conf'),'xiaoye-release:/etc/nginx/conf.d/default.conf');run('docker','exec','xiaoye-release','nginx','-s','reload')
-    restart();raise
+    restart()
+    for name,state in timer_states.items():
+        subprocess.run(['systemctl','enable' if state['enabled']=='enabled' else 'disable',name],capture_output=True,check=state['enabled']=='enabled')
+        if state['active']=='active':run('systemctl','start',name)
+    raise

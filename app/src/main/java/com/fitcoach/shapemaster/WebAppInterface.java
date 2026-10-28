@@ -19,7 +19,9 @@ import android.widget.Toast;
 import androidx.core.app.NotificationCompat;
 
 public class WebAppInterface {
-    private static final java.util.concurrent.ExecutorService LOCAL_AI = java.util.concurrent.Executors.newFixedThreadPool(2);
+    private final java.util.concurrent.ThreadPoolExecutor LOCAL_AI = new java.util.concurrent.ThreadPoolExecutor(
+            2, 2, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+            new java.util.concurrent.ArrayBlockingQueue<>(4));
     private final Context context;
     private final WebView webView;
     private static final String CHANNEL_ID = "shapemaster_reminders";
@@ -60,7 +62,8 @@ public class WebAppInterface {
 
     @JavascriptInterface
     public void requestMicrophonePermission() {
-        if (context instanceof MainActivity) ((MainActivity) context).requestMicPreflight();
+        if (context instanceof MainActivity) ((MainActivity) context).runOnUiThread(
+                () -> ((MainActivity) context).requestMicPreflight());
     }
 
     @JavascriptInterface
@@ -150,6 +153,7 @@ public class WebAppInterface {
         try {
             ToneGenerator toneGen = new ToneGenerator(AudioManager.STREAM_MUSIC, 100);
             toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 200);
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(toneGen::release, 250);
         } catch (Exception ignored) {
         }
     }
@@ -466,7 +470,7 @@ public class WebAppInterface {
     @JavascriptInterface public void localAiRequest(String id,int port,String endpoint,String body) {
         if(webView==null || id==null || id.length()>100 || port<1024 || port>65535
                 || !("/health".equals(endpoint)||"/v1/chat/completions".equals(endpoint)) || (body!=null && body.length()>30000))return;
-        LOCAL_AI.submit(()->{
+        try { LOCAL_AI.execute(()->{
             org.json.JSONObject result=new org.json.JSONObject();java.net.HttpURLConnection connection=null;
             try{
                 connection=(java.net.HttpURLConnection)new java.net.URL("http://127.0.0.1:"+port+endpoint).openConnection();
@@ -484,7 +488,14 @@ public class WebAppInterface {
             finally{if(connection!=null)connection.disconnect();}
             String script="if(window.onLocalAiResponse)window.onLocalAiResponse("+org.json.JSONObject.quote(id)+","+result.toString()+");";
             webView.post(()->{if(context instanceof android.app.Activity && ((android.app.Activity)context).isDestroyed())return;webView.evaluateJavascript(script,null);});
-        });
+        }); } catch (java.util.concurrent.RejectedExecutionException busy) {
+            String script="window.onLocalAiResponse&&window.onLocalAiResponse("+org.json.JSONObject.quote(id)+",{error:'busy'});";
+            webView.post(() -> { if (context instanceof Activity && !((Activity) context).isDestroyed()) webView.evaluateJavascript(script,null); });
+        }
+    }
+    public void release() {
+        LOCAL_AI.shutdownNow();
+        stopVoiceCallAudio();
     }
     @JavascriptInterface public boolean configureReminder(boolean enabled,int hour,int minute) {
         if(hour<0||hour>23||minute<0||minute>59)return false;

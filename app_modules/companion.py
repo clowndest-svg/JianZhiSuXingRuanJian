@@ -5,10 +5,11 @@ from datetime import date, timedelta
 
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
+from app_modules.migrations import execute_schema
 
 
 def migrate(c):
-    c.executescript('''
+    execute_schema(c, '''
     CREATE TABLE IF NOT EXISTS shared_goals (
         id INTEGER PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES users(id),
         title TEXT NOT NULL, kind TEXT NOT NULL, target INTEGER NOT NULL,
@@ -18,7 +19,6 @@ def migrate(c):
         user_id INTEGER NOT NULL REFERENCES users(id), PRIMARY KEY(goal_id,user_id));
     CREATE INDEX IF NOT EXISTS idx_goal_member_user ON shared_goal_members(user_id,goal_id);
     ''')
-    c.commit()
 
 
 def period_summary(c, uid, days, end):
@@ -46,14 +46,27 @@ def period_summary(c, uid, days, end):
             'calorie_sample_days': len(vals), 'rows': rows}
 
 
+def goal_summary(c, uid):
+    rows = c.execute('SELECT g.* FROM shared_goals g JOIN shared_goal_members m ON g.id=m.goal_id WHERE m.user_id=? ORDER BY g.id DESC LIMIT 30', (uid,)).fetchall()
+    if not rows:return []
+    ids=[g['id'] for g in rows];marks=','.join('?' for _ in ids)
+    members={gid:[] for gid in ids}
+    for m in c.execute('SELECT m.goal_id,u.id,u.nickname FROM shared_goal_members m JOIN users u ON u.id=m.user_id WHERE m.goal_id IN ('+marks+') ORDER BY u.id', ids):
+        members[m['goal_id']].append(m)
+    counts={}
+    for kind,table,clause in [('workout','workout_logs',''),('complete','daily_reviews',' AND r.complete=1')]:
+        selected=[g['id'] for g in rows if g['kind']==kind]
+        if not selected:continue
+        sql='SELECT g.id,m.user_id,COUNT(DISTINCT r.log_date) AS n FROM shared_goals g JOIN shared_goal_members m ON m.goal_id=g.id LEFT JOIN '+table+' r ON r.user_id=m.user_id AND r.log_date BETWEEN g.start_date AND g.end_date'+clause+' WHERE g.id IN ('+','.join('?' for _ in selected)+') GROUP BY g.id,m.user_id'
+        counts.update({(r['id'],r['user_id']):r['n'] for r in c.execute(sql,selected)})
+    return [{**{k:g[k] for k in ('id','title','kind','target','start_date','end_date')},
+             'owner':g['owner_id']==uid,'members':[{'nickname':m['nickname'],'me':m['id']==uid,
+             'days':counts.get((g['id'],m['id']),0)} for m in members[g['id']]]} for g in rows]
+
+
 def install(app, env):
     get_db = env['get_db']
     current = env['get_current_user']
-    c = get_db()
-    try:
-        migrate(c)
-    finally:
-        c.close()
 
     @app.get('/api/summary')
     def summary(days: int = 7, end: date | None = None, user: dict = Depends(current)):
@@ -121,16 +134,7 @@ def install(app, env):
     def goals(user: dict = Depends(current)):
         c = get_db()
         try:
-            rows = c.execute('SELECT g.* FROM shared_goals g JOIN shared_goal_members m ON g.id=m.goal_id WHERE m.user_id=? ORDER BY g.id DESC LIMIT 30', (user['id'],)).fetchall()
-            out = []
-            for g in rows:
-                members = []
-                for m in c.execute('SELECT u.id,u.nickname FROM users u JOIN shared_goal_members m ON u.id=m.user_id WHERE m.goal_id=? ORDER BY u.id', (g['id'],)).fetchall():
-                    table, clause = ('workout_logs', '') if g['kind'] == 'workout' else ('daily_reviews', ' AND complete=1')
-                    n = c.execute(f'SELECT COUNT(DISTINCT log_date) FROM {table} WHERE user_id=? AND log_date BETWEEN ? AND ?' + clause, (m['id'], g['start_date'], g['end_date'])).fetchone()[0]
-                    members.append({'nickname': m['nickname'], 'me': m['id'] == user['id'], 'days': n})
-                out.append({k: g[k] for k in ('id', 'title', 'kind', 'target', 'start_date', 'end_date') } | {'owner': g['owner_id'] == user['id'], 'members': members})
-            return {'code': 0, 'items': out}
+            return {'code': 0, 'items': goal_summary(c, user['id'])}
         finally:
             c.close()
 

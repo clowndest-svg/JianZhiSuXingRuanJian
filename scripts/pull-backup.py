@@ -172,8 +172,14 @@ def main():
     parser.add_argument('--age-threshold-hours',type=float,default=float(os.environ.get('QINGSU_BACKUP_AGE_HOURS',DEFAULT_AGE_THRESHOLD)))
     args=parser.parse_args()
     keys=Path(args.key_dir);out=Path(args.backup_dir)
-    ensure_keys(keys)
-    if args.prepare:print('Public encryption certificate prepared; private key remains local.');raise SystemExit(0)
+    key_files=(keys/'backup-private.pem',keys/'backup-recipient.pem',keys/'backup-password.txt')
+    if args.prepare:
+        if any(p.exists() for p in key_files) and not all(p.is_file() for p in key_files):
+            raise BackupVerifyError('密钥材料不齐，拒绝覆盖已有材料；请从受保护备份恢复')
+        ensure_keys(keys)
+        print('Public encryption certificate prepared; private key remains local.');raise SystemExit(0)
+    if not all(p.is_file() for p in key_files):
+        raise BackupVerifyError('密钥材料不齐，验证/拉取不会自动生成替换密钥')
     report={'checked_at':int(time.time()),'backup_dir':str(out),'status':'unknown','reason':'','age':None,'verify':None}
     try:
         if args.verify_only:
@@ -193,6 +199,7 @@ def main():
     path=Path(args.report) if args.report else out/'verify-report.json'
     try:write_report(report,path)
     except OSError as error:report['report_error']=str(error)
+    prune(out)
     print(json.dumps(report,ensure_ascii=False))
     raise SystemExit(1 if report['status']=='red' else 0)
 

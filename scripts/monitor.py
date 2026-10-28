@@ -10,7 +10,7 @@ CATEGORY_ORDER=('api','ai','media','ws','admin')
 def route_template(token):
     """日志里的 path 片段归成路由模板：/api/posts/123 与 /api/posts/7 算同一个接口。
 
-    server.py 现在只打首段（形如 ['api']），将来给到全路径时这里不用改。
+    兼容历史首段日志，新日志由服务端提供脱敏路由模板。
     """
     parts=re.findall(r"'([^']*)'",token) if token.strip().startswith('[') else token.strip().split('/')
     return '/'+'/'.join('{id}' if ID_SEGMENT.match(part) else part for part in parts if part)
@@ -34,10 +34,7 @@ def endpoint_category(template):
     return 'admin' if parts[0] in ('admin','ops') else 'api'
 
 def percentile(values,fraction=0.95):
-    """近位排名：样本少的时候取的是偏大的那个，慢接口排名才可信。
-
-    上面 report['p95_ms'] 那行老公式在样本数不足 20 时会落到最小值，那是既有告警口径，不跟着改。
-    """
+    """近位排名：少量样本也不会低估慢请求，所有P95读数共用此口径。"""
     if not values:return None
     ordered=sorted(values);index=max(0,min(len(ordered)-1,math.ceil(len(ordered)*fraction)-1))
     return round(ordered[index],1)
@@ -84,6 +81,16 @@ def diff_alerts(state,problems,now):
 
 def journal(unit):
     return subprocess.run(['journalctl','-u',unit,'--since','5 minutes ago','--no-pager','-o','cat'],capture_output=True,text=True).stdout
+
+def write_report(path,value):
+    import tempfile
+    path=Path(path);fd,name=tempfile.mkstemp(prefix='.'+path.name+'-',dir=path.parent)
+    try:
+        with os.fdopen(fd,'w') as output:
+            json.dump(value,output);output.flush();os.fsync(output.fileno())
+        os.replace(name,path)
+    finally:Path(name).unlink(missing_ok=True)
+
 
 def main():
     public_base=(root/'site-base').read_text().strip() if (root/'site-base').is_file() else 'https://124.220.54.64'
@@ -154,13 +161,16 @@ def main():
     backups=list((root/'backups/scheduled').glob('bundle-*.p7m'))
     report['backup_age_hours']=round((time.time()-max((x.stat().st_mtime for x in backups),default=0))/3600,1)
     if report['backup_age_hours']>26:problems.append('stale_backup')
-    expiry=subprocess.run(['openssl','x509','-enddate','-noout','-in','/etc/letsencrypt/live/'+public_base.split('://')[1]+'/cert.pem'],capture_output=True,text=True).stdout.strip()
-    from email.utils import parsedate_to_datetime
-    report['certificate_hours_left']=round((parsedate_to_datetime(expiry.split('=',1)[1]).timestamp()-time.time())/3600,1)
-    if report['certificate_hours_left']<48:problems.append('certificate_expiring')
+    try:
+        expiry=subprocess.run(['openssl','x509','-enddate','-noout','-in','/etc/letsencrypt/live/'+public_base.split('://')[1]+'/cert.pem'],capture_output=True,text=True,timeout=10,check=True).stdout.strip()
+        from email.utils import parsedate_to_datetime
+        report['certificate_hours_left']=round((parsedate_to_datetime(expiry.split('=',1)[1]).timestamp()-time.time())/3600,1)
+        if report['certificate_hours_left']<48:problems.append('certificate_expiring')
+    except Exception:
+        report['certificate_hours_left']=None;problems.append('certificate_unreadable')
     logs=journal('qingsu')
     latencies=sorted(float(n) for n in re.findall(r'elapsed_ms=(\d+(?:\.\d+)?)',logs));statuses=re.findall(r'status=(\d+)',logs)
-    report.update(requests=len(statuses),errors_5xx=sum(int(s)>=500 for s in statuses),p95_ms=round(latencies[max(0,int(len(latencies)*.95)-1)],1) if latencies else None,sqlite_lock_errors=logs.lower().count('database is locked'),cache_degraded=logs.count('cache_degraded'))
+    report.update(requests=len(statuses),errors_5xx=sum(int(s)>=500 for s in statuses),p95_ms=percentile(latencies),sqlite_lock_errors=logs.lower().count('database is locked'),cache_degraded=logs.count('cache_degraded'))
     if report['errors_5xx'] or report['sqlite_lock_errors'] or report['cache_degraded']:problems.append('application_errors')
     if report['p95_ms'] and report['p95_ms']>2000:problems.append('slow_requests')
     # 后台服务没装时不该把整轮监控判成红，但装了不看就是"后台坏了没人知道"
@@ -177,8 +187,8 @@ def main():
     state_path=alert_state_path();alerts,state=diff_alerts(read_alert_state(state_path),problems,report['checked_at'])
     report['alerts']=alerts
     report['problems']=problems
-    folder=root/'monitor';folder.mkdir(mode=0o700,exist_ok=True);(folder/'status.json').write_text(json.dumps(report))
-    state_path.parent.mkdir(mode=0o700,parents=True,exist_ok=True);state_path.write_text(json.dumps(state))
+    folder=root/'monitor';folder.mkdir(mode=0o700,exist_ok=True);write_report(folder/'status.json',report)
+    state_path.parent.mkdir(mode=0o700,parents=True,exist_ok=True);write_report(state_path,state)
     for line in ['ALERT problem=%s'%problem for problem in alerts['new']]+['RECOVERED problem=%s'%problem for problem in alerts['recovered']]:print(line)
     print(json.dumps(report));raise SystemExit(bool(problems))
 

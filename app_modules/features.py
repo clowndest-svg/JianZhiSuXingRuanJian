@@ -5,16 +5,16 @@ from datetime import date, datetime
 from typing import Optional
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
+from app_modules.migrations import execute_schema
 
 DEFAULT_SCOPE = {'weight': True, 'profile': False, 'meals': False, 'workout': True, 'photos': False}
 
 def migrate(conn):
-    conn.executescript('''
+    execute_schema(conn, '''
     CREATE TABLE IF NOT EXISTS share_settings(user_id INTEGER PRIMARY KEY REFERENCES users(id), enabled INTEGER NOT NULL, expires_at INTEGER NOT NULL, scope TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS daily_reviews(user_id INTEGER NOT NULL REFERENCES users(id), log_date TEXT NOT NULL, complete INTEGER NOT NULL, PRIMARY KEY(user_id,log_date));
     ''')
     conn.execute('INSERT OR IGNORE INTO share_settings SELECT id,1,?,? FROM users',(int(time.time())+7*86400,json.dumps(DEFAULT_SCOPE)))
-    conn.commit()
 
 def share_settings(conn, uid):
     row=conn.execute('SELECT * FROM share_settings WHERE user_id=?',(uid,)).fetchone()
@@ -46,8 +46,6 @@ def public_projection(data, settings):
 
 def install(app, env):
     get_db=env['get_db'];current=env['get_current_user']
-    with get_db() as c:migrate(c)
-    c.close()
 
     class ShareReq(BaseModel):
         enabled:bool=True
