@@ -1,0 +1,22 @@
+{
+  "version_code": 72,
+  "version_name": "2.3.1",
+  "apk_bytes": 9408702,
+  "apk_sha256": "dc3898db5ccffcd40dd929d10779d76984e5ee2592b0300e2c40e41c7927c869",
+  "apk_source_assets_checked": 43,
+  "online_source_assets_checked": 41,
+  "android_generated_assets_ignored": [
+    "assets/dexopt/baseline.prof",
+    "assets/dexopt/baseline.profm"
+  ],
+  "source_revision": "e6031af5551b6c5b385f36b8fcb9c9f8cd0a8c39",
+  "signature_schemes": {
+    "v1": false,
+    "v2": true,
+    "v3": true,
+    "v3_1": false,
+    "v4": false
+  },
+  "certificate_sha256": "c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f",
+  "certificate_dn": "CN=QingSu Release, O=QingSu, C=CN"
+}
