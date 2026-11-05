@@ -236,7 +236,7 @@ const tdRow=(title,o)=>{const c=o||{};return `<div class="td-row"><div class="td
 const tdSwitch=(id,on,label)=>`<input class="td-switch" id="${id}" type="checkbox" ${on?'checked':''} aria-label="${escapeHtml(label)}">`;
 const tdToggleRow=(id,on,title,hint)=>tdRow(title,{hint,control:tdSwitch(id,on,title)});
 const tdValueRow=(title,value,hint)=>tdRow(title,{hint,control:`<span class="td-row-value">${escapeHtml(String(value))}</span>`});
-const TD_SOURCE_CN={direct:'本人填写',manual:'本人填写',legacy_estimate:'按名称粗估',nutrition_kb:'成分表匹配',nutrition_heuristic:'按关键词粗估',nutrition_kb_partial:'部分食材已匹配成分表'};
+const TD_SOURCE_CN={meal_components:'已核对食材估算',meal_components_partial:'食材宏量不完整',direct:'本人填写',manual:'本人填写',legacy_estimate:'按名称粗估',nutrition_kb:'成分表匹配',nutrition_heuristic:'按关键词粗估',nutrition_kb_partial:'部分食材已匹配成分表'};
 const tdSourceLabel=source=>TD_SOURCE_CN[source]||'估算来源未知';
 function openDraftManager(){
     const rows=readDrafts();
@@ -444,7 +444,7 @@ const accountApply=applyDashboardData;
 applyDashboardData=function(data){
     if(isPublicScreen()){renderPublicView(data);return;}
     accountApply(data);
-    const foodNote=document.getElementById('today-meal-diary-list');if(foodNote&&data.today_meals?.some(x=>['direct','manual','legacy_estimate','nutrition_heuristic','nutrition_kb_partial'].includes(x.source))){const note=document.createElement('p');note.className='field-hint';note.textContent='部分餐食宏量未知；图表仅汇总已匹配食材的估算，不代表完整营养摄入。';foodNote.appendChild(note);}
+    const foodNote=document.getElementById('today-meal-diary-list');if(foodNote&&data.today_meals?.some(x=>['direct','manual','legacy_estimate','nutrition_heuristic','nutrition_kb_partial','meal_components_partial'].includes(x.source))){const note=document.createElement('p');note.className='field-hint';note.textContent='部分餐食宏量未知；图表仅汇总已匹配食材的估算，不代表完整营养摄入。';foodNote.appendChild(note);}
     const offline=document.getElementById('sync-offline-banner');if(offline)offline.remove();
     if(!isPublicScreen()&&state.user){try{localStorage.setItem('QINGSU_LAST_'+state.user.username,JSON.stringify({saved_at:new Date().toISOString(),data}));}catch(e){}paintDrafts();}
 };

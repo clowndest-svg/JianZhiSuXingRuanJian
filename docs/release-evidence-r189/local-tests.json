@@ -1,0 +1,362 @@
+{
+  "python": [
+    {
+      "suite": "test_ai_contract.py",
+      "exit": 0,
+      "seconds": 5.26,
+      "skipped": []
+    },
+    {
+      "suite": "test_backup_snapshot.py",
+      "exit": 0,
+      "seconds": 0.2,
+      "skipped": [
+        "4"
+      ]
+    },
+    {
+      "suite": "test_backup_verify.py",
+      "exit": 0,
+      "seconds": 0.97,
+      "skipped": []
+    },
+    {
+      "suite": "test_bubble_themes.py",
+      "exit": 0,
+      "seconds": 3.03,
+      "skipped": []
+    },
+    {
+      "suite": "test_calls.py",
+      "exit": 0,
+      "seconds": 2.78,
+      "skipped": []
+    },
+    {
+      "suite": "test_chat_history.py",
+      "exit": 0,
+      "seconds": 3.84,
+      "skipped": []
+    },
+    {
+      "suite": "test_chat_media.py",
+      "exit": 0,
+      "seconds": 8.47,
+      "skipped": []
+    },
+    {
+      "suite": "test_companion.py",
+      "exit": 0,
+      "seconds": 8.53,
+      "skipped": []
+    },
+    {
+      "suite": "test_consistency.py",
+      "exit": 0,
+      "seconds": 4.45,
+      "skipped": []
+    },
+    {
+      "suite": "test_deploy_pairing.py",
+      "exit": 0,
+      "seconds": 0.25,
+      "skipped": []
+    },
+    {
+      "suite": "test_deployment_failures.py",
+      "exit": 0,
+      "seconds": 1.17,
+      "skipped": []
+    },
+    {
+      "suite": "test_douyin_bridge.py",
+      "exit": 0,
+      "seconds": 1.06,
+      "skipped": []
+    },
+    {
+      "suite": "test_integration.py",
+      "exit": 0,
+      "seconds": 66.09,
+      "skipped": []
+    },
+    {
+      "suite": "test_long_tasks.py",
+      "exit": 0,
+      "seconds": 0.77,
+      "skipped": []
+    },
+    {
+      "suite": "test_meal_photo.py",
+      "exit": 0,
+      "seconds": 3.08,
+      "skipped": []
+    },
+    {
+      "suite": "test_migration_contract.py",
+      "exit": 0,
+      "seconds": 5.17,
+      "skipped": []
+    },
+    {
+      "suite": "test_monitor_alerts.py",
+      "exit": 0,
+      "seconds": 0.27,
+      "skipped": []
+    },
+    {
+      "suite": "test_monitor_failures.py",
+      "exit": 0,
+      "seconds": 0.33,
+      "skipped": []
+    },
+    {
+      "suite": "test_multiprocess.py",
+      "exit": 0,
+      "seconds": 3.22,
+      "skipped": []
+    },
+    {
+      "suite": "test_native_media_contract.py",
+      "exit": 0,
+      "seconds": 3.3,
+      "skipped": []
+    },
+    {
+      "suite": "test_optimization_ai_status.py",
+      "exit": 0,
+      "seconds": 0.28,
+      "skipped": []
+    },
+    {
+      "suite": "test_optimization_data.py",
+      "exit": 0,
+      "seconds": 6.92,
+      "skipped": []
+    },
+    {
+      "suite": "test_optimization_runtime.py",
+      "exit": 0,
+      "seconds": 4.8,
+      "skipped": []
+    },
+    {
+      "suite": "test_optimization_security.py",
+      "exit": 0,
+      "seconds": 44.94,
+      "skipped": []
+    },
+    {
+      "suite": "test_optimization_ux.py",
+      "exit": 0,
+      "seconds": 9.58,
+      "skipped": []
+    },
+    {
+      "suite": "test_optimization_weekly.py",
+      "exit": 0,
+      "seconds": 6.17,
+      "skipped": []
+    },
+    {
+      "suite": "test_r173_contracts.py",
+      "exit": 0,
+      "seconds": 4.36,
+      "skipped": []
+    },
+    {
+      "suite": "test_release_state.py",
+      "exit": 0,
+      "seconds": 0.97,
+      "skipped": []
+    },
+    {
+      "suite": "test_training.py",
+      "exit": 0,
+      "seconds": 4.44,
+      "skipped": []
+    },
+    {
+      "suite": "test_update_copy.py",
+      "exit": 0,
+      "seconds": 1.36,
+      "skipped": []
+    },
+    {
+      "suite": "legacy-backend.py",
+      "exit": 0,
+      "seconds": 21.28,
+      "skipped": []
+    }
+  ],
+  "node": [
+    {
+      "suite": "legacy-frontend.mjs",
+      "exit": 0,
+      "seconds": 0.91,
+      "skipped": []
+    },
+    {
+      "suite": "frontend-integration.mjs",
+      "exit": 0,
+      "seconds": 0.16,
+      "skipped": []
+    },
+    {
+      "suite": "pwa-cache-contract.mjs",
+      "exit": 0,
+      "seconds": 0.31,
+      "skipped": []
+    },
+    {
+      "suite": "frontend-budget.mjs",
+      "exit": 0,
+      "seconds": 0.16,
+      "skipped": []
+    },
+    {
+      "suite": "request-contract.mjs",
+      "exit": 0,
+      "seconds": 0.27,
+      "skipped": []
+    },
+    {
+      "suite": "ai-status-ui.mjs",
+      "exit": 0,
+      "seconds": 0.16,
+      "skipped": []
+    },
+    {
+      "suite": "dm-asr-race.mjs",
+      "exit": 0,
+      "seconds": 0.14,
+      "skipped": []
+    },
+    {
+      "suite": "dm-state-call.mjs",
+      "exit": 0,
+      "seconds": 0.23,
+      "skipped": []
+    },
+    {
+      "suite": "exercise-video.mjs",
+      "exit": 0,
+      "seconds": 0.14,
+      "skipped": []
+    },
+    {
+      "suite": "home-first-screen.mjs",
+      "exit": 0,
+      "seconds": 0.2,
+      "skipped": []
+    }
+  ],
+  "browser": [
+    {
+      "suite": "runtime-ui.mjs",
+      "exit": 0,
+      "seconds": 4.61,
+      "skipped": []
+    },
+    {
+      "suite": "bubble-themes-ui.mjs",
+      "exit": 0,
+      "seconds": 22.02,
+      "skipped": []
+    },
+    {
+      "suite": "chat-ui.mjs",
+      "exit": 1,
+      "seconds": 66.39,
+      "skipped": []
+    },
+    {
+      "suite": "chat-history-ui.mjs",
+      "exit": 0,
+      "seconds": 15.52,
+      "skipped": []
+    },
+    {
+      "suite": "training-ui.mjs",
+      "exit": 0,
+      "seconds": 8.53,
+      "skipped": []
+    },
+    {
+      "suite": "meal-photo-ui.mjs",
+      "exit": 0,
+      "seconds": 4.89,
+      "skipped": []
+    },
+    {
+      "suite": "media-cache-ui.mjs",
+      "exit": 0,
+      "seconds": 7.02,
+      "skipped": []
+    },
+    {
+      "suite": "recovery-ui.mjs",
+      "exit": 0,
+      "seconds": 4.05,
+      "skipped": []
+    },
+    {
+      "suite": "offline-day-ui.mjs",
+      "exit": 0,
+      "seconds": 3.67,
+      "skipped": []
+    },
+    {
+      "suite": "a11y-dialog-contract.mjs",
+      "exit": 0,
+      "seconds": 7.14,
+      "skipped": []
+    },
+    {
+      "suite": "records-profile-permission.mjs",
+      "exit": 0,
+      "seconds": 38.61,
+      "skipped": []
+    },
+    {
+      "suite": "admin-pagination-ui.mjs",
+      "exit": 0,
+      "seconds": 3.91,
+      "skipped": []
+    }
+  ],
+  "followups": {
+    "chat-ui.mjs": {
+      "exit": 0,
+      "reason": "Rerun with explicitly configured ffmpeg/ffprobe; complete original chat suite passed"
+    },
+    "test_meal_photo.py": {
+      "passed": 9
+    },
+    "meal-photo-ui.mjs": {
+      "passed": 10
+    },
+    "admin_existing": {
+      "passed": 42
+    },
+    "admin_vision_api": {
+      "passed": 5
+    },
+    "admin_vision_ui": {
+      "passed": 5
+    },
+    "android": {
+      "assembleRelease": true,
+      "lintRelease": true,
+      "signature_v2": true,
+      "signature_v3": true,
+      "assets_match": true
+    }
+  },
+  "limitations": [
+    "Windows skipped 4 Linux-specific backup snapshot cases; await CI Linux",
+    "Browser model outputs are synthetic fixtures",
+    "Physical Android disconnected",
+    "Two real meal images plus a nonfood smoke do not prove general recognition accuracy"
+  ]
+}

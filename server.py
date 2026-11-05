@@ -6,7 +6,7 @@ import math
 import uuid
 import logging
 from app_modules.features import share_settings, public_projection, DEFAULT_SCOPE
-from app_modules import mailer, geo, geoip, community, chat, audio, stickers, asr, migrations, media
+from app_modules import mailer, geo, geoip, community, chat, audio, stickers, asr, migrations, media, meal_photo
 import io
 import mimetypes
 import os
@@ -447,6 +447,7 @@ def _migrate_schema(conn):
     c.execute("CREATE TABLE IF NOT EXISTS daily_metrics (user_id INTEGER NOT NULL, log_date TEXT NOT NULL, metrics_json TEXT NOT NULL, origin TEXT NOT NULL, PRIMARY KEY(user_id,log_date))")
     c.execute("CREATE TABLE IF NOT EXISTS record_changes (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT NOT NULL, record_id INTEGER NOT NULL, previous_json TEXT NOT NULL, operation TEXT NOT NULL, created_at TEXT NOT NULL)")
     _ensure_columns(c,"food_logs",[("source","TEXT DEFAULT 'legacy_estimate'"),("estimate_reason","TEXT")])
+    _ensure_columns(c,"food_logs",[("components_json","TEXT")])
     _community_schema(c)
     from app_modules.training import migrate as migrate_training
     migrate_training(c)
@@ -1144,6 +1145,7 @@ class FoodLogReq(OccurrenceReq):
     food_name: str
     cal: Optional[int] = None
     request_id: Optional[str] = None
+    components: Optional[List[meal_photo.Component]] = Field(default=None, min_length=1, max_length=12)
 
 class WeightLogReq(ValidatedModel):
     weight_jin: float
@@ -2172,6 +2174,9 @@ from app_modules.nutrition import FOOD_KB_ITEMS, parse_food_nutrition
 def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
     from app_modules.record_time import record_day
     day = record_day(req, user)
+    component_totals = meal_photo.summarize(req.components) if req.components is not None else None
+    if component_totals is not None and req.cal is not None:
+        raise HTTPException(422, '食材明细会重新计算热量，不能同时手填总热量')
     conn = get_db()
     c = conn.cursor()
     snapshot_metrics(c,user["id"])
@@ -2194,7 +2199,12 @@ def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
     how_parsed = "direct"
     reason = ""
 
-    if est_cal is not None:
+    if component_totals is not None:
+        est_cal = component_totals['cal']
+        protein_g, carbs_g, fat_g = (component_totals[k] or 0 for k in ('protein_g','carbs_g','fat_g'))
+        how_parsed = 'meal_components' if component_totals['macros_known'] else 'meal_components_partial'
+        reason = '本人核对食材和份量；照片与每100g营养均为估算，非称重测定' if component_totals['macros_known'] else '本人核对食材和份量；部分宏量未知'
+    elif est_cal is not None:
         protein_g = carbs_g = fat_g = 0.0
         reason = "手填热量；宏量未知，不按比例倒推"
     else:
@@ -2211,6 +2221,8 @@ def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (user["id"], today, req.slot, name, est_cal, protein_g, carbs_g, fat_g, now_time, created_at))
     record_id = c.lastrowid
+    if req.components is not None:
+        c.execute('UPDATE food_logs SET components_json=? WHERE id=?', (json.dumps([x.model_dump() for x in req.components], ensure_ascii=False), record_id))
     c.execute("UPDATE food_logs SET occurred_at=?,timezone_offset_minutes=? WHERE id=?",
               (req.occurred_at.isoformat() if req.occurred_at else None, req.timezone_offset_minutes, record_id))
 
@@ -2223,6 +2235,7 @@ def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
     return {
         "code": 0,
         "msg": f"已成功记入【{req.slot}】：{name} ({est_cal} kcal · {source_desc})",
+        "record_id": record_id,
         "cal": est_cal,
         "protein_g": protein_g,
         "carbs_g": carbs_g,
@@ -2546,7 +2559,7 @@ def export_csv(user: dict = Depends(get_current_user)):
     for name, sql, cols in [
         ("饮食", "SELECT log_date, slot, food_name, cal, protein_g, carbs_g, fat_g, time_str, source, estimate_reason FROM food_logs WHERE user_id=? ORDER BY id",
          lambda r: [r["log_date"], r["slot"]+" · "+r["food_name"], r["cal"],
-                    (f"蛋白{r['protein_g']}g 碳水{r['carbs_g']}g 脂肪{r['fat_g']}g（估算）" if r['source'] in ('nutrition_kb','nutrition_kb_partial') else "宏量未知")+f"；来源:{r['source']}；{r['estimate_reason'] or ''}"]),
+                    (f"蛋白{r['protein_g']}g 碳水{r['carbs_g']}g 脂肪{r['fat_g']}g（估算）" if r['source'] in ('nutrition_kb','nutrition_kb_partial','meal_components') else "宏量未知")+f"；来源:{r['source']}；{r['estimate_reason'] or ''}"]),
         ("体重", "SELECT log_date, weight_jin, waist_cm FROM weight_logs WHERE user_id=? ORDER BY id",
          lambda r: [r["log_date"], "空腹体重", r["weight_jin"], f"腰围 {r['waist_cm'] or '未填'} cm"]),
         ("训练", "SELECT log_date, duration_minutes, cal_burned, plan_name FROM workout_logs WHERE user_id=? ORDER BY id",
@@ -3611,7 +3624,7 @@ def compute_charts_data(user: dict) -> dict:
     today = date.today().isoformat()
     c.execute("SELECT SUM(protein_g) as p, SUM(carbs_g) as c, SUM(fat_g) as f, SUM(cal) as total FROM food_logs WHERE user_id = ? AND log_date = ?", (user["id"], today))
     m_row = c.fetchone()
-    unknown_macros=c.execute("SELECT COUNT(*) FROM food_logs WHERE user_id=? AND log_date=? AND COALESCE(source,'') <> 'nutrition_kb'",(user["id"],today)).fetchone()[0]
+    unknown_macros=c.execute("SELECT COUNT(*) FROM food_logs WHERE user_id=? AND log_date=? AND COALESCE(source,'') NOT IN ('nutrition_kb','meal_components')",(user["id"],today)).fetchone()[0]
     total_cal = m_row["total"] or 0
     real_p = round(m_row["p"] or 0, 1)
     real_c = round(m_row["c"] or 0, 1)
@@ -3994,6 +4007,7 @@ class RecordChangeReq(ValidatedModel):
     food_name: Optional[str]=None
     slot: Optional[str]=None
     cal: Optional[int]=None
+    components: Optional[List[meal_photo.Component]] = Field(default=None, min_length=1, max_length=12)
     weight_jin: Optional[float]=None
     waist_cm: Optional[float]=None
     duration_minutes: Optional[int]=None
@@ -4041,11 +4055,20 @@ def change_record(kind, record_id, req, user, deleting=False):
         if deleting:conn.execute(f"DELETE FROM {table} WHERE id=? AND user_id=?",(record_id,user["id"]))
         else:
             updates={k:getattr(req,k) for k in fields[kind] if getattr(req,k) is not None}
+            components = req.components if kind == 'food' else None
+            if components is not None:
+                if 'cal' in updates:raise HTTPException(422, '食材明细不能同时手填总热量')
+                totals = meal_photo.summarize(components)
+                updates.update(cal=totals['cal'], protein_g=totals['protein_g'] or 0, carbs_g=totals['carbs_g'] or 0,
+                               fat_g=totals['fat_g'] or 0, source='meal_components' if totals['macros_known'] else 'meal_components_partial',
+                               estimate_reason='本人修正食材与份量；营养为估算',
+                               components_json=json.dumps([x.model_dump() for x in components], ensure_ascii=False))
             if not updates:raise HTTPException(status_code=400,detail="没有要修改的字段")
-            if kind=="food" and ("cal" in updates or "food_name" in updates):
+            if kind=="food" and components is None and ("cal" in updates or "food_name" in updates):
                 if "cal" not in updates:
                     parsed=parse_food_nutrition(updates["food_name"]);updates.update(cal=parsed["cal"],protein_g=parsed["protein_g"],carbs_g=parsed["carbs_g"],fat_g=parsed["fat_g"],source=parsed["source"],estimate_reason=parsed.get("reason",""))
                 else:updates.update(protein_g=0,carbs_g=0,fat_g=0,source="manual",estimate_reason="手动修正热量，宏量未知")
+                updates['components_json'] = None
             conn.execute(f"UPDATE {table} SET "+",".join(k+"=?" for k in updates)+" WHERE id=? AND user_id=?",(*updates.values(),record_id,user["id"]))
         if kind=="weight":
             latest=conn.execute("SELECT weight_jin FROM weight_logs WHERE user_id=? ORDER BY log_date DESC,id DESC LIMIT 1",(user["id"],)).fetchone()
@@ -4095,6 +4118,7 @@ def record_change_history(offset: int = 0, limit: int = 30,
 
 from app_modules.features import install as install_features
 install_features(app,globals())
+meal_photo.install(app, globals())
 from app_modules.companion import install as install_companion
 install_companion(app, globals())
 from app_modules.weekly_review import install as install_weekly_review
@@ -4120,7 +4144,7 @@ ASSET_MEDIA = {"js": "application/javascript", "css": "text/css", "svg": "image/
                "png": "image/png", "webmanifest": "application/manifest+json",
                "json": "application/json"}
 PUBLIC_ASSETS = ("features.js", "features.css", "companion.js", "sw.js", "manifest.webmanifest",
-                 "app-icon.png", "guidance.json", "bubble-themes.js", "bubble-themes.css", "bubble-ai.png", "bubble-moon.png", "chat-backgrounds.js", "chat-backgrounds.css", "chat-tools.js", "chat-tools.css", "training.js", "training.css")
+                 "app-icon.png", "guidance.json", "bubble-themes.js", "bubble-themes.css", "bubble-ai.png", "bubble-moon.png", "chat-backgrounds.js", "chat-backgrounds.css", "chat-tools.js", "chat-tools.css", "training.js", "training.css", "meal-photo.js", "meal-photo.css")
 # 扩展名没登记类型就要在启动时炸，不能等到用户请求才发现是 500：
 # app-icon.png 换图标那次正是这么静默上线的，页面只是不显示图标，没人会去点它。
 for asset in PUBLIC_ASSETS:

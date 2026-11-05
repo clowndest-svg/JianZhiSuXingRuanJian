@@ -30,7 +30,7 @@ def endpoint_category(template):
     if not parts:return 'api'
     if parts[0]=='ws':return 'ws'
     if parts[0] in ('uploads','avatars','stickers') or 'media' in parts:return 'media'
-    if any(part in ('ai','ask','asr') for part in parts):return 'ai'
+    if any(part in ('ai','ask','asr','vision') for part in parts):return 'ai'
     return 'admin' if parts[0] in ('admin','ops') else 'api'
 
 def percentile(values,fraction=0.95):

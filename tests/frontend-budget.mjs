@@ -37,6 +37,9 @@ const BUDGET = {
   // r187: notebook, reusable plans, calendar and factual training progress.
   "training.js": { raw: 32_768, gzip: 10_240 },
   "training.css": { raw: 12_288, gzip: 4_096 },
+  // r189: explicit photo review and editable ingredient nutrition.
+  "meal-photo.js": { raw: 28_672, gzip: 9_216 },
+  "meal-photo.css": { raw: 8_192, gzip: 3_072 },
 };
 
 const results = [];

@@ -1,0 +1,374 @@
+{
+  "source": "USDA National Nutrient Database for Standard Reference Legacy, April 2018",
+  "url": "https://www.ars.usda.gov/ARSUserFiles/80400535/DATA/SR-Legacy/SR-Leg_ASC.zip",
+  "archive_sha256": "79705f75a7306d0910ad16dd4d66a5caf602dad528b99b77c7a510bfaf3d6e14",
+  "basis": "All nutrient values per100g edible food; actual cooking and recipe may differ. Default100g is not inferred from the image.",
+  "entries": [
+    {
+      "code": "raw_chicken_breast",
+      "name": "鸡胸肉（生重参考）",
+      "ndb": "05062",
+      "description": "Chicken, broiler or fryers, breast, skinless, boneless, meat only, raw",
+      "aliases": [
+        "raw chicken breast",
+        "raw chicken breasts",
+        "生鸡胸"
+      ],
+      "kcal100": 120.0,
+      "protein100": 22.5,
+      "carbs100": 0.0,
+      "fat100": 2.62
+    },
+    {
+      "code": "rice",
+      "name": "米饭",
+      "ndb": "20045",
+      "description": "Rice, white, long-grain, regular, enriched, cooked",
+      "aliases": [
+        "rice",
+        "米饭",
+        "白饭"
+      ],
+      "kcal100": 130.0,
+      "protein100": 2.69,
+      "carbs100": 28.17,
+      "fat100": 0.28
+    },
+    {
+      "code": "chicken_breast",
+      "name": "鸡胸肉（熟制参考）",
+      "ndb": "05064",
+      "description": "Chicken, broilers or fryers, breast, meat only, cooked, roasted",
+      "aliases": [
+        "chicken breast",
+        "鸡胸",
+        "chicken breasts"
+      ],
+      "kcal100": 165.0,
+      "protein100": 31.02,
+      "carbs100": 0.0,
+      "fat100": 3.57
+    },
+    {
+      "code": "roast_chicken",
+      "name": "鸡肉（烤制带皮参考）",
+      "ndb": "05009",
+      "description": "Chicken, broilers or fryers, meat and skin, cooked, roasted",
+      "aliases": [
+        "chicken",
+        "鸡肉",
+        "烤鸡",
+        "鸡翅",
+        "鸡腿",
+        "chicken wings",
+        "chicken drumsticks",
+        "chicken thighs",
+        "chicken legs"
+      ],
+      "kcal100": 239.0,
+      "protein100": 27.3,
+      "carbs100": 0.0,
+      "fat100": 13.6
+    },
+    {
+      "code": "fried_chicken",
+      "name": "炸鸡（裹粉参考）",
+      "ndb": "05007",
+      "description": "Chicken, broilers or fryers, meat and skin, cooked, fried, batter",
+      "aliases": [
+        "fried chicken",
+        "炸鸡"
+      ],
+      "kcal100": 289.0,
+      "protein100": 22.54,
+      "carbs100": 9.42,
+      "fat100": 17.35
+    },
+    {
+      "code": "chicken_nuggets",
+      "name": "鸡块（裹粉油炸参考）",
+      "ndb": "21229",
+      "description": "Fast foods, chicken, breaded and fried, boneless pieces, plain",
+      "aliases": [
+        "chicken nuggets",
+        "nuggets",
+        "鸡块"
+      ],
+      "kcal100": 307.0,
+      "protein100": 15.92,
+      "carbs100": 14.93,
+      "fat100": 20.36
+    },
+    {
+      "code": "sausage",
+      "name": "香肠（熟制参考）",
+      "ndb": "07949",
+      "description": "Frankfurter, meat, heated",
+      "aliases": [
+        "sausage",
+        "hot dog",
+        "香肠",
+        "火腿肠"
+      ],
+      "kcal100": 278.0,
+      "protein100": 9.77,
+      "carbs100": 4.9,
+      "fat100": 24.31
+    },
+    {
+      "code": "egg",
+      "name": "鸡蛋（煮熟参考）",
+      "ndb": "01129",
+      "description": "Egg, whole, cooked, hard-boiled",
+      "aliases": [
+        "egg",
+        "eggs",
+        "鸡蛋"
+      ],
+      "kcal100": 155.0,
+      "protein100": 12.58,
+      "carbs100": 1.12,
+      "fat100": 10.61
+    },
+    {
+      "code": "tomato",
+      "name": "番茄",
+      "ndb": "11529",
+      "description": "Tomatoes, red, ripe, raw, year round average",
+      "aliases": [
+        "tomato",
+        "tomatoes",
+        "番茄",
+        "西红柿"
+      ],
+      "kcal100": 18.0,
+      "protein100": 0.88,
+      "carbs100": 3.89,
+      "fat100": 0.2
+    },
+    {
+      "code": "oil",
+      "name": "烹调油（豆油参考）",
+      "ndb": "04044",
+      "description": "Oil, soybean, salad or cooking",
+      "aliases": [
+        "cooking oil",
+        "食用油"
+      ],
+      "kcal100": 884.0,
+      "protein100": 0.0,
+      "carbs100": 0.0,
+      "fat100": 100.0
+    },
+    {
+      "code": "noodles",
+      "name": "面条（煮熟参考）",
+      "ndb": "20310",
+      "description": "Noodles, egg, cooked, enriched, with added salt",
+      "aliases": [
+        "noodles",
+        "noodle",
+        "pasta",
+        "面条"
+      ],
+      "kcal100": 138.0,
+      "protein100": 4.54,
+      "carbs100": 25.16,
+      "fat100": 2.07
+    },
+    {
+      "code": "fish",
+      "name": "鱼肉（熟制参考）",
+      "ndb": "15262",
+      "description": "Fish, tilapia, cooked, dry heat",
+      "aliases": [
+        "fish",
+        "鱼肉"
+      ],
+      "kcal100": 128.0,
+      "protein100": 26.15,
+      "carbs100": 0.0,
+      "fat100": 2.65
+    },
+    {
+      "code": "beef",
+      "name": "牛肉（熟制参考）",
+      "ndb": "23568",
+      "description": "Beef, ground, 85% lean meat / 15% fat, patty, cooked, broiled",
+      "aliases": [
+        "beef",
+        "steak",
+        "牛肉"
+      ],
+      "kcal100": 250.0,
+      "protein100": 25.93,
+      "carbs100": 0.0,
+      "fat100": 15.41
+    },
+    {
+      "code": "pork",
+      "name": "猪肉（熟制参考）",
+      "ndb": "10022",
+      "description": "Pork, fresh, loin, whole, separable lean and fat, cooked, broiled",
+      "aliases": [
+        "pork",
+        "猪肉"
+      ],
+      "kcal100": 242.0,
+      "protein100": 27.32,
+      "carbs100": 0.0,
+      "fat100": 13.92
+    },
+    {
+      "code": "tofu",
+      "name": "豆腐",
+      "ndb": "16427",
+      "description": "Tofu, raw, regular, prepared with calcium sulfate",
+      "aliases": [
+        "tofu",
+        "豆腐"
+      ],
+      "kcal100": 76.0,
+      "protein100": 8.08,
+      "carbs100": 1.87,
+      "fat100": 4.78
+    },
+    {
+      "code": "vegetables",
+      "name": "蔬菜（熟混合菜参考）",
+      "ndb": "11584",
+      "description": "Vegetables, mixed, frozen, cooked, boiled, drained, without salt",
+      "aliases": [
+        "vegetables",
+        "vegetable",
+        "greens",
+        "蔬菜",
+        "青菜"
+      ],
+      "kcal100": 65.0,
+      "protein100": 2.86,
+      "carbs100": 13.09,
+      "fat100": 0.15
+    },
+    {
+      "code": "broccoli",
+      "name": "西兰花（煮熟参考）",
+      "ndb": "11091",
+      "description": "Broccoli, cooked, boiled, drained, without salt",
+      "aliases": [
+        "broccoli",
+        "西兰花"
+      ],
+      "kcal100": 35.0,
+      "protein100": 2.38,
+      "carbs100": 7.18,
+      "fat100": 0.41
+    },
+    {
+      "code": "bread",
+      "name": "面包（白面包参考）",
+      "ndb": "18069",
+      "description": "Bread, white, commercially prepared (includes soft bread crumbs)",
+      "aliases": [
+        "bread",
+        "toast",
+        "面包",
+        "吐司"
+      ],
+      "kcal100": 266.0,
+      "protein100": 8.85,
+      "carbs100": 49.42,
+      "fat100": 3.33
+    },
+    {
+      "code": "apple",
+      "name": "苹果",
+      "ndb": "09003",
+      "description": "Apples, raw, with skin (Includes foods for USDA's Food Distribution Program)",
+      "aliases": [
+        "apple",
+        "apples",
+        "苹果"
+      ],
+      "kcal100": 52.0,
+      "protein100": 0.26,
+      "carbs100": 13.81,
+      "fat100": 0.17
+    },
+    {
+      "code": "banana",
+      "name": "香蕉",
+      "ndb": "09040",
+      "description": "Bananas, raw",
+      "aliases": [
+        "banana",
+        "bananas",
+        "香蕉"
+      ],
+      "kcal100": 89.0,
+      "protein100": 1.09,
+      "carbs100": 22.84,
+      "fat100": 0.33
+    },
+    {
+      "code": "fries",
+      "name": "薯条（烤制参考）",
+      "ndb": "11403",
+      "description": "Potatoes, french fried, all types, salt added in processing, frozen, home-prepared, oven heated",
+      "aliases": [
+        "fries",
+        "french fries",
+        "薯条"
+      ],
+      "kcal100": 158.0,
+      "protein100": 2.75,
+      "carbs100": 25.55,
+      "fat100": 5.48
+    },
+    {
+      "code": "potato",
+      "name": "土豆（煮熟参考）",
+      "ndb": "11365",
+      "description": "Potatoes, boiled, cooked in skin, flesh, without salt",
+      "aliases": [
+        "potato",
+        "potatoes",
+        "土豆"
+      ],
+      "kcal100": 87.0,
+      "protein100": 1.87,
+      "carbs100": 20.13,
+      "fat100": 0.1
+    },
+    {
+      "code": "shrimp",
+      "name": "虾（熟制参考）",
+      "ndb": "15271",
+      "description": "Crustaceans, shrimp, cooked",
+      "aliases": [
+        "shrimp",
+        "prawns",
+        "虾仁",
+        "大虾"
+      ],
+      "kcal100": 99.0,
+      "protein100": 23.98,
+      "carbs100": 0.2,
+      "fat100": 0.28
+    },
+    {
+      "code": "milk",
+      "name": "牛奶（全脂参考）",
+      "ndb": "01077",
+      "description": "Milk, whole, 3.25% milkfat, with added vitamin D",
+      "aliases": [
+        "milk",
+        "牛奶"
+      ],
+      "kcal100": 61.0,
+      "protein100": 3.15,
+      "carbs100": 4.8,
+      "fat100": 3.25
+    }
+  ]
+}

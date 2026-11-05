@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="chat-backgrounds.css">
 <link rel="stylesheet" href="chat-tools.css">
 <link rel="stylesheet" href="training.css">
+<link rel="stylesheet" href="meal-photo.css">
     <link rel="icon" type="image/png" href="app-icon.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <meta name="theme-color" content="#1f7a4d">
@@ -28,8 +29,7 @@
                         <h1>轻塑</h1>
                         <p class="brand-tag">减脂塑形严管伴侣</p>
                     </div>
-                    <!-- 档案摘要挂在品牌第二行。它原来单独占一行，
-                         顶栏就成了"品牌 / 档案 / 模式"三层堆叠，右侧还空出一块 -->
+
                     <button type="button" class="brand-profile" onclick="openProfileModal()" title="修改档案">
                         <span id="header-profile-summary">未绑定档案 · 请先登录</span>
                         <span class="brand-edit" aria-hidden="true">✎</span>
@@ -46,8 +46,7 @@
                     <span class="account-name" id="header-username-display">登录/注册</span>
                 </button>
                 <button class="header-icon-btn" id="btn-view-toggle" onclick="toggleViewMode()" title="切换电脑版/手机版排版">🖥️</button>
-                <!-- 原来这里还有一颗齿轮，点的也是 openProfileModal——和下面那行档案摘要
-                     完全重复，窄屏上却要多占 40px。删掉，档案入口只留一处。 -->
+
             </div>
         </div>
 
@@ -83,8 +82,7 @@
     <!-- 主体视窗区域 -->
     <main id="app-main">
 
-        <!-- 工具类面板之间的吸顶切换条：底部导航收成 5 格之后，
-             这 6 个功能互相切换不能再靠"回到更多页再点一次"，那会让人以为功能变少了 -->
+
         <div class="tool-strip" id="tool-strip" role="tablist" aria-label="工具之间切换">
             <button type="button" class="ts-chip" data-tab="recipes" onclick="switchTab('recipes')">🥗 食谱</button>
             <button type="button" class="ts-chip" data-tab="workout" onclick="switchTab('workout')">🏋️ 训练</button>
@@ -244,6 +242,7 @@
                 </div>
 
                 <!-- 省步骤入口（B03）：复制上一餐只是草稿，不会直接入账 -->
+                <div class="meal-photo-launch"><div><b>拍一张，核对这一餐</b><span>识别食材 · 调整份量 · 查看营养估算</span></div><button type="button" id="meal-photo-launch">拍照识餐 ↗</button></div>
                 <div class="meal-quick-row" role="group" aria-label="快速带出一餐">
                     <button type="button" class="meal-quick-btn" id="copy-last-today">复制今天上一餐</button>
                     <button type="button" class="meal-quick-btn" id="copy-last-ever">复制最近一餐</button>
@@ -342,7 +341,7 @@
                 <span style="font-size: 12px; color: var(--primary-dark); font-weight: bold;">进入 ➔</span>
             </div>
 
-        
+
 <div class="card body-suspect" id="body-suspect-card" style="display:none;">
             <div class="bs-title">⚠️ 你的身高体重年龄可能还是系统早期的默认值</div>
             <div class="bs-body">这几项直接决定每日热量额度。若不是你本人填的，
@@ -721,13 +720,12 @@
         <!-- 网页独占：只有拿到这条大屏链接的人看得到，装在手机里的 App 不出现这块 -->
         <!-- 旧版注册/保存会用 26/165/140/120 兜底，存量档案可能仍是那组数；
              这里只提醒核对，不替用户改任何数字 -->
-        
 
-        <!-- 网页独占工作台：判断标准是「需不需要大屏/键盘/打印机」，
-             需要就留在网页，App 里整块 remove 掉，不做两边一样的复制品 -->
-        
 
-        
+
+
+
+
 
         <!-- ================= TAB 4: 形体训练计划 ================= -->
         <section id="panel-workout" class="view-panel">
@@ -777,7 +775,7 @@
             <div class="timer-box">
                 <div style="font-size: 13px; opacity: 0.9;" id="timer-label">⏱️ 抗阻塑形训练倒计时 (20分钟)</div>
                 <div class="timer-digits" id="timer-display">20:00</div>
-                
+
                 <!-- 实时燃脂计数器 -->
                 <div class="live-burn-display">
                     <span>🔥 实时燃脂：</span>
@@ -1234,9 +1232,7 @@
     <footer id="site-icp-footer" style="padding:16px 12px 24px;text-align:center;font-size:12px;line-height:1.8;color:var(--text-secondary,#64748b);"><a style="color:inherit;text-decoration:none;" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">湘ICP备2026050129号-1</a></footer>
 
 
-    <!-- ================= 整页跳转层（用户主页 / 帖子详情 / 私信会话 / 统计列表） =================
-         机主原话："用户主页直接跳转页面不要弹窗了，加一个返回按钮"。
-         这一层盖住整个视口，顶栏固定带返回，正文滚动，底栏可选（评论框、发私信框）。 -->
+
     <section id="page-layer" class="page-layer" hidden role="dialog" aria-modal="true" aria-labelledby="pl-title">
         <header class="pl-head">
             <button type="button" class="pl-back" onclick="closePage()">‹ 返回</button>
@@ -1583,7 +1579,7 @@
                 <button class="modal-close-btn" style="background: rgba(255,255,255,0.2); color: #FFF;" aria-label="关闭下载弹窗" onclick="closeDownloadModal()">✕</button>
             </div>
             <div class="modal-body" style="text-align: center; padding: 18px 16px;">
-                
+
                 <!-- 扫码区域 -->
                 <div class="qr-container-card">
                     <div style="font-size: 13px; font-weight: 800; color: var(--text-main); margin-bottom: 3px;">
@@ -1684,8 +1680,7 @@
                 <button type="button" class="exd-close" onclick="closeExerciseDetail()" aria-label="关闭动作演示">×</button>
             </div>
 
-            <!-- 画布独占这一块。以前视口上叠了三处 absolute 浮层（视角提示、相位徽标、
-                 说明），手机上正好糊在人形上；现在画布里只有人，信息走画布下方正常流 -->
+
             <div class="exd-stage">
                 <canvas id="ex-detail-canvas" class="exd-canvas" width="340" height="340"></canvas>
             </div>
@@ -1730,5 +1725,6 @@
 <script src="chat-tools.js"></script>
     <script src="companion.js"></script>
 <script src="training.js"></script>
+<script src="meal-photo.js"></script>
 </body>
 </html>
