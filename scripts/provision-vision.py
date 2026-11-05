@@ -59,7 +59,7 @@ ProtectHome=true
 WantedBy=multi-user.target
 ''')
     dropin=pathlib.Path('/etc/systemd/system/qingsu-ops.service.d/vision.conf');dropin.parent.mkdir(exist_ok=True)
-    dropin.write_text('[Service]\nReadWritePaths=/opt/qingsu/vision-config\n')
+    dropin.write_text('[Service]\nReadWritePaths=/opt/qingsu/vision-config\nEnvironment=QINGSU_VISION_CHECK=/opt/qingsu/vision-config/check.json\n')
     subprocess.run(['systemctl','daemon-reload'],check=True)
     subprocess.run(['systemctl','enable','--now','qingsu-vision'],check=True)
     subprocess.run(['systemctl','restart','qingsu-ops'],check=True)
