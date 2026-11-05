@@ -1,0 +1,16 @@
+{
+  "passed": 5,
+  "checks": [
+    "live homepage button opens authenticated photo review and actual model status",
+    "actual production model results render with explicit100g assumption",
+    "editing edible weight recalculates visible nutrition before recording",
+    "confirmed photo meal appears in live diary and summary",
+    "live saved meal reopens with editable ingredient details"
+  ],
+  "real_model": true,
+  "real_https": true,
+  "viewport": {
+    "width": 393,
+    "height": 850
+  }
+}

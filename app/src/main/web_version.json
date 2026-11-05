@@ -1,10 +1,10 @@
 {
- "version_code": 74,
- "version_name": "2.4.1",
- "min_version_code": 74,
- "apk_url": "https://124.220.54.64/qingsu.apk",
- "size": 9417027,
- "md5": "82c4c219a45c1e5ef3f8e9037e9e0bd7",
- "sha256": "c8ebfeb8070caa38cf6e937995401f66d2a60c82fb2486a7904a9c4c0d245733",
- "notes": "r190 / 2.4.1 (74)\n- 新增拍照识餐与逐项食材核对，并修复参考食材两位小数营养值无法确认保存的问题。\n\n更新内容：\n• 新增拍照识餐与逐项食材核对，并修复参考食材两位小数营养值无法确认保存的问题。\n• 后台新增本机或外部视觉API配置、连接和实际图片测试，修复检查结果保存目录权限。"
+  "version_code": 74,
+  "version_name": "2.4.1",
+  "min_version_code": 74,
+  "apk_url": "https://scientificexploration.art/qingsu.apk",
+  "size": 9417027,
+  "md5": "457ab78d5371a48d99f0d05d649a9eeb",
+  "sha256": "acc4fac74e2079b799ebf43c9714215e427a5345d649c9a470c15d52e2ec357b",
+  "notes": "r190 / 2.4.1 (74)\n- 新增拍照识餐与逐项食材核对，并修复参考食材两位小数营养值无法确认保存的问题。\n\n更新内容：\n• 新增拍照识餐与逐项食材核对，并修复参考食材两位小数营养值无法确认保存的问题。\n• 后台新增本机或外部视觉API配置、连接和实际图片测试，修复检查结果保存目录权限。"
 }

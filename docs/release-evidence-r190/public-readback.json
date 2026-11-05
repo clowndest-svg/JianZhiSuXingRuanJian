@@ -1,0 +1,83 @@
+{
+  "ready": {
+    "release": "r42009371148",
+    "source_revision": "783d9ccc260f6ccb5dd42207cab8956848c793b7",
+    "status": "ok",
+    "site_base": "https://scientificexploration.art",
+    "min_build": 0,
+    "schema_version": 16,
+    "schema_required": 16,
+    "build_override": true,
+    "gate": {
+      "blocked": 0,
+      "builds": {
+        "74": 66
+      }
+    },
+    "geoip": {
+      "ok": true,
+      "version": 3,
+      "bytes": 11122642
+    },
+    "keys": {
+      "isolated": true,
+      "regenerated": [],
+      "present": {
+        "media-signing.key": true,
+        "ws-secret.key": true
+      }
+    },
+    "chat": {
+      "online": 0,
+      "sockets": 0,
+      "rejected": 0,
+      "redis": true,
+      "turn": true,
+      "calls": 0,
+      "asr": true
+    },
+    "rate": {
+      "store": "redis",
+      "degraded": false,
+      "last_error": "",
+      "memory_buckets": 0
+    }
+  },
+  "manifest": {
+    "version_code": 74,
+    "version_name": "2.4.1",
+    "min_version_code": 74,
+    "apk_url": "https://scientificexploration.art/qingsu.apk",
+    "size": 9417027,
+    "md5": "457ab78d5371a48d99f0d05d649a9eeb",
+    "sha256": "acc4fac74e2079b799ebf43c9714215e427a5345d649c9a470c15d52e2ec357b",
+    "notes": "r190 / 2.4.1 (74)\n- 新增拍照识餐与逐项食材核对，并修复参考食材两位小数营养值无法确认保存的问题。\n\n更新内容：\n• 新增拍照识餐与逐项食材核对，并修复参考食材两位小数营养值无法确认保存的问题。\n• 后台新增本机或外部视觉API配置、连接和实际图片测试，修复检查结果保存目录权限。"
+  },
+  "assets": {
+    "meal-photo.js": {
+      "sha256": "7aaf26e0b5708cec8378229db56077f7883449ae1478bf6d5d7640fefbdeac10",
+      "matches_workspace": true
+    },
+    "meal-photo.css": {
+      "sha256": "15fd22f511bdb1ab4e8423e4f27aedd4a52ccc6baf6973b777c66f51122b91fd",
+      "matches_workspace": true
+    },
+    "app.js": {
+      "sha256": "97930405604d2fe7d786339cd0e2509648a48330cd39342b017586c9eb13b51c",
+      "matches_workspace": true
+    },
+    "features.js": {
+      "sha256": "a29a1e3985fc9ecc0794ad9884badb208de28df9584021e537b9c95311f7d3ef",
+      "matches_workspace": true
+    },
+    "sw.js": {
+      "sha256": "e1d34ccd4837dfa7e45c758080066c3e6d2a5c18f50f5c9255b4880e47241708",
+      "matches_workspace": true
+    }
+  },
+  "page": {
+    "sha256": "a749f8d471b4d2d6cf5d388161a6617f7906f5786fe1dbb28fccb41afef7a2a0",
+    "photo_launch_present": true,
+    "photo_module_present": true
+  }
+}

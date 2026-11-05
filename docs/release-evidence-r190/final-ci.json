@@ -1,0 +1,44 @@
+[
+  {
+    "repository": "clowndest-svg/JianZhiSuXingRuanJian",
+    "source_revision": "783d9ccc260f6ccb5dd42207cab8956848c793b7",
+    "jobs": [
+      {
+        "name": "android",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 42009371148
+      },
+      {
+        "name": "integration",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 42009371148
+      },
+      {
+        "name": "deploy",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 42009371148
+      }
+    ]
+  },
+  {
+    "repository": "clowndest-svg/JianZhiSuXingRuanJianHouTai",
+    "source_revision": "ce007ffa185189ba1da77d72e668bf37ed0add02",
+    "jobs": [
+      {
+        "name": "test",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 42012972420
+      },
+      {
+        "name": "deploy",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 42012972420
+      }
+    ]
+  }
+]

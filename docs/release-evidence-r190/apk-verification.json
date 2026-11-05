@@ -1,0 +1,9 @@
+{
+  "build": 74,
+  "version": "2.4.1",
+  "bytes": 9417027,
+  "sha256": "acc4fac74e2079b799ebf43c9714215e427a5345d649c9a470c15d52e2ec357b",
+  "certificate_sha256": "c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f",
+  "signature_v2": true,
+  "signature_v3": true
+}

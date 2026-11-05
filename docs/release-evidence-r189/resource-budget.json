@@ -1,0 +1,22 @@
+{
+  "app.js": {
+    "bytes": 276119,
+    "gzip_bytes": 90480
+  },
+  "features.js": {
+    "bytes": 269066,
+    "gzip_bytes": 78207
+  },
+  "index.html": {
+    "bytes": 121900,
+    "gzip_bytes": 29120
+  },
+  "meal-photo.js": {
+    "bytes": 15989,
+    "gzip_bytes": 6281
+  },
+  "meal-photo.css": {
+    "bytes": 4310,
+    "gzip_bytes": 1440
+  }
+}

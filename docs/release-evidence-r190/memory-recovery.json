@@ -1,0 +1,1 @@
+{"idle_text_model_restarted": true, "before": {"available_mb": 1115, "swap_used_mb": 550}, "after": {"available_mb": 1233, "swap_used_mb": 471}, "health": "ok", "note": "Only idle text inference restarted; no database changes"}

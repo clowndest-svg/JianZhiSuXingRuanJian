@@ -1,0 +1,82 @@
+[
+  {
+    "file": "meal-mixed.jpg",
+    "ok": true,
+    "seconds": 0.91,
+    "food_name": "米饭、鸡肉",
+    "components": [
+      {
+        "name": "米饭",
+        "grams": 100.0,
+        "kcal100": 130.0,
+        "protein100": 2.69,
+        "carbs100": 28.17,
+        "fat100": 0.28,
+        "gi": null,
+        "available_carbs100": null,
+        "gi_source": "",
+        "reference": "USDA SR Legacy #20045"
+      },
+      {
+        "name": "鸡肉（烤制带皮参考）",
+        "grams": 100.0,
+        "kcal100": 239.0,
+        "protein100": 27.3,
+        "carbs100": 0.0,
+        "fat100": 13.6,
+        "gi": null,
+        "available_carbs100": null,
+        "gi_source": "",
+        "reference": "USDA SR Legacy #05009"
+      }
+    ],
+    "totals": {
+      "cal": 369,
+      "grams": 200.0,
+      "protein_g": 30.0,
+      "carbs_g": 28.2,
+      "fat_g": 13.9,
+      "macros_known": true,
+      "glycemic_load": null,
+      "health_score": null
+    },
+    "note": "本机模型仅初步识别种类；每项暂按100g及参考成分表计算，请改为实际吃下的可食部重量，补齐漏识食材。"
+  },
+  {
+    "file": "meal-chicken.jpg",
+    "ok": true,
+    "seconds": 0.39,
+    "food_name": "鸡胸肉",
+    "components": [
+      {
+        "name": "鸡胸肉（生重参考）",
+        "grams": 100.0,
+        "kcal100": 120.0,
+        "protein100": 22.5,
+        "carbs100": 0.0,
+        "fat100": 2.62,
+        "gi": null,
+        "available_carbs100": null,
+        "gi_source": "",
+        "reference": "USDA SR Legacy #05062"
+      }
+    ],
+    "totals": {
+      "cal": 120,
+      "grams": 100.0,
+      "protein_g": 22.5,
+      "carbs_g": 0.0,
+      "fat_g": 2.6,
+      "macros_known": true,
+      "glycemic_load": null,
+      "health_score": null
+    },
+    "note": "本机模型仅初步识别种类；每项暂按100g及参考成分表计算，请改为实际吃下的可食部重量，补齐漏识食材。"
+  },
+  {
+    "file": "nonfood.png",
+    "ok": false,
+    "seconds": 0.43,
+    "error": "HTTPException"
+  }
+]

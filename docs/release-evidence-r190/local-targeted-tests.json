@@ -1,0 +1,28 @@
+{
+  "photo_api": {
+    "passed": 9
+  },
+  "photo_browser": {
+    "passed": 11,
+    "additional_regression": "USDA 2.69/28.17 numeric values must actually confirm and persist"
+  },
+  "admin_vision_api": {
+    "passed": 6,
+    "additional_regression": "check state defaults to the dedicated writable config directory"
+  },
+  "admin_browser": {
+    "passed": 5
+  },
+  "android": {
+    "build": 74,
+    "assembleRelease": true,
+    "lintRelease": true,
+    "signature_v2_v3": true,
+    "assets_match": true
+  },
+  "first_production_findings": [
+    "73 browser confirmation blocked by native step mismatch",
+    "admin connection result could not write root-owned admin directory"
+  ],
+  "physical_android": "not connected"
+}

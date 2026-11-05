@@ -1,0 +1,29 @@
+{
+  "removed": [
+    "r39734173380",
+    "r39911006231",
+    "r39923691402",
+    "r39937860003",
+    "r39960300921",
+    "r39979977577",
+    "r39984028956",
+    "r39992664029",
+    "r40061547783",
+    "models/smolvlm-500m (rejected candidate only)",
+    "monitor.py.bak-r168",
+    "monitor.py.new"
+  ],
+  "bytes_removed": 672891175,
+  "retained_release_stages": [
+    "r40628630643",
+    "r42005374658"
+  ],
+  "preserved": [
+    "data",
+    "uploads",
+    "keys",
+    "backups",
+    "current InternVL model",
+    "text model"
+  ]
+}
