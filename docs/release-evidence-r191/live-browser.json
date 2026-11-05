@@ -1,0 +1,13 @@
+{
+  "passed": 5,
+  "checks": [
+    "production photo-review editor saves corrected reference nutrition into shared ledger",
+    "live stale editor rejects overwrite and reloads current record version",
+    "corrected record, dashboard and charts use the same total without duplicate meal",
+    "history reopens the same updated ingredient details",
+    "deletion refreshes the diary and shared aggregates to zero"
+  ],
+  "real_https": true,
+  "mocked_responses": false,
+  "build": 75
+}

@@ -1,0 +1,24 @@
+{
+  "repository": "clowndest-svg/JianZhiSuXingRuanJian",
+  "source_revision": "c1d7c0bbb949a4e33ae6d59dfaccb2812e0c6860",
+  "jobs": [
+    {
+      "name": "android",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": 42072201117
+    },
+    {
+      "name": "integration",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": 42072201117
+    },
+    {
+      "name": "deploy",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": 42072201117
+    }
+  ]
+}

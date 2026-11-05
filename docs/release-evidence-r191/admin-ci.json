@@ -1,0 +1,18 @@
+{
+  "repository": "clowndest-svg/JianZhiSuXingRuanJianHouTai",
+  "source_revision": "a69244ebcada2ffd24628ea516436017923d4d93",
+  "jobs": [
+    {
+      "name": "test",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": 42075018098
+    },
+    {
+      "name": "deploy",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": 42075018098
+    }
+  ]
+}

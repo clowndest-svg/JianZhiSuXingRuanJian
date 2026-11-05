@@ -1,0 +1,39 @@
+{
+  "ready": {
+    "release": "r42072201117",
+    "source_revision": "c1d7c0bbb949a4e33ae6d59dfaccb2812e0c6860",
+    "status": "ok",
+    "schema_version": 17,
+    "schema_required": 17,
+    "min_build": 0,
+    "build_override": true
+  },
+  "manifest": {
+    "version_code": 75,
+    "version_name": "2.4.2",
+    "min_version_code": 75,
+    "apk_url": "https://scientificexploration.art/qingsu.apk",
+    "size": 9417027,
+    "md5": "13da252e9dc4f204ebb1ecb35137ea01",
+    "sha256": "cad8ea0d8366ec0a4b8ec8a0c8c2229a9b4d09946f41bd57661db12db1995dc8",
+    "notes": "r191 / 2.4.2 (75)\n- 统一饮食保存、历史修改和离线重试的原子回执，防重复、内容错配与多设备旧版本覆盖。\n\n更新内容：\n• 统一饮食保存、历史修改和离线重试的原子回执，防重复、内容错配与多设备旧版本覆盖。\n• 加固首页与图表刷新顺序、账号切换隔离和数据库读快照，保持明细与汇总一致。"
+  },
+  "assets": {
+    "app.js": {
+      "matches_workspace": true,
+      "sha256": "5c4483854ee655b39b7c473dab343a9125acb32b402367c640b067b52d0912a8"
+    },
+    "features.js": {
+      "matches_workspace": true,
+      "sha256": "e6654cd3251895fb3c1e9214c42d8d86fa087ab443c4ae1423bebad701e218c1"
+    },
+    "meal-photo.js": {
+      "matches_workspace": true,
+      "sha256": "7fa9229815ea1489389a5ea87585cda0c29b52ae4ef4d5420be898ab44eb23ea"
+    },
+    "sw.js": {
+      "matches_workspace": true,
+      "sha256": "0a1667ca5b5c763b812c9e17df9114bb1c023bdc2c62db45a09ddd1c854599ce"
+    }
+  }
+}

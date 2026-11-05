@@ -1,0 +1,11 @@
+{
+  "status": "green",
+  "restored_integrity": "ok",
+  "foreign_key_violations": 0,
+  "tables": 77,
+  "media_files": 23,
+  "media_restored": 23,
+  "encrypted_file": "bundle-20261106-013022.p7m",
+  "users": 2,
+  "receipt_rows": 0
+}

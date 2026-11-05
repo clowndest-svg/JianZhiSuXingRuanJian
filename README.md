@@ -1,6 +1,8 @@
 # 轻塑：Android 与网页记录工具
 
-当前生产版本：r190 / Android **2.4.1（74）**，前后台CI与真实生产验收通过。线上下载指纹以 [version.json](https://scientificexploration.art/version.json) 为准；实现、验收与剩余边界见 [r190发布记录](docs/release-r190.md)。
+当前生产版本：r191 / Android **2.4.2（75）**，前后台CI与真实生产验收通过。线上下载指纹以 [version.json](https://scientificexploration.art/version.json) 为准；关联加固、验收与剩余边界见 [r191发布记录](docs/release-r191.md)。
+
+r191统一保存回执、离线重试与历史修改版本，阻止重复记账和旧页面覆盖新记录；首页、图表与流水使用一致快照，迟到刷新与旧账号响应不回写当前状态。原有业务记录及轻塑号已核对未变。
 
 r189新增照片识餐与逐项食材核对、营养汇总、参考食材改选和历史修正；后台提供本机开源视觉模型及外部API设置。初始每项100g是待核对假设，照片不用于精确称重。
 

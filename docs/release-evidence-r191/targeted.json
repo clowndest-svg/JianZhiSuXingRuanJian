@@ -20,5 +20,11 @@
     "signature_v2_v3": true,
     "assets_match": true
   },
-  "physical_android": "not connected"
+  "physical_android": "not connected",
+  "admin_api": {
+    "tests": 43,
+    "passed": true,
+    "additional_contract": "account deletion includes own write receipts and preserves peer receipts with the same key",
+    "build_revision_over_stale_environment": true
+  }
 }
