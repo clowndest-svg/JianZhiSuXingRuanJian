@@ -113,11 +113,14 @@ def install(app, env):
         if not table or offset<0 or not 1<=limit<=100:raise HTTPException(400,'无效的分页或记录类型')
         c=get_db()
         try:
+            c.execute('BEGIN')
             rows=[dict(r) for r in c.execute(f'SELECT * FROM {table} WHERE user_id=? ORDER BY log_date DESC,id DESC LIMIT ? OFFSET ?',(user['id'],limit,offset))]
             if kind=='workout' and rows:
                 links={r['workout_log_id']:r['id'] for r in c.execute('SELECT id,workout_log_id FROM training_sessions WHERE user_id=? AND deleted=0 AND workout_log_id IN ('+','.join('?' for _ in rows)+')',(user['id'],*[x['id'] for x in rows]))}
                 for row in rows:row['training_session_id']=links.get(row['id'])
-            for row in rows:row.pop('user_id',None)
+            for row in rows:
+                row['revision']=env['record_integrity'].revision(c, kind, row)
+                row.pop('user_id',None)
             return {'rows':rows,'offset':offset,'limit':limit}
         finally:c.close()
 

@@ -74,7 +74,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: clowndest-svg/JianZhiSuXingRuanJianHouTai
-          ref: 6335e3a105aea4374479c96b6063225d52ca55c3
+          ref: 4bbf3b1500ac7383319c93e369ba0f284681615b
           path: .admin-repo
       - uses: actions/setup-python@v5
         with:

@@ -135,7 +135,8 @@ class MigrationContracts(unittest.TestCase):
 
     def test_all_extension_tables_exist_before_version_is_recorded(self):
         required = {'share_settings', 'daily_reviews', 'shared_goals', 'shared_goal_members',
-                    'push_subscriptions', 'training_sessions', 'training_sets', 'training_templates'}
+                    'push_subscriptions', 'training_sessions', 'training_sets', 'training_templates',
+                    'record_write_receipts'}
         original = migrations.record
         seen = []
 

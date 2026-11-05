@@ -15,7 +15,7 @@ import os
 import sqlite3
 
 # 生产库当前应该处在的结构版本。加一条 MIGRATIONS 就 +1。
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 # (版本, 名称, 所有者, 说明)。名称要和 server.py 里那段动作对得上，
 # 不然半年后没人知道第 7 版到底改了什么。
@@ -36,6 +36,7 @@ MIGRATIONS = (
     (14, "训练手账", "app", "training_sessions/training_sets/training_templates；个人模板、日历与逐组训练"),
     (15, "显式事务迁移与查询索引", "app", "统一扩展表迁移；稳定轻塑号；周期照片、会话参与者与训练列表索引"),
     (16, "食材营养明细", "app", "food_logs.components_json；确认后的可编辑食材和克重，不保存识别照片"),
+    (17, "记录写入回执", "app", "record_write_receipts；原子回执、请求内容校验与记录版本冲突检查"),
 )
 
 # 后台仓库自己拥有的表：主应用既不建也不改，只在此登记，避免出现"两张表谁都在写"。

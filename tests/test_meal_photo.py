@@ -1,5 +1,5 @@
 """Real HTTP provider, API/SQLite and bounded image contracts; isolated data only."""
-import copy,importlib.util,io,json,sys,threading,unittest,uuid
+import copy,importlib.util,io,json,sys,threading,unittest,uuid,concurrent.futures
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from unittest.mock import patch
@@ -77,11 +77,83 @@ class PhotoMeals(unittest.TestCase):
    self.assertEqual(self.c.post('/api/food/log',headers=self.headers,json=p).status_code,422)
  def test_legacy_logging_and_new_schema(self):
   r=self.c.post('/api/food/log',headers=self.headers,json={'food_name':'米饭','slot':'午餐','cal':234});self.assertEqual(r.status_code,200,r.text);self.assertEqual(r.json()['cal'],234);self.assertEqual(r.json()['protein_g'],0)
-  c=self.s.get_db();self.assertEqual(c.execute('SELECT version FROM schema_version').fetchone()[0],16);self.assertEqual(c.execute('PRAGMA foreign_key_check').fetchall(),[]);c.close()
+  c=self.s.get_db();self.assertEqual(c.execute('SELECT version FROM schema_version').fetchone()[0],17);self.assertEqual(c.execute('PRAGMA foreign_key_check').fetchall(),[]);c.close()
  def test_local_caption_uses_reference_not_model_numbers(self):
   rows=mp.local_components('A plate of rice and chicken breast. 9999 kcal, 5000 grams.')
   self.assertEqual(len(rows),2);self.assertTrue(all(x.grams==100 for x in rows));self.assertEqual(mp.summarize(rows)['cal'],295);self.assertTrue(all(x.reference.startswith('USDA') for x in rows))
   with self.assertRaises(ValueError):mp.local_components('A car on the road, no food.')
   with patch.object(mp,'read_config',return_value={**self.cfg,'local':True}):self.assertEqual(self.recognize().status_code,409)
+
+ def detail(self,sid,headers=None):
+  return self.c.get('/api/records/food/'+str(sid),headers=headers or self.headers)
+ def test_retry_returns_original_receipt_and_rejects_changed_content(self):
+  p=self.payload();first=self.c.post('/api/food/log',headers=self.headers,json=p).json()
+  again=self.c.post('/api/food/log',headers=self.headers,json=p).json()
+  self.assertEqual(again,{**first,'duplicate':True})
+  peer=self.c.post('/api/food/log',headers=self.peer,json=p)
+  self.assertEqual(peer.status_code,200,peer.text);self.assertNotEqual(peer.json()['record_id'],first['record_id']);self.assertEqual(self.detail(peer.json()['record_id']).status_code,404)
+  changed={**p,'components':[RICE]}
+  self.assertEqual(self.c.post('/api/food/log',headers=self.headers,json=changed).status_code,409)
+  sid=first['record_id'];url='/api/records/food/'+str(sid)+'/update'
+  edit={'components':[RICE],'expected_revision':first['revision'],'request_id':str(uuid.uuid4())}
+  saved=self.c.post(url,headers=self.headers,json=edit).json()
+  self.assertEqual(self.c.post(url,headers=self.headers,json=edit).json(),{**saved,'duplicate':True})
+  self.assertEqual(self.c.post(url,headers=self.headers,json={**edit,'components':[CHICKEN]}).status_code,409)
+  conn=self.s.get_db();self.assertEqual(conn.execute('SELECT COUNT(*) FROM record_changes WHERE user_id=? AND kind=? AND record_id=?',(self.users[0]['id'],'food',sid)).fetchone()[0],1);conn.close()
+ def test_concurrent_creates_and_conflicting_edits_are_atomic(self):
+  p=self.payload();before=self.count();barrier=threading.Barrier(6)
+  def create(_):
+   barrier.wait();return self.c.post('/api/food/log',headers=self.headers,json=p)
+  with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:responses=list(pool.map(create,range(6)))
+  self.assertEqual([r.status_code for r in responses],[200]*6)
+  sid=responses[0].json()['record_id'];self.assertEqual({r.json()['record_id'] for r in responses},{sid});self.assertEqual(self.count(),before+1)
+  rev=responses[0].json()['revision'];barrier=threading.Barrier(6)
+  def edit(i):
+   barrier.wait();return self.c.post('/api/records/food/'+str(sid)+'/update',headers=self.headers,json={'components':[{**RICE,'grams':100+i}],'expected_revision':rev,'request_id':str(uuid.uuid4())})
+  with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:responses=list(pool.map(edit,range(6)))
+  self.assertEqual(sorted(r.status_code for r in responses),[200,409,409,409,409,409])
+  winner=next(r.json() for r in responses if r.status_code==200)
+  self.assertEqual(self.detail(sid).json()['row']['revision'],winner['revision'])
+ def test_stale_delete_and_same_value_update_cannot_overwrite_newer_record(self):
+  first=self.c.post('/api/food/log',headers=self.headers,json=self.payload()).json();sid=first['record_id'];url='/api/records/food/'+str(sid)
+  saved=self.c.post(url+'/update',headers=self.headers,json={'components':[RICE,CHICKEN],'expected_revision':first['revision']}).json()
+  self.assertNotEqual(first['revision'],saved['revision'])
+  self.assertEqual(self.c.post(url+'/delete',headers=self.headers,json={'expected_revision':first['revision']}).status_code,409)
+  self.assertEqual(self.detail(sid,self.peer).status_code,404)
+  delete={'request_id':str(uuid.uuid4()),'expected_revision':saved['revision']}
+  result=self.c.post(url+'/delete',headers=self.headers,json=delete).json()
+  self.assertEqual(self.c.post(url+'/delete',headers=self.headers,json=delete).json(),{**result,'duplicate':True})
+  self.assertEqual(self.detail(sid).status_code,404)
+ def test_failed_receipt_write_rolls_back_meal_audit_and_retry_marker(self):
+  p=self.payload();before=self.count()
+  with patch.object(self.s.record_integrity,'remember',side_effect=RuntimeError('synthetic storage fault')):
+   self.assertEqual(self.c.post('/api/food/log',headers=self.headers,json=p).status_code,500)
+  self.assertEqual(self.count(),before)
+  conn=self.s.get_db();self.assertIsNone(conn.execute('SELECT 1 FROM request_receipts WHERE request_key=?',(p['request_id'],)).fetchone());conn.close()
+  first=self.c.post('/api/food/log',headers=self.headers,json=p).json();sid=first['record_id']
+  with patch.object(self.s.record_integrity,'remember',side_effect=RuntimeError('synthetic storage fault')):
+   self.assertEqual(self.c.post('/api/records/food/'+str(sid)+'/update',headers=self.headers,json={'components':[RICE],'request_id':str(uuid.uuid4()),'expected_revision':first['revision']}).status_code,500)
+  row=self.detail(sid).json()['row'];self.assertEqual(row['cal'],508);self.assertEqual(row['revision'],first['revision'])
+ def test_dashboard_keeps_one_read_snapshot_during_concurrent_commit(self):
+  original=self.s.get_db;injected=[];uid=self.users[0]['id'];today=self.s.date.today().isoformat()
+  def traced():
+   conn=original()
+   def trace(sql):
+    if 'SELECT * FROM food_logs WHERE user_id =' in sql and not injected:
+     injected.append(True);other=original()
+     other.execute('INSERT INTO food_logs(user_id,log_date,slot,food_name,cal) VALUES (?,?,?,?,?)',(uid,today,'午餐','synthetic interleaved meal',321));other.commit();other.close()
+   conn.set_trace_callback(trace);return conn
+  with patch.object(self.s,'get_db',side_effect=traced):r=self.c.get('/api/dashboard',headers=self.headers)
+  self.assertEqual(r.status_code,200,r.text);self.assertTrue(injected)
+  d=r.json();self.assertEqual(d['today_consumed'],sum(x['cal'] for x in d['today_meals']))
+  fresh=self.c.get('/api/dashboard',headers=self.headers).json();self.assertEqual(fresh['today_consumed'],d['today_consumed']+321)
+ def test_confirmed_day_and_charts_follow_corrected_food_ledger(self):
+  today=self.s.date.today().isoformat();first=self.c.post('/api/food/log',headers=self.headers,json=self.payload()).json();sid=first['record_id']
+  self.assertEqual(self.c.post('/api/day/complete',headers=self.headers,json={'log_date':today,'complete':True}).status_code,200)
+  before=self.c.get('/api/charts',headers=self.headers).json()['deficit_history'][-1]
+  result=self.c.post('/api/records/food/'+str(sid)+'/update',headers=self.headers,json={'components':[{**RICE,'grams':100}],'expected_revision':first['revision'],'request_id':str(uuid.uuid4())}).json()
+  dash=self.c.get('/api/dashboard',headers=self.headers).json();charts=self.c.get('/api/charts',headers=self.headers).json()['deficit_history'][-1]
+  self.assertEqual(charts['consumed'],dash['today_consumed']);self.assertEqual(charts['consumed'],result['day_after']['consumed_cal']);self.assertEqual(before['consumed']-charts['consumed'],378);self.assertEqual(charts['record_status'],'partial')
+  conn=self.s.get_db();self.assertEqual(conn.execute('PRAGMA foreign_key_check').fetchall(),[]);conn.close()
 
 if __name__=='__main__':unittest.main()

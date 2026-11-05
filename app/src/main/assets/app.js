@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 74;
+const APP_BUILD = 75;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -653,16 +653,16 @@ async function rawPostApi(path, body, opts) {
     return requestBase(path, Object.assign({ method: "POST", body: body }, opts || {}));
 }
 
-// Preserve request IDs across uncertain network retries; merge simultaneous clicks.
+// Reuse uncertain write IDs and merge simultaneous submissions.
+let recordMutationSeq=0,dashboardReadSeq=0,chartsReadSeq=0;
 const pendingWrites = new Map();
 const uncertainWrites = new Map();
 function postApi(path, body, opts) {
     if (!state.token) return Promise.reject(new Error("请先登录"));
-    // 打卡类写操作要带 request_id 做幂等；社区发帖/评论和私信同理——断网重试
-    // 不该发出第二条。评论的路径是 /api/community/posts/<id>/comments，所以按前缀认。
+    // 记录及社区写入统一携带幂等标识，重试复用原回执。
     const RECORD_PATHS = ["/api/food/log", "/api/workout/complete",
                           "/api/community/posts", "/api/chat/send"];
-    const isRecord = RECORD_PATHS.some(p => path === p || path.startsWith(p + "/"));
+    const isRecord = RECORD_PATHS.some(p => path === p || path.startsWith(p + "/")) || /^\/api\/records\/(food|weight|workout)\/\d+\/(update|delete)$/.test(path);
     const signature = JSON.stringify(body instanceof FormData ? {} : Object.fromEntries(Object.entries(body || {}).filter(([key])=>!["request_id","occurred_at","timezone_offset_minutes"].includes(key))));
     const key = sessionGeneration + ":" + path + ":" + signature;
     if (pendingWrites.has(key)) return pendingWrites.get(key);
@@ -670,15 +670,15 @@ function postApi(path, body, opts) {
         const id = body.request_id || uncertainWrites.get(key) || (Date.now().toString(36)+"-"+Math.random().toString(36).slice(2));
         uncertainWrites.set(key,id); body.request_id=id;
     }
-    const task=rawPostApi(path,body,opts).then(data=>{uncertainWrites.delete(key);return data;})
+    const task=rawPostApi(path,body,opts).then(data=>{uncertainWrites.delete(key);if(isRecord||path.startsWith("/api/records/")||path==="/api/day/complete")recordMutationSeq++;return data;})
         .finally(()=>pendingWrites.delete(key));
     pendingWrites.set(key,task);return task;
 }
 
-/** 档案写入按调用顺序排队：先选的场景不能反过来把后保存的身高体重覆盖掉。 */
+/** 档案按提交顺序保存。 */
 function queueProfileUpdate(body) {
     profileWriteSeq++;
-    // 返回后在新账号下执行的排队写入必须被丢弃。
+    // 切号后丢弃旧队列。
     const generation = sessionGeneration;
     const payload = Object.assign({}, body);
     const run = () => {
@@ -843,28 +843,30 @@ function applyDashboardData(data) {
 
 async function syncRemoteDashboard() {
     if (!state.token) return;
+    const readSeq=++dashboardReadSeq,mutation=recordMutationSeq;
     const generation=sessionGeneration;
     const writeSeq=profileWriteSeq;
     try {
         const res = await fetch(`${API_BASE}/api/dashboard`, {
             headers: { "Authorization": `Bearer ${state.token}` }
         });
+        if (generation !== sessionGeneration || readSeq !== dashboardReadSeq || mutation !== recordMutationSeq) return;
         if (res.status === 401) {
             localStorage.removeItem(TOKEN_KEY);
             openAuthModal();
             return;
         }
         const data = await res.json();
-        if (generation !== sessionGeneration) return;
+        if (generation !== sessionGeneration || readSeq !== dashboardReadSeq || mutation !== recordMutationSeq) return;
         if (writeSeq !== profileWriteSeq) return;
         if (!res.ok) throw new Error("HTTP " + res.status);
         applyDashboardData(data);
         renderHabitMatrix();
         homeMarkSync();
         renderHomeToday();
-        // 常用餐食跟着今天的账一起刷：记完一笔就该看见它进列表（B03）
         if (typeof loadRecentMeals === "function") loadRecentMeals();
     } catch (e) {
+        if (generation !== sessionGeneration || readSeq !== dashboardReadSeq || mutation !== recordMutationSeq) return;
         console.error("Failed to sync remote dashboard", e);
         if(typeof restoreOfflineDashboard === "function") restoreOfflineDashboard(e);
     }
@@ -872,6 +874,7 @@ async function syncRemoteDashboard() {
 
 async function syncRemoteCharts() {
     if (!state.token) return;
+    const readSeq=++chartsReadSeq,mutation=recordMutationSeq;
     const generation=sessionGeneration;
     const writeSeq=profileWriteSeq;
     try {
@@ -879,8 +882,9 @@ async function syncRemoteCharts() {
             headers: { "Authorization": `Bearer ${state.token}` }
         });
         const data = await res.json();
-        if (generation !== sessionGeneration) return;
+        if (generation !== sessionGeneration || readSeq !== chartsReadSeq || mutation !== recordMutationSeq) return;
         if (writeSeq !== profileWriteSeq) return;
+        if (!res.ok) throw new Error("HTTP " + res.status);
         if (data.weight_history) {
             state.weightHistory = data.weight_history;
             state.deficitHistory = data.deficit_history;
@@ -1161,22 +1165,19 @@ async function editMealRecord(id) {
     if(value===null)return;
     const cal=Number(value);
     if(!Number.isFinite(cal)||cal<0||cal>10000){callNativeToast("请填写0–10000之间的热量");return;}
-    try{const r=await postApi(`/api/records/food/${id}/update`,{cal});showRecordImpact(r,"已修正");
+    try{const r=await postApi(`/api/records/food/${id}/update`,{cal,expected_revision:item.revision});showRecordImpact(r,"已修正");
         await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);wbRows=null;}
     catch(e){reportWriteFailure(e,"餐食修正");}
 }
 async function deleteMealRecord(id) {
     if(!window.confirm("删除这笔餐食记录？相关统计会重新计算。"))return;
-    try{const r=await postApi(`/api/records/food/${id}/delete`,{});showRecordImpact(r,"已删除");
+    try{const r=await postApi(`/api/records/food/${id}/delete`,{expected_revision:state.mealDiary.find(x=>x.id===id)?.revision});showRecordImpact(r,"已删除");
         await Promise.all([syncRemoteDashboard(), syncRemoteCharts()]);wbRows=null;}
     catch(e){reportWriteFailure(e,"餐食删除");}
 }
 
 // ==========================================
-// 修正/删除之后要说清"影响了哪一天、那天现在算成什么"（B03）。
-// 只弹一句"已删除"等于什么都没交代：用户不知道改的是哪天的账，
-// 也不知道那天的完整日确认已经被作废。
-// ==========================================
+// 修正和删除回执展示受影响日期与汇总。
 function recordImpactText(res, verb) {
     if (!res || !res.affected_date) {
         return { full: verb + "了，但服务端没回影响范围：哪一天的账变了请自己核对，页面数字以刷新后为准。",

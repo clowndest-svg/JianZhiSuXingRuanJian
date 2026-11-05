@@ -48,7 +48,7 @@ function render(){
  <div class="mp-portions" role="group" aria-label="整餐份量调整"><button type="button" data-scale="0.5">减为一半</button><button type="button" data-scale="2">增加一倍</button><span>相对当前重量；数值会同步更新</span></div>
  <div id="mp-rows">${draft.components.map(rowHtml).join('')}</div><button type="button" id="mp-add" ${draft.components.length>=12?'disabled':''}>＋ 添加食材</button>
  <div class="mp-notes"><p><b>健康评分</b> 未评定 · 缺少完整饮食与评估依据</p><p><b>血糖负荷 GL</b> <span id="mp-gl"></span></p><p>GL = GI × 该份可利用碳水 ÷ 100；多食材结果为近似合计，不代表个人血糖反应。<a href="https://glycemicindex.com/2021/11/glycemic-load-and-diabetes/" target="_blank" rel="noopener noreferrer">计算依据</a></p></div>
- <label class="mp-consent"><input type="checkbox" id="mp-confirm" ${draft.confirmed?'checked':''}>我已核对食材、可食部重量及营养估算</label><div class="mp-savebar"><button type="button" id="mp-cancel">暂不保存</button><button type="button" id="mp-save" class="mp-primary" ${!draft.components.length||draft.saving?'disabled':''}>${draft.saving?'保存中…':draft.recordId?'保存食材修正':'确认并记入饮食'}</button></div>`;
+ <label class="mp-consent"><input type="checkbox" id="mp-confirm" ${draft.confirmed?'checked':''}>我已核对食材、可食部重量及营养估算</label>${draft.conflict?'<button type="button" id="mp-reload">重新载入最新记录（舍弃当前修改）</button>':''}<div class="mp-savebar"><button type="button" id="mp-cancel">暂不保存</button><button type="button" id="mp-save" class="mp-primary" ${!draft.components.length||draft.saving||draft.busy||draft.conflict?'disabled':''}>${draft.saving?'保存中…':draft.recordId?'保存食材修正':'确认并记入饮食'}</button></div>`;
  root.querySelector('#mp-camera').onclick=()=>root.querySelector('#mp-camera-file').click();
  root.querySelector('#mp-album').onclick=()=>root.querySelector('#mp-album-file').click();
  for(const id of ['mp-camera-file','mp-album-file'])root.querySelector('#'+id).onchange=ev=>selectFile(ev.target.files[0]);
@@ -57,12 +57,13 @@ function render(){
  root.querySelector('#mp-recognize').onclick=recognize;
  root.querySelector('#mp-cancel').onclick=()=>document.getElementById('account-tools-dialog').close();
  root.querySelector('#mp-save').onclick=save;
+ root.querySelector('#mp-reload')?.addEventListener('click',async()=>{const d=draft,s=sequence;try{const r=await getJson('/api/records/food/'+d.recordId);if(live(d,s))open(r.row);}catch(e){if(live(d,s))note(e.message,true);}});
  root.querySelector('#mp-add').onclick=()=>{if(draft.busy||draft.saving||draft.uncertain)return;collect();draft.components.push(empty());draft.confirmed=false;render();};
  root.querySelectorAll('[data-reference]').forEach(select=>select.onchange=()=>{if(select.value==='')return;collect();const i=Number(select.dataset.reference),ref=references[Number(select.value)];draft.components[i]={...empty(),...ref,grams:draft.components[i].grams};draft.confirmed=false;render();});
  root.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{if(draft.busy||draft.saving||draft.uncertain)return;collect();draft.components.splice(Number(b.dataset.remove),1);draft.confirmed=false;render();});
  root.querySelectorAll('[data-scale]').forEach(b=>b.onclick=()=>{if(draft.busy||draft.saving||draft.uncertain)return;collect();const factor=Number(b.dataset.scale);if(draft.components.some(c=>c.grams*factor>5000||c.grams*factor<=0)||draft.components.reduce((s,c)=>s+c.grams*factor,0)>5000){note('整餐重量需在0到5000g之间',true);return;}draft.components.forEach(c=>c.grams=Math.round(c.grams*factor*10)/10);draft.confirmed=false;render();});
  root.querySelectorAll('[data-field],#mp-name,#mp-slot').forEach(input=>input.oninput=()=>{collect();if(['name','kcal100','protein100','carbs100','fat100'].includes(input.dataset.field)){const i=Number(input.closest('[data-mp-row]').dataset.mpRow);draft.components[i].reference='';}draft.confirmed=false;root.querySelector('#mp-confirm').checked=false;summary();});
- if(draft.busy||draft.saving||draft.uncertain){root.querySelectorAll('[data-field],[data-reference],#mp-name,#mp-slot,#mp-camera,#mp-album,[data-scale],[data-remove],#mp-add,#mp-recognize').forEach(el=>el.disabled=true);}
+ if(draft.busy||draft.saving||draft.uncertain||draft.conflict){root.querySelectorAll('[data-field],[data-reference],#mp-name,#mp-slot,#mp-camera,#mp-album,[data-scale],[data-remove],#mp-add,#mp-recognize').forEach(el=>el.disabled=true);}
  summary();
 }
 function selectFile(file){
@@ -73,9 +74,9 @@ function selectFile(file){
  draft.message='照片仅在本机预览，勾选说明并点击识别后才会上传。';render();
 }
 async function recognize(){
- const d=draft,s=sequence;if(!d||!live(d,s)||d.busy||!d.file)return;
+ const d=draft,s=sequence;if(!d||!live(d,s)||d.busy||d.saving||d.uncertain||d.conflict||!d.file)return;
  collect();if(!d.consent||!['local','external'].includes(d.mode)){note('请等待服务状态读取完成，再阅读并勾选照片处理说明',true);return;}
- d.busy=true;d.message='正在识别，通常需要数十秒；离开后旧结果会被忽略。';render();
+ d.busy=true;d.confirmed=false;d.message='正在识别，通常需要数十秒；离开后旧结果会被忽略。';render();
  const fd=new FormData();fd.append('photo',d.file);fd.append('consent','true');fd.append('mode',d.mode);fd.append('config_revision',d.configRevision||'');
  try{
   const r=await rawPostApi('/api/food/vision/recognize',fd,{timeout:120000,tag:'meal-photo-recognize'});
@@ -86,15 +87,15 @@ async function recognize(){
  finally{if(live(d,s)){d.busy=false;render();}}
 }
 async function save(){
- const d=draft,s=sequence;if(!d||!live(d,s)||d.saving)return;
+ const d=draft,s=sequence;if(!d||!live(d,s)||d.saving||d.busy||d.conflict)return;
  collect();if(!d.confirmed){note('请核对后勾选确认',true);return;}
  const root=document.getElementById('meal-photo-editor');
  const invalid=[...root.querySelectorAll('input[required],input[type=number]')].find(x=>!x.checkValidity());
  if(invalid){invalid.reportValidity();return;}
  if(!d.food_name.trim()||!d.components.length){note('请填写餐名并至少保留一项食材',true);return;}
  const t=totals();if(t.grams>5000||t.cal>10000){note('整餐不能超过5000g或10000kcal，请核对份量',true);return;}
- const body={food_name:d.food_name.trim(),slot:d.slot,components:copy(d.components)};
- if(!d.recordId)Object.assign(body,d.occurrence,{request_id:d.requestId});
+ const body=d.savePayload||{food_name:d.food_name.trim(),slot:d.slot,components:copy(d.components),request_id:d.requestId,...(d.recordId?{expected_revision:d.revision}:d.occurrence)};
+ d.savePayload=body;
  d.saving=true;d.message='正在保存，请稍候…';render();
  try{
   const r=await postApi(d.recordId?'/api/records/food/'+d.recordId+'/update':'/api/food/log',body);
@@ -102,14 +103,14 @@ async function save(){
   if(r.code!==0||!(d.recordId?r.operation==='update':Number.isInteger(r.record_id)||r.duplicate===true))throw Object.assign(new Error('回执不完整，请保留当前内容并重试核对'),{status:0});
   document.getElementById('account-tools-dialog').close();callNativeToast(d.recordId?'食材明细已修正':'这一餐已保存');wbRows=null;
   await Promise.all([syncRemoteDashboard(),syncRemoteCharts(),loadRecentMeals()]);
- }catch(e){if(live(d,s)){d.uncertain=!e.status;d.message=e.message+(d.uncertain?'；已保留内容和重试标识，请点保存重试，避免重复记账':'；请核对食材数据');}}
+ }catch(e){if(live(d,s)){d.uncertain=!e.status||e.status>=500;d.conflict=e.status===409||e.status===404;if(!d.uncertain&&!d.conflict){d.savePayload=null;d.requestId=uuid();}d.message=e.message+(d.uncertain?'；已保留内容和重试标识，请点保存重试，避免重复记账':'；请核对食材数据');}}
  finally{if(live(d,s)){d.saving=false;render();}}
 }
 function open(row){
  if(!state.token){openAuthModal();return;}
  release();let components=[];if(row?.components_json)try{components=JSON.parse(row.components_json);}catch(e){}
  draft={generation:sessionGeneration,food_name:row?.food_name||'',slot:row?.slot||MEAL_SLOT_CN[state.selectedMealSlot]||'餐食',components,
-   requestId:uuid(),recordId:row?.id||0,occurrence:occurrenceNow(),file:null,busy:false,saving:false,consent:false,confirmed:false};
+   requestId:uuid(),recordId:row?.id||0,revision:row?.revision,occurrence:occurrenceNow(),file:null,busy:false,saving:false,consent:false,confirmed:false};
  toolDialog(row?'核对食材明细':'拍照识餐','<div id="meal-photo-editor"></div>');render();
  const d=draft,s=sequence,dialog=document.getElementById('account-tools-dialog');
  if(!references.length)getJson('/api/food/vision/references').then(r=>{if(!Array.isArray(r.items))return;references=r.items;if(live(d,s)){collect();render();}}).catch(()=>{});

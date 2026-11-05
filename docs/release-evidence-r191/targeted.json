@@ -1,0 +1,24 @@
+{
+  "photo_api": 15,
+  "photo_browser": 16,
+  "node_suites": 10,
+  "browser_suites": 12,
+  "first_python_failure": {
+    "suite": "test_chat_media.py",
+    "reason": "local FFmpeg path absent"
+  },
+  "chat_media_rerun": {
+    "tests": 18,
+    "passed": true,
+    "ffmpeg_path_set": true
+  },
+  "migration_tests": 9,
+  "android": {
+    "build": 75,
+    "assembleRelease": true,
+    "lintRelease": true,
+    "signature_v2_v3": true,
+    "assets_match": true
+  },
+  "physical_android": "not connected"
+}

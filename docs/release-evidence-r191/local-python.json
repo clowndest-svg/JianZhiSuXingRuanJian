@@ -1,0 +1,190 @@
+[
+  {
+    "suite": "test_ai_contract.py",
+    "exit": 0,
+    "seconds": 5.61,
+    "skipped": []
+  },
+  {
+    "suite": "test_backup_snapshot.py",
+    "exit": 0,
+    "seconds": 0.2,
+    "skipped": [
+      "4"
+    ]
+  },
+  {
+    "suite": "test_backup_verify.py",
+    "exit": 0,
+    "seconds": 1.03,
+    "skipped": []
+  },
+  {
+    "suite": "test_bubble_themes.py",
+    "exit": 0,
+    "seconds": 3.2,
+    "skipped": []
+  },
+  {
+    "suite": "test_calls.py",
+    "exit": 0,
+    "seconds": 2.55,
+    "skipped": []
+  },
+  {
+    "suite": "test_chat_history.py",
+    "exit": 0,
+    "seconds": 3.55,
+    "skipped": []
+  },
+  {
+    "suite": "test_chat_media.py",
+    "exit": 1,
+    "seconds": 2.64,
+    "skipped": []
+  },
+  {
+    "suite": "test_companion.py",
+    "exit": 0,
+    "seconds": 12.3,
+    "skipped": []
+  },
+  {
+    "suite": "test_consistency.py",
+    "exit": 0,
+    "seconds": 5.42,
+    "skipped": []
+  },
+  {
+    "suite": "test_deploy_pairing.py",
+    "exit": 0,
+    "seconds": 0.33,
+    "skipped": []
+  },
+  {
+    "suite": "test_deployment_failures.py",
+    "exit": 0,
+    "seconds": 1.34,
+    "skipped": []
+  },
+  {
+    "suite": "test_douyin_bridge.py",
+    "exit": 0,
+    "seconds": 1.5,
+    "skipped": []
+  },
+  {
+    "suite": "test_integration.py",
+    "exit": 0,
+    "seconds": 83.77,
+    "skipped": []
+  },
+  {
+    "suite": "test_long_tasks.py",
+    "exit": 0,
+    "seconds": 0.88,
+    "skipped": []
+  },
+  {
+    "suite": "test_meal_photo.py",
+    "exit": 0,
+    "seconds": 4.62,
+    "skipped": []
+  },
+  {
+    "suite": "test_migration_contract.py",
+    "exit": 0,
+    "seconds": 8.53,
+    "skipped": []
+  },
+  {
+    "suite": "test_monitor_alerts.py",
+    "exit": 0,
+    "seconds": 0.34,
+    "skipped": []
+  },
+  {
+    "suite": "test_monitor_failures.py",
+    "exit": 0,
+    "seconds": 0.42,
+    "skipped": []
+  },
+  {
+    "suite": "test_multiprocess.py",
+    "exit": 0,
+    "seconds": 3.34,
+    "skipped": []
+  },
+  {
+    "suite": "test_native_media_contract.py",
+    "exit": 0,
+    "seconds": 4.02,
+    "skipped": []
+  },
+  {
+    "suite": "test_optimization_ai_status.py",
+    "exit": 0,
+    "seconds": 0.26,
+    "skipped": []
+  },
+  {
+    "suite": "test_optimization_data.py",
+    "exit": 0,
+    "seconds": 9.8,
+    "skipped": []
+  },
+  {
+    "suite": "test_optimization_runtime.py",
+    "exit": 0,
+    "seconds": 7.33,
+    "skipped": []
+  },
+  {
+    "suite": "test_optimization_security.py",
+    "exit": 0,
+    "seconds": 49.12,
+    "skipped": []
+  },
+  {
+    "suite": "test_optimization_ux.py",
+    "exit": 0,
+    "seconds": 11.01,
+    "skipped": []
+  },
+  {
+    "suite": "test_optimization_weekly.py",
+    "exit": 0,
+    "seconds": 6.75,
+    "skipped": []
+  },
+  {
+    "suite": "test_r173_contracts.py",
+    "exit": 0,
+    "seconds": 4.05,
+    "skipped": []
+  },
+  {
+    "suite": "test_release_state.py",
+    "exit": 0,
+    "seconds": 0.94,
+    "skipped": []
+  },
+  {
+    "suite": "test_training.py",
+    "exit": 0,
+    "seconds": 4.25,
+    "skipped": []
+  },
+  {
+    "suite": "test_update_copy.py",
+    "exit": 0,
+    "seconds": 1.5,
+    "skipped": []
+  },
+  {
+    "suite": "legacy-backend.py",
+    "exit": 0,
+    "seconds": 20.94,
+    "skipped": []
+  }
+]

@@ -6,7 +6,7 @@ import math
 import uuid
 import logging
 from app_modules.features import share_settings, public_projection, DEFAULT_SCOPE
-from app_modules import mailer, geo, geoip, community, chat, audio, stickers, asr, migrations, media, meal_photo
+from app_modules import mailer, geo, geoip, community, chat, audio, stickers, asr, migrations, media, meal_photo, record_integrity
 import io
 import mimetypes
 import os
@@ -448,6 +448,8 @@ def _migrate_schema(conn):
     c.execute("CREATE TABLE IF NOT EXISTS record_changes (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, kind TEXT NOT NULL, record_id INTEGER NOT NULL, previous_json TEXT NOT NULL, operation TEXT NOT NULL, created_at TEXT NOT NULL)")
     _ensure_columns(c,"food_logs",[("source","TEXT DEFAULT 'legacy_estimate'"),("estimate_reason","TEXT")])
     _ensure_columns(c,"food_logs",[("components_json","TEXT")])
+    c.execute(record_integrity.SCHEMA)
+    c.execute('CREATE INDEX IF NOT EXISTS idx_record_changes_version ON record_changes(user_id,kind,record_id,id)')
     _community_schema(c)
     from app_modules.training import migrate as migrate_training
     migrate_training(c)
@@ -1144,7 +1146,7 @@ class FoodLogReq(OccurrenceReq):
     slot: str
     food_name: str
     cal: Optional[int] = None
-    request_id: Optional[str] = None
+    request_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
     components: Optional[List[meal_photo.Component]] = Field(default=None, min_length=1, max_length=12)
 
 class WeightLogReq(ValidatedModel):
@@ -1881,6 +1883,7 @@ def save_preferences(req: PrefsReq, user: dict = Depends(get_current_user)):
 
 def compute_dashboard_data(user: dict) -> dict:
     conn = get_db()
+    conn.execute('BEGIN')
     c = conn.cursor()
     today = date.today().isoformat()
 
@@ -1910,6 +1913,7 @@ def compute_dashboard_data(user: dict) -> dict:
     # Real today meals list
     c.execute("SELECT * FROM food_logs WHERE user_id = ? AND log_date = ? ORDER BY id DESC", (user["id"], today))
     today_meals = [dict(row) for row in c.fetchall()]
+    for row in today_meals:row['revision']=record_integrity.revision(conn, 'food', row)
 
     # Real latest weight log
     c.execute("SELECT * FROM weight_logs WHERE user_id = ? ORDER BY log_date DESC,id DESC LIMIT 1", (user["id"],))
@@ -2179,71 +2183,80 @@ def log_food(req: FoodLogReq, user: dict = Depends(get_current_user)):
         raise HTTPException(422, '食材明细会重新计算热量，不能同时手填总热量')
     conn = get_db()
     c = conn.cursor()
-    snapshot_metrics(c,user["id"])
-    request_id=getattr(req,"request_id",None)
-    if request_id:
-        c.execute("INSERT OR IGNORE INTO request_receipts VALUES (?,?,?,?)", (user["id"],request_id,"food",datetime.now().isoformat()))
-        if c.rowcount==0:
-            conn.close()
-            return {"code":0,"duplicate":True,"msg":"这笔记录已保存，无需重复提交"}
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        payload = req.model_dump(mode='json')
+        request_id = req.request_id
+        cached = record_integrity.replay(conn, user['id'], request_id, 'food:create', payload)
+        if cached is not None:
+            return cached
+        if request_id:
+            c.execute("INSERT OR IGNORE INTO request_receipts VALUES (?,?,?,?)", (user['id'],request_id,'food',datetime.now().isoformat()))
+            if c.rowcount == 0:
+                return {'code':0,'duplicate':True,'legacy_receipt':True,'msg':'这笔记录已保存，无需重复提交'}
+        snapshot_metrics(c, user['id'])
+        today = day
+        now_time = datetime.now().strftime("%H:%M")
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    today = day
-    now_time = datetime.now().strftime("%H:%M")
-    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        name = req.food_name.strip()
+        est_cal = req.cal
+        protein_g = 0.0
+        carbs_g = 0.0
+        fat_g = 0.0
+        how_parsed = "direct"
+        reason = ""
 
-    name = req.food_name.strip()
-    est_cal = req.cal
-    protein_g = 0.0
-    carbs_g = 0.0
-    fat_g = 0.0
-    how_parsed = "direct"
-    reason = ""
+        if component_totals is not None:
+            est_cal = component_totals['cal']
+            protein_g, carbs_g, fat_g = (component_totals[k] or 0 for k in ('protein_g','carbs_g','fat_g'))
+            how_parsed = 'meal_components' if component_totals['macros_known'] else 'meal_components_partial'
+            reason = '本人核对食材和份量；照片与每100g营养均为估算，非称重测定' if component_totals['macros_known'] else '本人核对食材和份量；部分宏量未知'
+        elif est_cal is not None:
+            protein_g = carbs_g = fat_g = 0.0
+            reason = "手填热量；宏量未知，不按比例倒推"
+        else:
+            parsed = parse_food_nutrition(name)
+            est_cal = parsed["cal"]
+            protein_g = parsed["protein_g"]
+            carbs_g = parsed["carbs_g"]
+            fat_g = parsed["fat_g"]
+            how_parsed = parsed["source"]
+            reason = parsed.get("reason", "")
 
-    if component_totals is not None:
-        est_cal = component_totals['cal']
-        protein_g, carbs_g, fat_g = (component_totals[k] or 0 for k in ('protein_g','carbs_g','fat_g'))
-        how_parsed = 'meal_components' if component_totals['macros_known'] else 'meal_components_partial'
-        reason = '本人核对食材和份量；照片与每100g营养均为估算，非称重测定' if component_totals['macros_known'] else '本人核对食材和份量；部分宏量未知'
-    elif est_cal is not None:
-        protein_g = carbs_g = fat_g = 0.0
-        reason = "手填热量；宏量未知，不按比例倒推"
-    else:
-        parsed = parse_food_nutrition(name)
-        est_cal = parsed["cal"]
-        protein_g = parsed["protein_g"]
-        carbs_g = parsed["carbs_g"]
-        fat_g = parsed["fat_g"]
-        how_parsed = parsed["source"]
-        reason = parsed.get("reason", "")
+        c.execute("""
+        INSERT INTO food_logs (user_id, log_date, slot, food_name, cal, protein_g, carbs_g, fat_g, time_str, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user["id"], today, req.slot, name, est_cal, protein_g, carbs_g, fat_g, now_time, created_at))
+        record_id = c.lastrowid
+        if req.components is not None:
+            c.execute('UPDATE food_logs SET components_json=? WHERE id=?', (json.dumps([x.model_dump() for x in req.components], ensure_ascii=False), record_id))
+        c.execute("UPDATE food_logs SET occurred_at=?,timezone_offset_minutes=? WHERE id=?",
+                  (req.occurred_at.isoformat() if req.occurred_at else None, req.timezone_offset_minutes, record_id))
 
-    c.execute("""
-    INSERT INTO food_logs (user_id, log_date, slot, food_name, cal, protein_g, carbs_g, fat_g, time_str, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (user["id"], today, req.slot, name, est_cal, protein_g, carbs_g, fat_g, now_time, created_at))
-    record_id = c.lastrowid
-    if req.components is not None:
-        c.execute('UPDATE food_logs SET components_json=? WHERE id=?', (json.dumps([x.model_dump() for x in req.components], ensure_ascii=False), record_id))
-    c.execute("UPDATE food_logs SET occurred_at=?,timezone_offset_minutes=? WHERE id=?",
-              (req.occurred_at.isoformat() if req.occurred_at else None, req.timezone_offset_minutes, record_id))
-
-    c.execute("UPDATE food_logs SET source=?,estimate_reason=? WHERE id=?",(how_parsed,reason,record_id))
-    c.execute("DELETE FROM daily_reviews WHERE user_id=? AND log_date=?",(user["id"],today))
-    conn.commit()
-    conn.close()
-
-    source_desc = {"nutrition_kb": "成分表匹配", "nutrition_kb_partial": "成分表部分匹配", "nutrition_heuristic": "关键词粗估", "direct": "你自己填的"}.get(how_parsed, "粗估")
-    return {
-        "code": 0,
-        "msg": f"已成功记入【{req.slot}】：{name} ({est_cal} kcal · {source_desc})",
-        "record_id": record_id,
-        "cal": est_cal,
-        "protein_g": protein_g,
-        "carbs_g": carbs_g,
-        "fat_g": fat_g,
-        "source": how_parsed,
-        "reason": reason
-    }
-
+        c.execute("UPDATE food_logs SET source=?,estimate_reason=? WHERE id=?",(how_parsed,reason,record_id))
+        c.execute("DELETE FROM daily_reviews WHERE user_id=? AND log_date=?",(user["id"],today))
+        source_desc = {"nutrition_kb": "成分表匹配", "nutrition_kb_partial": "成分表部分匹配", "nutrition_heuristic": "关键词粗估", "direct": "你自己填的"}.get(how_parsed, "粗估")
+        result = {
+            "code": 0,
+            "msg": f"已成功记入【{req.slot}】：{name} ({est_cal} kcal · {source_desc})",
+            "record_id": record_id,
+            "cal": est_cal,
+            "protein_g": protein_g,
+            "carbs_g": carbs_g,
+            "fat_g": fat_g,
+            "source": how_parsed,
+            "reason": reason
+        }
+        result['revision'] = record_integrity.revision(conn, 'food', conn.execute('SELECT * FROM food_logs WHERE id=?', (record_id,)).fetchone())
+        record_integrity.remember(conn, user['id'], request_id, 'food:create', payload, result)
+        conn.commit()
+        return result
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 # 「最近常用餐食」的数据源：只从本人历史里长出来，不是全站热门菜。
 # 只读、不写库；带鉴权，参数越界直接报错（与 /api/records 同一口径，读接口不设额外限流）。
@@ -3579,6 +3592,7 @@ def _deficit_rows(c, user_id: int, metrics: dict, days: int) -> list:
 def get_habits(user: dict = Depends(get_current_user)):
     """30 天自律矩阵：前端画 30 格，后端就必须真给 30 天，不能只给 7 天让剩下 23 格永远灰。"""
     conn = get_db()
+    conn.execute('BEGIN')
     c = conn.cursor()
     c.execute("SELECT * FROM profiles WHERE user_id = ?", (user["id"],))
     p = dict(c.fetchone() or {})
@@ -3589,6 +3603,7 @@ def get_habits(user: dict = Depends(get_current_user)):
 
 def compute_charts_data(user: dict) -> dict:
     conn = get_db()
+    conn.execute('BEGIN')
     c = conn.cursor()
 
     c.execute("SELECT * FROM profiles WHERE user_id = ?", (user["id"],))
@@ -4003,7 +4018,12 @@ def health():
     return info
 
 
-class RecordChangeReq(ValidatedModel):
+class RecordDeleteReq(ValidatedModel):
+    request_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    expected_revision: Optional[str] = Field(default=None, min_length=64, max_length=64)
+
+
+class RecordChangeReq(RecordDeleteReq):
     food_name: Optional[str]=None
     slot: Optional[str]=None
     cal: Optional[int]=None
@@ -4042,9 +4062,16 @@ def change_record(kind, record_id, req, user, deleting=False):
     if kind not in tables:raise HTTPException(status_code=400,detail="记录类型无效")
     conn=get_db()
     try:
+        conn.execute('BEGIN IMMEDIATE')
         table=tables[kind]
+        payload = (req or RecordDeleteReq()).model_dump(mode='json')
+        key = req.request_id if req else None
+        scope = kind + ':' + str(record_id) + (':delete' if deleting else ':update')
+        cached = record_integrity.replay(conn, user['id'], key, scope, payload)
+        if cached is not None:return cached
         row=conn.execute(f"SELECT * FROM {table} WHERE id=? AND user_id=?",(record_id,user["id"])).fetchone()
         if not row:raise HTTPException(status_code=404,detail="记录不存在")
+        record_integrity.check_revision(conn, kind, row, req.expected_revision if req else None)
         if kind=="workout" and conn.execute("SELECT 1 FROM training_sessions WHERE user_id=? AND workout_log_id=? AND deleted=0",(user["id"],record_id)).fetchone():
             raise HTTPException(409,"这条记录关联训练手账，请在训练手账中一起修改或删除")
         affected_date=row["log_date"]
@@ -4074,24 +4101,28 @@ def change_record(kind, record_id, req, user, deleting=False):
             latest=conn.execute("SELECT weight_jin FROM weight_logs WHERE user_id=? ORDER BY log_date DESC,id DESC LIMIT 1",(user["id"],)).fetchone()
             if latest:conn.execute("UPDATE profiles SET weight_jin=? WHERE user_id=?",(latest[0],user["id"]))
         conn.execute("DELETE FROM daily_reviews WHERE user_id=? AND log_date=?",(user["id"],row["log_date"]))
-        conn.commit()
         after=_day_totals(conn,user["id"],affected_date)
+        result={"code":0,"msg":"记录已删除" if deleting else "记录已更新",
+                "kind":kind,"record_id":record_id,"operation":"delete" if deleting else "update",
+                "affected_date":affected_date,"affected_label":affected_label,
+                "is_today":affected_date==date.today().isoformat(),"review_reset":True,
+                "day_before":before,"day_after":after}
+        if not deleting:
+            result['revision']=record_integrity.revision(conn, kind, conn.execute(f'SELECT * FROM {table} WHERE id=? AND user_id=?',(record_id,user['id'])).fetchone())
+        record_integrity.remember(conn, user['id'], key, scope, payload, result)
+        conn.commit()
     except Exception:conn.rollback();raise
     finally:conn.close()
-    return {"code":0,"msg":"记录已删除" if deleting else "记录已更新",
-            "kind":kind,"record_id":record_id,"operation":"delete" if deleting else "update",
-            "affected_date":affected_date,"affected_label":affected_label,
-            "is_today":affected_date==date.today().isoformat(),
-            "review_reset":True,
-            "day_before":before,"day_after":after}
+    return result
+
 
 @app.post("/api/records/{kind}/{record_id}/update")
 def update_record(kind:str,record_id:int,req:RecordChangeReq,user:dict=Depends(get_current_user)):
     return change_record(kind,record_id,req,user)
 
 @app.post("/api/records/{kind}/{record_id}/delete")
-def delete_record(kind:str,record_id:int,user:dict=Depends(get_current_user)):
-    return change_record(kind,record_id,None,user,True)
+def delete_record(kind:str,record_id:int,req:Optional[RecordDeleteReq]=None,user:dict=Depends(get_current_user)):
+    return change_record(kind,record_id,req,user,True)
 
 
 @app.get("/api/records/changes")
@@ -4115,6 +4146,23 @@ def record_change_history(offset: int = 0, limit: int = 30,
         if isinstance(r["previous"], dict):
             r["previous"].pop("user_id", None)
     return {"rows": rows, "offset": offset, "limit": limit}
+
+
+@app.get('/api/records/{kind}/{record_id}')
+def record_detail(kind: str, record_id: int, user: dict = Depends(get_current_user)):
+    table = {'food':'food_logs', 'weight':'weight_logs', 'workout':'workout_logs'}.get(kind)
+    if not table:raise HTTPException(400, '记录类型无效')
+    conn = get_db()
+    try:
+        conn.execute('BEGIN')
+        row = conn.execute(f'SELECT * FROM {table} WHERE user_id=? AND id=?', (user['id'],record_id)).fetchone()
+        if row is None:raise HTTPException(404, '记录已删除或不存在')
+        result = dict(row)
+        result['revision'] = record_integrity.revision(conn, kind, row)
+        result.pop('user_id', None)
+        return {'code':0, 'row':result}
+    finally:
+        conn.close()
 
 from app_modules.features import install as install_features
 install_features(app,globals())

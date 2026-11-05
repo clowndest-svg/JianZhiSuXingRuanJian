@@ -1,0 +1,74 @@
+[
+  {
+    "suite": "runtime-ui.mjs",
+    "exit": 0,
+    "seconds": 5.62,
+    "skipped": []
+  },
+  {
+    "suite": "bubble-themes-ui.mjs",
+    "exit": 0,
+    "seconds": 25.06,
+    "skipped": []
+  },
+  {
+    "suite": "chat-ui.mjs",
+    "exit": 0,
+    "seconds": 17.17,
+    "skipped": []
+  },
+  {
+    "suite": "chat-history-ui.mjs",
+    "exit": 0,
+    "seconds": 16.75,
+    "skipped": []
+  },
+  {
+    "suite": "training-ui.mjs",
+    "exit": 0,
+    "seconds": 9.11,
+    "skipped": []
+  },
+  {
+    "suite": "meal-photo-ui.mjs",
+    "exit": 0,
+    "seconds": 6.94,
+    "skipped": []
+  },
+  {
+    "suite": "media-cache-ui.mjs",
+    "exit": 0,
+    "seconds": 7.64,
+    "skipped": []
+  },
+  {
+    "suite": "recovery-ui.mjs",
+    "exit": 0,
+    "seconds": 4.83,
+    "skipped": []
+  },
+  {
+    "suite": "offline-day-ui.mjs",
+    "exit": 0,
+    "seconds": 4.84,
+    "skipped": []
+  },
+  {
+    "suite": "a11y-dialog-contract.mjs",
+    "exit": 0,
+    "seconds": 8.22,
+    "skipped": []
+  },
+  {
+    "suite": "records-profile-permission.mjs",
+    "exit": 0,
+    "seconds": 40.81,
+    "skipped": []
+  },
+  {
+    "suite": "admin-pagination-ui.mjs",
+    "exit": 0,
+    "seconds": 4.77,
+    "skipped": []
+  }
+]

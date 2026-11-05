@@ -1,0 +1,62 @@
+[
+  {
+    "suite": "legacy-frontend.mjs",
+    "exit": 0,
+    "seconds": 1.36,
+    "skipped": []
+  },
+  {
+    "suite": "frontend-integration.mjs",
+    "exit": 0,
+    "seconds": 0.53,
+    "skipped": []
+  },
+  {
+    "suite": "pwa-cache-contract.mjs",
+    "exit": 0,
+    "seconds": 0.67,
+    "skipped": []
+  },
+  {
+    "suite": "frontend-budget.mjs",
+    "exit": 0,
+    "seconds": 0.23,
+    "skipped": []
+  },
+  {
+    "suite": "request-contract.mjs",
+    "exit": 0,
+    "seconds": 0.27,
+    "skipped": []
+  },
+  {
+    "suite": "ai-status-ui.mjs",
+    "exit": 0,
+    "seconds": 0.16,
+    "skipped": []
+  },
+  {
+    "suite": "dm-asr-race.mjs",
+    "exit": 0,
+    "seconds": 0.14,
+    "skipped": []
+  },
+  {
+    "suite": "dm-state-call.mjs",
+    "exit": 0,
+    "seconds": 0.23,
+    "skipped": []
+  },
+  {
+    "suite": "exercise-video.mjs",
+    "exit": 0,
+    "seconds": 0.14,
+    "skipped": []
+  },
+  {
+    "suite": "home-first-screen.mjs",
+    "exit": 0,
+    "seconds": 0.17,
+    "skipped": []
+  }
+]

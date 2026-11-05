@@ -317,4 +317,26 @@ function hanging(h) {
     console.log('PASS: 无效成功回执与真实HTTP错误、204各自处理');
 }
 
+// Later refreshes and committed writes invalidate older read results.
+{
+    const {h,run}=fresh(),pending=[];
+    h.sandbox.__fetchHandler=()=>new Promise(resolve=>pending.push(resolve));
+    run('renderCharts=()=>{};renderHomeToday=()=>{};');
+    const older=run('syncRemoteCharts()'),newer=run('syncRemoteCharts()');
+    pending[1](ok({weight_history:[2],deficit_history:[2],macros_today:{}}));await newer;
+    pending[0](ok({weight_history:[1],deficit_history:[1],macros_today:{}}));await older;
+    assert.equal(JSON.stringify(run('state.weightHistory')),'[2]');
+    console.log('PASS: 迟到图表不能覆盖后发刷新');
+}
+{
+    const {h,run}=fresh();let finish;
+    h.sandbox.__fetchHandler=url=>String(url).includes('/api/food/log')?Promise.resolve(ok({code:0,record_id:1})):new Promise(resolve=>finish=resolve);
+    run('window.applied=0;applyDashboardData=()=>window.applied++;renderHabitMatrix=()=>{};homeMarkSync=()=>{};renderHomeToday=()=>{};loadRecentMeals=()=>{};');
+    const older=run('syncRemoteDashboard()');
+    await run('postApi("/api/food/log",{food_name:"fixture",slot:"午餐",cal:123,request_id:"fixture-write"})');
+    finish(ok({}));await older;
+    assert.equal(run('window.applied'),0);
+    console.log('PASS: 已提交记录使旧首页快照失效');
+}
+
 console.log('PASS: request-contract 全部判据通过');

@@ -103,12 +103,14 @@ logNaturalMeal=async function(){
 /* ---------- 最近常用餐食：只从本人历史长出来（B03） ---------- */
 async function loadRecentMeals(){
     if(!state.token){state.recentMeals=[];renderRecentMeals();return state.recentMeals;}
+    const generation=sessionGeneration,token=state.token;
     try{
         const d=await getJson('/api/food/recent?limit=12',{tag:'recent-meals'});
         state.recentMeals=Array.isArray(d.items)?d.items:[];
         state.recentMealsNote=d.scanned>=300?('只翻了你最近 '+d.scanned+' 笔餐食'):(d.note||'');
     }catch(e){
         // 读不到就明说读不到，绝不拿别人的热门菜或凭印象编一份"你常吃的"
+        if(generation!==sessionGeneration||token!==state.token||e.code==='cancelled')return state.recentMeals;
         state.recentMeals=[];state.recentMealsNote='常用餐食没读到：'+((e&&e.message)||'网络不通');
     }
     renderRecentMeals();
@@ -328,7 +330,7 @@ async function editHistoryRecord(id){
     const label={cal:'餐食热量（kcal，修正后宏量未知）',weight_jin:'体重（斤）',duration_minutes:'训练时长（分钟）'}[field];
     const text=window.prompt(label,String(row[field]));if(text===null)return;
     if(!text.trim()||!Number.isFinite(Number(text))){callNativeToast('请填写数字');return;}
-    const body={[field]:Number(text)};
+    const body={[field]:Number(text),expected_revision:row.revision};
     if(recordKind==='food'){const name=window.prompt('餐食名称',row.food_name);if(name===null)return;if(!name.trim()){callNativeToast('餐食名称不能为空');return;}body.food_name=name.trim();}
     try{const r=await postApi(`/api/records/${recordKind}/${id}/update`,body);showRecordImpact(r,'已修正');
         await syncRemoteDashboard();await syncRemoteCharts();await openRecordManager(recordKind,recordOffset);}
@@ -337,7 +339,7 @@ async function editHistoryRecord(id){
 async function deleteHistoryRecord(id){
     const linked=recordRows.find(x=>x.id===id);if(linked?.training_session_id&&window.QSTraining){QSTraining.edit(linked.training_session_id);return;}
     if(!window.confirm('删除此记录并重新计算统计？'))return;
-    try{const r=await postApi(`/api/records/${recordKind}/${id}/delete`,{});showRecordImpact(r,'已删除');
+    try{const r=await postApi(`/api/records/${recordKind}/${id}/delete`,{expected_revision:linked?.revision});showRecordImpact(r,'已删除');
         await syncRemoteDashboard();await syncRemoteCharts();await openRecordManager(recordKind,recordOffset);}
     catch(e){callNativeToast(e.message);}
 }
@@ -420,7 +422,13 @@ postApi=function(path,body,opts){
     const record=path==='/api/food/log'||path==='/api/workout/complete';
     if(record&&!body.log_date)Object.assign(body,occurrenceNow());
     const owner=state.user?.username;const generation=sessionGeneration;
-    return accountPostApi(path,body,opts).catch(error=>{
+    return accountPostApi(path,body,opts).then(result=>{
+        if(record&&body.request_id&&generation===sessionGeneration&&state.user?.username===owner){
+            const rows=readDrafts(),remaining=rows.filter(x=>x.id!==body.request_id);
+            if(remaining.length!==rows.length)setDrafts(remaining);
+        }
+        return result;
+    }).catch(error=>{
         if(record && owner && generation===sessionGeneration && state.user?.username===owner && !error.status && (error.name==='TypeError'||error.name==='AbortError'||/fetch|network|网络/i.test(error.message))){
             const rows=readDrafts();if(!rows.some(x=>x.id===body.request_id)){rows.push({id:body.request_id,path,body});setDrafts(rows);}
             error.message='已保存在本机待同步草稿；尚未确认云端保存';
