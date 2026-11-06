@@ -68,7 +68,11 @@ def burst(n, fn):
 
 def main():
     (ROOT / '_audit_sandbox').mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=ROOT / '_audit_sandbox') as temp:
+    # Windows 上子进程刚退出时，它那份 server.log 句柄可能还没释放；清理因此抛
+    # PermissionError 会把已经跑完的判据整段吞掉（本轮就这么红过一次：日志里只有栈，
+    # 一条判据结果都没留下）。清理失败不等于产品失败，别的套件也是这个口径。
+    with tempfile.TemporaryDirectory(dir=ROOT / '_audit_sandbox',
+                                     ignore_cleanup_errors=True) as temp:
         env = os.environ.copy()
         for kind in ('DB', 'UPLOAD', 'WEB'):
             env['QINGSU_' + kind + '_DIR'] = temp + '/' + kind

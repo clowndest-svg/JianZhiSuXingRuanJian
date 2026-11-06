@@ -21,7 +21,9 @@ const ASSETS = path.join(ROOT, "app/src/main/assets");
 // 单条重试、重连补拉、通话失败分型）落地，按实测抬高。B08 让 features.js 多了约 7KB，
 // 这是功能本身的大小，不是顺手塞进来的；要再往上抬请先回答"这批字节买到了什么"。
 const BUDGET = {
-  "app.js": { raw: 280_576, gzip: 92_160 },
+  // 2026-11-06 r192：app.js +7 行把首屏两个入口共用一次 /api/habits 请求，
+  // gzip 从 92,160 涨到 92,227 —— 买回来的是首屏少一个接口往返（实测 26→25 个请求）。
+  "app.js": { raw: 282_624, gzip: 93_184 },
   "features.js": { raw: 270_336, gzip: 79_872 },
   "index.html": { raw: 122_880, gzip: 30_720 },
   "style.css": { raw: 88_064, gzip: 20_480 },

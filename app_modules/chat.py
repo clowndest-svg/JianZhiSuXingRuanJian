@@ -66,7 +66,30 @@ def read_ticket(secret, token, now=None):
 
 
 def presence_key(user_id):
+    """聚合在线键：会话列表那排圆点用一次 MGET 读它，所以必须保持"一个用户一个键"。"""
     return "qs:presence:%d" % int(user_id)
+
+
+def presence_worker_key(user_id, worker_id):
+    """带 worker 身份的在线键。
+
+    多进程下每个进程只管自己那一份，别人才删不掉别人的在线状态；
+    它是"这个用户在某个 worker 上真有连接"的唯一依据，比聚合键严格——
+    聚合键连"只取了票没连上来"也算在线，通话门禁不能要这么松。
+    """
+    return "qs:presence:%d@%s" % (int(user_id), str(worker_id)[:32])
+
+
+def call_key(call_id):
+    return "qs:call:%s" % str(call_id)[:64]
+
+
+def call_user_key(user_id):
+    return "qs:calluser:%d" % int(user_id)
+
+
+def worker_registry_key():
+    return "qs:wsworkers"
 
 
 def unread_key(user_id):

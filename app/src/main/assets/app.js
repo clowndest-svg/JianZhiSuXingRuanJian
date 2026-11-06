@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 75;
+const APP_BUILD = 76;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -3055,13 +3055,20 @@ function initWebWorkbench() {
 /** 30 天自律矩阵。三处必须同时成立才是真功能：后端真给 30 天、日期按本地历法算、
     取数失败要在屏上说原因——之前它读的是只有 7 天的 deficitHistory，
     23 个格子永远灰着，而且首屏在任何数据到位之前渲染，进去看就是全灰。 */
+// 首屏有两个入口会要这份矩阵（仪表盘渲染 + 网页工作台初始化），各发一次就浪费一个请求。
+// 只合并"同时在途"的那一次：写记录之后重新渲染仍然会真的重新取数。
+let habitMatrixFlight = null;
+
 async function renderHabitMatrix() {
     if (typeof document === "undefined") return;
     const el = document.getElementById("wb-habit-matrix");
     if (!el) return;
     let bars;
     try {
-        const d = await getJson("/api/habits");
+        if (!habitMatrixFlight) {
+            habitMatrixFlight = getJson("/api/habits").finally(() => { habitMatrixFlight = null; });
+        }
+        const d = await habitMatrixFlight;
         bars = (d && d.days) || [];
     } catch (e) {
         el.innerHTML = "";

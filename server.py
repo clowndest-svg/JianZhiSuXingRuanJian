@@ -1,12 +1,12 @@
 import csv
-from functools import lru_cache
+from functools import lru_cache, partial
 import hmac
 import base64
 import math
 import uuid
 import logging
 from app_modules.features import share_settings, public_projection, DEFAULT_SCOPE
-from app_modules import mailer, geo, geoip, community, chat, audio, stickers, asr, migrations, media, meal_photo, record_integrity
+from app_modules import mailer, geo, geoip, community, chat, audio, stickers, asr, migrations, media, meal_photo, record_integrity, ws_fanout, content_security
 import io
 import mimetypes
 import os
@@ -42,6 +42,10 @@ if migrations.migration_allowed():
     os.makedirs(WEB_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(DB_DIR, "qingsu.db")
+# 内联处理器要在真要下发的那份 HTML 里数：生产是 WEB_DIR，开发机退回仓库 assets。
+CSP_SCAN_DIRS = [WEB_DIR, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "app", "src", "main", "assets")]
+
 SITE_BASE = os.environ.get("QINGSU_SITE_BASE", "https://124.220.54.64").rstrip("/")
 
 app = FastAPI(title="轻塑·减脂塑形严管伴侣 API", version="5.0.0")
@@ -62,6 +66,10 @@ async def response_policy(request: Request, call_next):
     response.headers["X-Content-Type-Options"]="nosniff"
     response.headers["Referrer-Policy"]="no-referrer"
     response.headers["X-Frame-Options"]="DENY"
+    # C11：默认只发 Report-Only。开关拨到转正也要先过实测门槛（内联处理器清零 +
+    # 窗口内没有被拦的违规），门槛没过就照旧报告——宁可晚一步收紧，不把界面拦白。
+    content_security.apply(response.headers, directories=CSP_SCAN_DIRS,
+                               base=SITE_BASE)
     if request.url.path.startswith(("/api/", "/u/")) or (request.url.path.startswith("/uploads/") and "cache-control" not in response.headers):
         response.headers["Cache-Control"]="private, no-store"
     route = getattr(request.scope.get('route'), 'path', '/unmatched')
@@ -799,13 +807,30 @@ def _consume_email_code(conn, email, purpose, code):
 def _revoke_sessions(conn, user_id, keep_hash=None):
     """撤销会话。改密后旧设备必须掉线，否则"改了密码"不等于"别人进不来"。"""
     c = conn.cursor()
+    doomed = [str(row[0]) for row in c.execute(
+        "SELECT token_hash FROM sessions WHERE user_id=?", (user_id,)).fetchall()]
     if keep_hash:
+        doomed = [h for h in doomed if h != keep_hash]
         n = c.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?",
                       (user_id, keep_hash)).rowcount
     else:
         n = c.execute("DELETE FROM sessions WHERE user_id=?", (user_id,)).rowcount
     conn.commit()
+    _announce_revoked(user_id, doomed)
     return n
+
+
+def _announce_revoked(user_id, token_hashes):
+    """会话已经从库里删掉了——把"这些连接该关"告诉本进程和其它 worker，
+    而不是等对方下一次发消息才发现自己被撤销了。
+
+    按会话哈希逐个通知，不用账号级广播：多设备登录时退出其中一台不该踢掉其它台。
+    """
+    for item in token_hashes:
+        _fanout_control({"k": "ctl", "op": "kick", "uid": int(user_id),
+                         "session": item, "code": 4401, "from": ws_fanout.WORKER_ID})
+        ws_fanout.publish_control("kick", uid=int(user_id), session=item, code=4401)
+
 
 
 def _remember_city(conn, user_id, city):
@@ -2853,6 +2878,22 @@ def redis_up():
     return bool(ok and v in (True, "PONG"))
 
 
+# C07：跨进程投递层共用这一条 Redis 出口。用闭包而不是直接传函数，是因为测试（以及
+# 任何一次打桩）改的是模块全局 _redis_cmd，绑死引用会让降级判定停在打桩前的真值上。
+ws_fanout.bind(redis_cmd=lambda args: _redis_cmd(args))
+
+
+async def await_db(work, *args, **kwargs):
+    """把同步 SQLite / 同步 Redis 挪出事件循环（C07 第一步）。
+
+    uvicorn --workers 之后事件循环是全进程共享的稀缺资源：循环里跑一次同步查询，
+    这条 worker 上所有 WS 连接和请求一起等。get_db() 本来就带 check_same_thread=False，
+    放线程池没有任何额外代价。
+    """
+    import anyio
+    return await anyio.to_thread.run_sync(partial(work, *args, **kwargs))
+
+
 _mem_buckets = {}   # Redis 不可用时的进程内兜底
 
 
@@ -3805,6 +3846,9 @@ def logout(user: dict = Depends(get_current_user)):
     try:
         conn.execute("DELETE FROM sessions WHERE token_hash=?",(user["_session_hash"],));conn.commit()
     finally: conn.close()
+    # 会话已经不在了，连着的实时连接要当场知道——等对方下一次按键才发现，
+    # 等于给拿着旧令牌的人留了一段可用的私信通道。
+    _announce_revoked(user["id"], [user["_session_hash"]])
     return {"code":0}
 
 _KEYS_REGENERATED = set()
@@ -3975,6 +4019,20 @@ def release_identity():
             continue
     return {"release": "unknown", "source_revision": "unknown"}
 
+@app.post("/csp-report", status_code=204)
+async def csp_violation_report(request: Request):
+    """浏览器回报的 CSP 违规只留聚合，不留原文。
+
+    violated-uri 可能是用户输入的 URL，带查询串也可能带令牌；截断 + 只取 directive
+    和是否拦截，够回答"能不能转正"，也够不上变成第二个日志泄漏面。
+    """
+    try:
+        body = await request.body()
+    except Exception:
+        return Response(status_code=204)
+    content_security.record(body[:8192])
+    return Response(status_code=204)
+
 @app.get("/health/live")
 def liveness():
     return {"status":"ok"}
@@ -4009,6 +4067,14 @@ def health():
                     "rejected": int(_ws_stats["rejected"]), "redis": bool(redis_up()),
                     "turn": bool(turn_secret()), "calls": len(_CALLS),
                     "asr": asr.enabled()}
+    # C07：投递到底是跨进程的还是只在本进程，必须在这里看得见。
+    # local-only 不是"坏了"，是"加 workers 之前先承认它只服务一个进程"——
+    # 静默降级比明确降级危险得多（消息只在本进程投、界面上却还显示对方在线）。
+    info["chat"].update(ws_fanout.status())
+    # C11：CSP 现在到底发哪一种头、为什么还没转正，必须在这里看得见，
+    # 不能只存在于一个没人去查的环境变量里。
+    info["csp"] = content_security.state(CSP_SCAN_DIRS, base=SITE_BASE)
+    info["chat"]["auth_sweep_sec"] = WS_AUTH_SWEEP_SECONDS
     # 限流计数存在哪，必须一眼看得见：Redis 在就是全局一份（多进程也准），
     # 退回进程内内存时每个进程各算一份——将来加 --workers 时这条会悄悄放宽 N 倍。
     info["rate"] = {"store": "redis" if redis_up() else "memory",
@@ -4249,11 +4315,15 @@ _ticket_used_mem = {}
 
 
 def _presence_touch(uid):
-    """在线状态放 Redis（45 秒 TTL，进程重启也不谎报）；Redis 没了退回进程内表。"""
+    """在线状态放 Redis（45 秒 TTL，进程重启也不谎报）；Redis 没了退回进程内表。
+
+    聚合键给会话列表用（一次 MGET 读一排圆点），带 worker 身份的那份给通话门禁和
+    投递路由用——前者连"只取了票没连上来"也算在线，后者必须是"真有连接"。
+    """
     now = time.time()
-    ok, _ = _redis_cmd(["SETEX", chat.presence_key(uid), "45", "1"])
-    if not ok:
-        _presence_mem[int(uid)] = now
+    if ws_fanout.presence_touch(int(uid)):
+        return
+    _presence_mem[int(uid)] = now
 
 
 def _presence_online(uid):
@@ -4261,6 +4331,19 @@ def _presence_online(uid):
     if ok:
         return bool(v)
     return now_ish() - _presence_mem.get(int(uid), 0) < 45
+
+
+def _ws_connected(uid):
+    """把"他在任何一个 worker 上有没有连接"当成全局问题回答。
+
+    Redis 答话时以带 worker 身份的在线表为准；答不上来才退回本进程的 _WS_HUB，
+    那条退路等价于单 worker 时代的判定，不是"假装所有人都在线"。
+    """
+    state = ws_fanout.connected(int(uid))
+    if state is not None:
+        return state
+    return bool(_WS_HUB.get(int(uid)))
+
 
 
 def now_ish():
@@ -5392,7 +5475,16 @@ def _message_dict(row):
 
 
 def _push(uid, payload):
-    """尽力投递：连接断了不算失败，消息已经在库里，对方下次拉历史一定拿得到。"""
+    """尽力投递：连接断了不算失败，消息已经在库里，对方下次拉历史一定拿得到。
+
+    本地先投一份，再经跨进程通道转发给其它 worker；订阅端只对"别的进程发来的"消息
+    回调 _push_local，所以同一条连接不会收到两次。
+    """
+    _push_local(uid, payload)
+    ws_fanout.publish(uid, payload)
+
+
+def _push_local(uid, payload):
     for sock in list(_WS_HUB.get(int(uid), ())):
         try:
             # HTTP handlers run in AnyIO worker threads. Queue on the socket's
@@ -5402,6 +5494,7 @@ def _push(uid, payload):
                 loop.call_soon_threadsafe(_queue_push, sock, payload)
         except RuntimeError:
             pass
+
 
 
 def _queue_push(sock, payload):
@@ -5892,10 +5985,45 @@ def chat_recall(req: RecallReq, user: dict = Depends(get_current_user)):
 
 _WS_HUB = {}
 _WS_LOOPS = {}
+_WS_KILL = {}        # socket → 该连接的事件循环上的"当场下线"标记
 _ws_stats = {"peaks": 0, "rejected": 0, "handed_off": 0}
 
 _CALLS = {}
 _CALL_BY_USER = {}
+
+# 空闲连接也要重新问一次库（封号/撤销会话是写在库里的），这条就是问的频率。
+# 默认 15 秒 = 改动前的读超时，单 worker 部署的节奏一点没变；调小只是为了让
+# 跨进程的统一撤销在测试里能在几秒内被观察到。
+WS_AUTH_SWEEP_SECONDS = max(1.0, float(os.environ.get("QINGSU_WS_AUTH_SWEEP_SEC") or 15))
+
+
+def _remember_loop(loop):
+    """记下本进程活着的事件循环：跨进程控制帧要回到循环线程才能动通话任务句柄。"""
+    if loop not in _LOOP_POOL:
+        _LOOP_POOL.append(loop)
+    _LOOP_POOL[:] = [x for x in _LOOP_POOL if not x.is_closed()][-8:]
+
+
+_LOOP_POOL = []
+
+
+def _on_loop(work, *args, **kwargs):
+    """把一件事挪到某个还在跑的事件循环上做。
+
+    HTTP handler 和 Redis 订阅线程都不在循环线程里，而通话的响铃计时任务只存在于创建它
+    的那条循环上——task.cancel() 不是线程安全的，必须回到那条循环去。
+    本进程一条循环都没有时原地执行：那时也没有任何任务需要取消。
+    """
+    for loop in tuple(_LOOP_POOL):
+        try:
+            if loop.is_closed():
+                continue
+            loop.call_soon_threadsafe(partial(work, *args, **kwargs))
+            return True
+        except RuntimeError:
+            continue
+    work(*args, **kwargs)
+    return False
 
 
 def _call_peer(uid):
@@ -5910,39 +6038,126 @@ def _call_peer(uid):
     return {"id": int(uid), "name": name[:40] or ("用户%d" % int(uid))}
 
 
-def _call_cleanup(call_id, *, event=None, targets=(), reason=""):
-    call = _CALLS.pop(call_id, None)
-    if not call:
+def _call_peers(a, b):
+    """两个用户的展示名一次线程跳转取完：信令路径上每次 await 都在排队，别把手伸两次。"""
+    return _call_peer(a), _call_peer(b)
+
+
+def _cancel_call_task(call):
+    """响铃计时任务只能在它所属的循环上取消。"""
+    task = (call or {}).get("task")
+    if not task or task.done():
         return
-    _CALL_BY_USER.pop(call.get("from"), None)
-    _CALL_BY_USER.pop(call.get("to"), None)
-    task = call.get("task")
     try:
-        current = asyncio.current_task()
+        if asyncio.current_task() is task:
+            return
     except RuntimeError:
-        current = None
-    if task and task is not current and not task.done():
+        pass
+    loop = (call or {}).get("loop")
+    if loop is not None and not loop.is_closed():
+        try:
+            loop.call_soon_threadsafe(task.cancel)
+            return
+        except RuntimeError:
+            pass
+    try:
         task.cancel()
+    except RuntimeError:
+        pass
+
+
+def _call_mirror(call_id, record):
+    """本地镜像：Redis 那份是全局权威，这一份负责拿到任务句柄和"Redis 没答话"时的全部行为。"""
+    _CALLS[call_id] = record
+    for side in (record.get("from"), record.get("to")):
+        if side is not None:
+            _CALL_BY_USER[int(side)] = call_id
+
+
+def _call_record(call_id):
+    """返回 (记录, 是否走了全局表)。记录为假值就是这通电话不存在。"""
+    remote = ws_fanout.call_get(call_id)
+    if remote is not None:
+        if not remote:
+            return None, True
+        local = _CALLS.get(call_id) or {}
+        record = dict(remote)
+        for key in ("task", "loop"):
+            if key in local:
+                record[key] = local[key]
+        return record, True
+    return _CALLS.get(call_id), False
+
+
+def _call_id_of(uid):
+    owner = ws_fanout.call_owner(int(uid))
+    if owner is not None:
+        return owner or None
+    return _CALL_BY_USER.get(int(uid))
+
+
+def _call_reserve(call_id, a, b, record):
+    """一笔画两个忙线位。True 抢到，False 有人正在通话，None 是 Redis 没答话走本地表。"""
+    got = ws_fanout.call_reserve(call_id, a, b, record)
+    if got is not None:
+        if not got:
+            # 忙线位可能属于一个已经崩掉的 worker：先回收残骸再试一次，
+            # 不能让一次进程事故把两个人永久锁成"正在通话"。
+            if ws_fanout.gc_user(a) or ws_fanout.gc_user(b):
+                got = ws_fanout.call_reserve(call_id, a, b, record)
+        return bool(got)
+    if a in _CALL_BY_USER or b in _CALL_BY_USER:
+        return False
+    return True
+
+
+def _call_update(call_id, changes):
+    """通话状态变更：写全局表 + 同步本地镜像。False 表示这通电话已经不在了。"""
+    merged = dict(_CALLS.get(call_id) or {})
+    merged.update(changes)
+    merged["ttl"] = (ws_fanout.CALL_TTL_ACTIVE if merged.get("state") == "active"
+                     else ws_fanout.CALL_TTL_RING)
+    stored = {k: v for k, v in merged.items() if k not in ("task", "loop")}
+    got = ws_fanout.call_write(call_id, stored)
+    if got is False:
+        return None
+    merged["worker"] = merged.get("worker") or ws_fanout.WORKER_ID
+    _call_mirror(call_id, merged)
+    ws_fanout.publish_control("call_sync", call_id=call_id, record=stored)
+    return merged
+
+
+def _call_cleanup(call_id, *, event=None, targets=(), reason=""):
+    """结束一通电话：全局表、本地镜像、双方事件、其它进程的镜像都要清干净，
+    绝不能留下解不开的忙线。"""
+    remote = ws_fanout.call_get(call_id)
+    call = _CALLS.get(call_id)
+    record = remote or call
+    if not record and remote is None:
+        return
+    record = record or {}
+    if remote is not None:
+        ws_fanout.call_drop(call_id, record.get("from"), record.get("to"))
+    if call:
+        _CALLS.pop(call_id, None)
+    for side in (record.get("from"), record.get("to")):
+        if side is not None and _CALL_BY_USER.get(int(side)) == call_id:
+            _CALL_BY_USER.pop(int(side), None)
+    _cancel_call_task(call)
     if event:
         for uid in targets:
             _push(int(uid), {"t": event, "call_id": call_id, "reason": reason})
+    ws_fanout.publish_control("call_drop", call_id=call_id)
 
 
 def _end_call_between(a, b):
-    """Follow HTTP handlers run in a worker thread; mutate call tasks on their WS loop."""
-    call_id = _CALL_BY_USER.get(a)
-    call = _CALLS.get(call_id)
-    if not call or {call["from"], call["to"]} != {a, b}:
+    """Follow HTTP handlers run in a worker thread; _call_cleanup 已经线程安全了，
+    任务取消会自己回到所属的循环上。"""
+    call_id = _call_id_of(a)
+    record, _global = _call_record(call_id) if call_id else (None, False)
+    if not record or {record.get("from"), record.get("to")} != {a, b}:
         return
-    def finish():
-        _call_cleanup(call_id, event="call_end", targets=(a, b), reason="互相关注后才能语音通话")
-    for uid in (a, b):
-        for socket in tuple(_WS_HUB.get(uid, ())):
-            loop = _WS_LOOPS.get(socket)
-            if loop and not loop.is_closed():
-                loop.call_soon_threadsafe(finish)
-                return
-    finish()
+    _call_cleanup(call_id, event="call_end", targets=(a, b), reason="互相关注后才能语音通话")
 
 
 def _call_permission(a, b):
@@ -5962,9 +6177,8 @@ async def _call_timeout(call_id):
     call = _CALLS.get(call_id)
     if not call or call.get("state") != "ringing":
         return
-    for uid in (call["from"], call["to"]):
-        _push(uid, {"t": "call_timeout", "call_id": call_id, "reason": "对方没有接听"})
-    _call_cleanup(call_id)
+    await await_db(_call_cleanup, call_id, event="call_timeout",
+                   targets=(call["from"], call["to"]), reason="对方没有接听")
 
 
 def _call_sdp(value):
@@ -5993,13 +6207,14 @@ def _call_candidate(value):
     return result
 
 
-def _call_participant(call_id, uid):
+async def _call_participant(call_id, uid):
     if not isinstance(call_id, str) or not re.fullmatch(r"c[A-Za-z0-9_-]{8,40}", call_id):
         raise ValueError("通话编号不正确")
-    call = _CALLS.get(call_id)
-    if not call or uid not in (call["from"], call["to"]):
+    call, _global = await await_db(_call_record, call_id)
+    if not call or uid not in (call.get("from"), call.get("to")):
         raise ValueError("通话不在了")
     return call
+
 
 
 async def _handle_call(ws, uid, kind, data):
@@ -6007,7 +6222,7 @@ async def _handle_call(ws, uid, kind, data):
         await ws.send_json({"t": "call_error", "detail": "通话信令太大"})
         return
     if kind == "call_invite":
-        ok, _where, _count = rate_hit("call:%d" % uid, CALL_RATE_LIMIT, 60)
+        ok, _where, _count = await await_db(rate_hit, "call:%d" % uid, CALL_RATE_LIMIT, 60)
         if not ok:
             await ws.send_json({"t": "call_error", "detail": "呼叫太频繁了，稍后再试"})
             return
@@ -6018,79 +6233,198 @@ async def _handle_call(ws, uid, kind, data):
         sdp = _call_sdp(data.get("sdp"))
         if sdp["type"] != "offer":
             raise ValueError("呼叫描述不正确")
-        me, peer = _call_peer(uid), _call_peer(to)
+        me, peer = await await_db(_call_peers, uid, to)
         if not me or not peer:
             await ws.send_json({"t": "call_error", "detail": "找不到这个用户"})
             return
-        denied = _call_permission(uid, to)
+        denied = await await_db(_call_permission, uid, to)
         if denied:
             await ws.send_json({"t": "call_error", "detail": denied})
             return
-        if uid in _CALL_BY_USER or to in _CALL_BY_USER:
+        call_id = "c" + secrets.token_urlsafe(9)
+        record = {"from": uid, "to": to, "state": "ringing", "created": time.time(),
+                  "worker": ws_fanout.WORKER_ID}
+        if not await await_db(_call_reserve, call_id, uid, to, record):
             await ws.send_json({"t": "call_busy", "detail": "你或对方正在另一通电话里"})
             return
-        if not _WS_HUB.get(to):
+        # 忙线位先占住，再问"对方在任何一个 worker 上有没有连接"——问完不合格就退回去，
+        # 顺序反了的话两个进程会同时以为自己是主叫。
+        if not await await_db(_ws_connected, to):
+            await await_db(_call_cleanup, call_id)
             await ws.send_json({"t": "call_unavailable",
                                 "detail": "对方不在线，语音通话需要双方都在 App 内"})
             return
-        call_id = "c" + secrets.token_urlsafe(9)
         task = asyncio.create_task(_call_timeout(call_id))
-        _CALLS[call_id] = {"from": uid, "to": to, "state": "ringing",
-                           "created": time.time(), "task": task}
-        _CALL_BY_USER[uid] = call_id
-        _CALL_BY_USER[to] = call_id
+        record["task"] = task
+        record["loop"] = asyncio.get_running_loop()
+        _call_mirror(call_id, record)
         await ws.send_json({"t": "call_ringing", "call_id": call_id, "peer": peer,
                             "expires": int(time.time()) + CALL_RING_SECONDS})
         _push(to, {"t": "call_invite", "call_id": call_id, "from": me, "sdp": sdp})
         return
     call_id = data.get("call_id")
     if kind in ("call_accept", "call_ice"):
-        call = _call_participant(call_id, uid)
-        denied = _call_permission(call["from"], call["to"])
+        call = await _call_participant(call_id, uid)
+        denied = await await_db(_call_permission, call["from"], call["to"])
         if denied:
-            _call_cleanup(call_id, event="call_end", targets=(call["from"], call["to"]), reason=denied)
+            await await_db(_call_cleanup, call_id, event="call_end",
+                           targets=(call["from"], call["to"]), reason=denied)
             return
     if kind == "call_accept":
-        call = _call_participant(call_id, uid)
+        call = await _call_participant(call_id, uid)
         if call["to"] != uid or call["state"] != "ringing":
             raise ValueError("这通电话已经不能接听")
         sdp = _call_sdp(data.get("sdp"))
         if sdp["type"] != "answer":
             raise ValueError("接听描述不正确")
-        task = call.get("task")
-        if task and not task.done():
-            task.cancel()
-        call["state"] = "active"
-        call["accepted_at"] = time.time()
+        _cancel_call_task(call)
+        updated = await await_db(_call_update, call_id,
+                                 {"state": "active", "accepted_at": time.time()})
+        if updated is None:
+            raise ValueError("这通电话已经不能接听")
+        peer_me, peer_other = await await_db(_call_peers, uid, call["from"])
         _push(call["from"], {"t": "call_accept", "call_id": call_id,
-                             "from": _call_peer(uid), "sdp": sdp})
+                             "from": peer_me, "sdp": sdp})
         await ws.send_json({"t": "call_active", "call_id": call_id,
-                            "peer": _call_peer(call["from"])})
+                            "peer": peer_other})
         return
     if kind == "call_ice":
-        call = _call_participant(call_id, uid)
+        call = await _call_participant(call_id, uid)
         other = call["to"] if call["from"] == uid else call["from"]
+        await await_db(ws_fanout.call_ttl, call_id, ws_fanout.CALL_TTL_ACTIVE)
         _push(other, {"t": "call_ice", "call_id": call_id,
                       "candidate": _call_candidate(data.get("candidate"))})
         return
     if kind == "call_reject":
-        call = _call_participant(call_id, uid)
+        call = await _call_participant(call_id, uid)
         if call["to"] != uid:
             raise ValueError("只有接听方可以拒绝")
-        _call_cleanup(call_id, event="call_reject", targets=(call["from"],), reason="对方拒绝了")
+        await await_db(_call_cleanup, call_id, event="call_reject",
+                       targets=(call["from"],), reason="对方拒绝了")
         return
     if kind == "call_cancel":
-        call = _call_participant(call_id, uid)
+        call = await _call_participant(call_id, uid)
         if call["from"] != uid:
             raise ValueError("只有呼叫方可以取消")
-        _call_cleanup(call_id, event="call_cancel", targets=(call["to"],), reason="对方取消了")
+        await await_db(_call_cleanup, call_id, event="call_cancel",
+                       targets=(call["to"],), reason="对方取消了")
         return
     if kind == "call_end":
-        call = _call_participant(call_id, uid)
+        call = await _call_participant(call_id, uid)
         other = call["to"] if call["from"] == uid else call["from"]
-        _call_cleanup(call_id, event="call_end", targets=(other,), reason="对方已挂断")
+        await await_db(_call_cleanup, call_id, event="call_end",
+                       targets=(other,), reason="对方已挂断")
         return
     await ws.send_json({"t": "call_error", "detail": "不认识的通话消息"})
+
+
+_WS_SESSION = {}      # socket → 这条连接绑的会话哈希（撤销单条会话时不能误踢其它设备）
+
+
+class _Kill:
+    """"这条连接要当场下线"的标记：事件 + 关闭码。
+
+    只设标记、由连接协程自己走关闭流程——直接 await close 的话，那条协程还卡在
+    receive 上，要等到空闲检查到期才动得了。
+    """
+    __slots__ = ("event", "code")
+
+    def __init__(self):
+        self.event = asyncio.Event()
+        self.code = 4401
+
+    def trigger(self, code=4401):
+        self.code = int(code) or 4401
+        self.event.set()
+
+    def is_set(self):
+        return self.event.is_set()
+
+    async def wait(self):
+        await self.event.wait()
+
+
+def _socket_state(row):
+    """把"会话存在性 + 封号"那一次查询的结果翻译成分支码。
+
+    封号和撤销要分开，因为关闭码不同（4403 / 4401），客户端得据此说不同的话；
+    而且封号覆盖这个账号的所有会话，撤销只覆盖被删掉的那一条。
+    """
+    if row is None:
+        return "gone"
+    return "banned" if row["banned_at"] else ""
+
+
+def _deliver_frame(sender, to_id, body, request_id, quote_id):
+    """WS 收消息那一条路的落库：连接在哪个线程都要开自己的 SQLite 连接。"""
+    conn = get_db()
+    try:
+        return _deliver(conn, sender, to_id, body, request_id, quote_id=quote_id)
+    finally:
+        conn.close()
+
+
+def _kick_local(uid, code=4401, session_hash=None):
+    """关掉这个用户在**本进程**的连接。
+
+    session_hash 给了就只踢那一条会话——同一账号多设备在线时，
+    退出其中一台不能把另一台也踢下线。
+    """
+    hit = 0
+    for sock in tuple(_WS_HUB.get(int(uid), ())):
+        if session_hash is not None and _WS_SESSION.get(sock) != session_hash:
+            continue
+        hit += 1
+        marker = _WS_KILL.get(sock)
+        if marker is not None and not marker.is_set():
+            marker.trigger(code)
+    return hit
+
+
+def _fanout_control(envelope):
+    """别的进程发来的控制帧。必须回到事件循环线程上处理：通话任务句柄和下线标记都归循环管。"""
+    _on_loop(_apply_control, envelope)
+
+
+def _apply_control(envelope):
+    op = str(envelope.get("op") or "")
+    call_id = str(envelope.get("call_id") or "")
+    if op in ("call_sync", "call_drop") and call_id:
+        if op == "call_drop":
+            call = _CALLS.pop(call_id, None)
+            if call:
+                for side in (call.get("from"), call.get("to")):
+                    if side is not None and _CALL_BY_USER.get(int(side)) == call_id:
+                        _CALL_BY_USER.pop(int(side), None)
+                _cancel_call_task(call)
+            return
+        stored = dict(envelope.get("record") or {})
+        if not stored:
+            return
+        call = _CALLS.get(call_id) or {}
+        stored.setdefault("task", call.get("task"))
+        stored.setdefault("loop", call.get("loop"))
+        if stored.get("state") != "ringing":
+            _cancel_call_task(stored)   # 响铃计时归创建它的进程管，别的进程只能喊它停
+        _call_mirror(call_id, stored)
+        return
+    if op == "kick":
+        try:
+            uid = int(envelope.get("uid") or 0)
+        except (TypeError, ValueError):
+            return
+        if uid:
+            if _kick_local(uid, int(envelope.get("code") or 4401), envelope.get("session") or None):
+                _ws_stats["handed_off"] += 1
+
+
+ws_fanout.bind(deliver=_push_local, control=_fanout_control)
+
+
+def _conn_online(uid):
+    """连接活着：带 worker 身份的那份和会话列表读的聚合键一起刷新。"""
+    ws_fanout.conn_touch(int(uid))
+    _presence_touch(int(uid))
 
 
 @app.websocket("/ws/chat")
@@ -6103,67 +6437,87 @@ async def chat_socket(ws: WebSocket, ticket: str = ""):
         await ws.close(code=4401)
         return
     uid = int(payload["u"])
-    conn = get_db()
-    try:
-        # 票据是 30 秒一次性，HTTP 侧发票时已经过封号判定，但"先拿到票、随后被封"这
-        # 30 秒内还能连上来；这里顺手在同一次查询里把封号一起看了，不多跑一次 DB。
-        alive = conn.execute("SELECT u.banned_at FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.id=? AND s.token_hash=? AND s.expires_at>?", (uid, payload.get("s", ""), int(time.time()))).fetchone()
-    finally:
-        conn.close()
-    if not alive or alive["banned_at"]:
+    session_hash = payload.get("s", "")
+
+    def authorized():
+        """这条连接以库为准还有效吗。查询写在这条协程里、执行放在线程池里：
+        封号和撤销只落在库里，实时连接必须自己回去问，不能只信握手时那张票。"""
+        conn = get_db()
+        try:
+            # 票据是 30 秒一次性，HTTP 侧发票时已经过封号判定，但"先拿到票、随后被封"这
+            # 30 秒内还能连上来；这里顺手在同一次查询里把封号一起看了，不多跑一次 DB。
+            row = conn.execute("SELECT u.banned_at FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.id=? AND s.token_hash=? AND s.expires_at>?", (uid, session_hash, int(time.time()))).fetchone()
+        finally:
+            conn.close()
+        return _socket_state(row)
+
+    state = await await_db(authorized)
+    if state:
         _ws_stats["rejected"] += 1
-        await ws.close(code=4403 if (alive and alive["banned_at"]) else 4401)
+        await ws.close(code=4403 if state == "banned" else 4401)
         return
     await ws.accept()
     _WS_HUB.setdefault(uid, []).append(ws)
     _WS_LOOPS[ws] = asyncio.get_running_loop()
+    _WS_SESSION[ws] = session_hash
+    kill = _Kill()
+    _WS_KILL[ws] = kill
+    _remember_loop(_WS_LOOPS[ws])
     _ws_stats["peaks"] = max(_ws_stats["peaks"], sum(len(v) for v in _WS_HUB.values()))
-    _presence_touch(uid)
+    await await_db(_conn_online, uid)
     await ws.send_json({"t": "ready", "server_time": int(time.time()), "online": _ws_stats["peaks"]})
     try:
         while True:
-            try:
-                data = await asyncio.wait_for(ws.receive_json(), timeout=15)
-            except asyncio.TimeoutError:
-                data = {"t": "ping"}
-            conn = get_db()
-            try:
-                authorized = conn.execute("SELECT u.banned_at FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.id=? AND s.token_hash=? AND s.expires_at>?", (uid, payload.get("s", ""), int(time.time()))).fetchone()
-            finally:
-                conn.close()
-            if not authorized or authorized["banned_at"]:
-                await ws.close(code=4403 if authorized else 4401)
+            # 读消息和"被别人要求下线"两件事一起等：统一撤销要能当场生效，
+            # 不能等客户端下一次按键或空闲检查到期。
+            reader = asyncio.ensure_future(ws.receive_json())
+            waiter = asyncio.ensure_future(kill.wait())
+            done, pending = await asyncio.wait((reader, waiter), timeout=WS_AUTH_SWEEP_SECONDS,
+                                               return_when=asyncio.FIRST_COMPLETED)
+            kicked = waiter in done
+            for task in pending:
+                task.cancel()
+            if reader in done:
+                data = reader.result()
+            elif kicked:
+                await ws.close(code=kill.code)
+                break
+            else:
+                data = {"t": "ping"}      # 空闲到期：和改动前一样，自己发一次心跳
+            state = await await_db(authorized)
+            if state:
+                # 谁先看见谁负责广播：另一个 worker 上同一账号的连接不用等自己的空闲检查
+                ws_fanout.publish_control("kick", uid=uid, code=4403 if state == "banned" else 4401,
+                                          session="" if state == "banned" else session_hash)
+                await ws.close(code=4403 if state == "banned" else 4401)
                 break
             if not isinstance(data, dict):
                 await ws.close(code=4400)
                 break
             kind = data.get("t")
             if kind == "ping":
-                _presence_touch(uid)
+                await await_db(_conn_online, uid)
                 await ws.send_json({"t": "pong", "at": int(time.time())})
                 continue
             sender = {"id": uid}
             try:
                 if kind == "send":
-                    ok, _w, _n = rate_hit("dm:%d" % uid, DM_RATE_LIMIT, 60)
+                    ok, _w, _n = await await_db(rate_hit, "dm:%d" % uid, DM_RATE_LIMIT, 60)
                     if not ok:
                         await ws.send_json({"t": "error", "request_id": data.get("request_id"),
                                             "detail": "发送太快了，歇一会儿"})
                         continue
                     body = community.clean_body(data.get("text"), 1000, "私信")
-                    conn = get_db()
-                    try:
-                        msg, dup = _deliver(conn, sender, int(data.get("to") or 0), body,
-                                            (data.get("request_id") or "")[:64] or None,
-                                            quote_id=int(data.get("quote_id") or 0))
-                    finally:
-                        conn.close()
+                    msg, dup = await await_db(_deliver_frame, sender, int(data.get("to") or 0),
+                                              body, (data.get("request_id") or "")[:64] or None,
+                                              int(data.get("quote_id") or 0))
                     if not dup:
                         _push(msg["to_id"], {"t": "msg", "message": msg})
                     await ws.send_json({"t": "ack", "request_id": data.get("request_id"),
                                         "message": msg, "duplicate": dup})
                 elif kind == "read":
-                    result = chat_history.mark_read(globals(), uid, int(data.get("with") or 0), data.get("message_ids"))
+                    result = await await_db(chat_history.mark_read, globals(), uid,
+                                            int(data.get("with") or 0), data.get("message_ids"))
                     await ws.send_json({"t": "read", "with": data.get("with"), **result})
                 elif isinstance(kind, str) and kind.startswith("call_"):
                     try:
@@ -6184,19 +6538,27 @@ async def chat_socket(ws: WebSocket, ticket: str = ""):
         pass
     finally:
         _WS_LOOPS.pop(ws, None)
+        _WS_SESSION.pop(ws, None)
+        _WS_KILL.pop(ws, None)
         socks = _WS_HUB.get(uid, [])
         if ws in socks:
             socks.remove(ws)
         if not socks:
             _WS_HUB.pop(uid, None)
-            ok, _ = _redis_cmd(["DEL", chat.presence_key(uid)])
-            if not ok:
-                _presence_mem.pop(uid, None)
-            call_id = _CALL_BY_USER.get(uid)
-            call = _CALLS.get(call_id) if call_id else None
-            if call:
-                other = call["to"] if call["from"] == uid else call["from"]
-                _call_cleanup(call_id, event="call_end", targets=(other,), reason="对方断线了")
+            try:
+                # 只删自己那一份在线状态；别的 worker 还持有这个用户时聚合键必须留着
+                if not await await_db(ws_fanout.conn_drop, uid):
+                    _presence_mem.pop(uid, None)
+                call_id = await await_db(_call_id_of, uid)
+                if call_id:
+                    call, _global = await await_db(_call_record, call_id)
+                    if call and uid in (call.get("from"), call.get("to")):
+                        other = call["to"] if call["from"] == uid else call["from"]
+                        await await_db(_call_cleanup, call_id, event="call_end",
+                                       targets=(other,), reason="对方断线了")
+            except Exception:
+                pass
+
 
 
 # ── 意见反馈 ───────────────────────────────────────────────────────────

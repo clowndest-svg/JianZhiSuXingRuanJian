@@ -8,7 +8,7 @@ def main():
     folder=ROOT/'_audit_sandbox'/('full-'+args.kind+'-'+str(int(time.time())));folder.mkdir()
     if args.kind=='python':files=sorted((ROOT/'tests').glob('test_*.py'))+[ROOT/'tests/legacy-backend.py']
     elif args.kind=='node':files=[ROOT/'tests'/n for n in ('legacy-frontend.mjs','frontend-integration.mjs','pwa-cache-contract.mjs','frontend-budget.mjs','request-contract.mjs','ai-status-ui.mjs','dm-asr-race.mjs','dm-state-call.mjs','exercise-video.mjs','home-first-screen.mjs')]
-    else:files=[ROOT/'tests'/n for n in ('runtime-ui.mjs','bubble-themes-ui.mjs','chat-ui.mjs','chat-history-ui.mjs','training-ui.mjs','meal-photo-ui.mjs','media-cache-ui.mjs','recovery-ui.mjs','offline-day-ui.mjs','a11y-dialog-contract.mjs','records-profile-permission.mjs','admin-pagination-ui.mjs')]
+    else:files=[ROOT/'tests'/n for n in ('runtime-ui.mjs','bubble-themes-ui.mjs','chat-ui.mjs','chat-history-ui.mjs','training-ui.mjs','meal-photo-ui.mjs','media-cache-ui.mjs','recovery-ui.mjs','offline-day-ui.mjs','a11y-dialog-contract.mjs','records-profile-permission.mjs','admin-pagination-ui.mjs','frontend-firstscreen.mjs','csp-report-browser.mjs')]
     env=dict(os.environ,PYTHONUTF8='1',PYTHONDONTWRITEBYTECODE='1',QINGSU_REQUIRE_REDIS='1',QINGSU_TEST_PYTHON=sys.executable,QINGSU_APP_REPO=str(ROOT),QINGSU_ADMIN_REPO=os.environ.get('QINGSU_ADMIN_REPO',str(ROOT.parent/'JianZhiSuXingRuanJianHouTai')))
     result=[]
     for file in files:

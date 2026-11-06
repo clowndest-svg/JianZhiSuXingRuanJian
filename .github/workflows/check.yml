@@ -213,6 +213,8 @@ jobs:
           node tests/runtime-ui.mjs
           node tests/records-profile-permission.mjs
           node tests/admin-pagination-ui.mjs
+          node tests/frontend-firstscreen.mjs
+          node tests/csp-report-browser.mjs
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

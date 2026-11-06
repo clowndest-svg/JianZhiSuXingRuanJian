@@ -167,3 +167,99 @@
 本次独立重跑：安全 21/21、数据 7/7（12 条社区列表实测 6 次 SELECT）、AI 状态 8/8；request、dm-state、PWA 三套 Node 契约通过。新媒体探针复现 A14 三项漏边界，结果单列为缺陷，不并入“通过”计数。没有重跑全部历史测试、浏览器缓存、真机、真实通话或生产变更验收。
 
 先补 A14 与有效负例、B06 UI 和跨仓 CI，再做主后台配置/策略/降权隔离演练、资源混合负载与独立备份恢复；通过后才进入受控发布。本次新增的整机预算、存储取舍、迁移与验收要求见总方案 D01–D05。阶段证据和未验证项目详见 [复核报告](optimization-review-2026-10-23.md)。
+
+## 十二、C07 跨进程实时投递与通话收口（2026-11-06，r192 候选）
+
+方案对这一条的验收原话是"双进程连接不同 worker 仍能消息互达、呼叫互达、统一撤销；
+未达标前显式保持单 worker"。这一节把三件事都做到了实测层面，并且**生产仍是单 worker**
+（systemd 里的 uvicorn 参数没动）——达标的是能力与判据，不是"已经扩容"。
+
+实现落点：新增 `app_modules/ws_fanout.py`（496 行，Redis 收发线程 + 全局在线/通话事实），
+`server.py` 的 `_push`、通话信令、`/api/logout` 与改密撤销、空闲检查、`/health/ready`，
+以及 `app_modules/chat.py` 里四个键名函数（键名只有一个来源，两个进程才不会各拼各的）。
+
+三条全局事实与它们的失效方式：
+
+| 事实 | 存放 | 进程崩溃后 |
+| --- | --- | --- |
+| 谁在哪个 worker 上有连接 | `qs:presence:<uid>@<worker>`（45s TTL）+ worker 心跳表 `qs:wsworkers`（90s） | 最晚 45 秒自动离线，不会长期谎报在线 |
+| 会话列表那排圆点 | 聚合键 `qs:presence:<uid>`，只在确认别的 worker 都不再持有时才删 | 靠 TTL 过期 |
+| 通话归谁、谁忙线 | `qs:call:<id>` + 每人一条 `qs:calluser:<uid>`，两个忙线位一条 Lua 一起占 | 响铃 120s、接通 1800s，且占位前会检查持有那通电话的 worker 是否还在心跳 |
+
+Redis 答不上来时每一项返回 `None`，调用方退回原来的进程内行为，并在 `/health/ready` 里
+如实报 `chat.fanout=local-only` 加 `chat.reason`。这一层的设计原则是：**宁可承认降级，
+也不许界面显示"对方在线"而消息其实只在本进程投了一份**。
+
+判据 `tests/test_multiprocess.py`：真的起两个独立 uvicorn 进程、真的建两条 WebSocket 连接，
+25 条判据全绿（限流 2、投递层就绪 2、跨进程消息 3、同进程不重复 2、跨进程通话 4、
+在线不被误删 3、统一撤销 3、以库为准的封号检查 1、崩溃忙线回收 2、Redis 掉线降级 3），
+另加一条"判据条数自证"——实跑条数与 `EXPECTED_ROWS` 对不上就判红，防止整节没跑到还算绿。
+没有 Redis 时这 25 条记成跳过而不是通过；CI 声明了 Redis 却连不上直接判红。
+
+变异标定 7/7 被抓：不转发跨进程消息（4 条红）、不丢掉本进程自己发出的那一条、
+断开时误删聚合在线键、控制帧不广播（撤销只能关本进程的连接）、状态接口谎报 `fanout=redis`、
+忙线残骸不回收、死掉的 worker 仍算活着。
+
+**其中第二个变异第一轮没被抓到，是判据本身的漏洞**：跨进程那节把收发双方放在两个 worker 上，
+正好绕开"本地已投一份 + 频道又回投一份"这条路径——只有把两个用户放进同一个 worker 才会撞上。
+补了「同进程投递不重复」一节，重跑该变异才变红。这类"绿灯是因为没走到那条路"的情况，
+只靠把判据数量报上去是发现不了的，所以每个变异都要真跑。
+
+还差什么才能真加 `--workers`（写在 `docs/operations.md`，共 7 条）：SQLite 单写者的锁竞争与
+混合负载实测、本机磁盘上的 uploads/缩略图/备份、空闲检查频率的两端代价、
+`chat.fanout != redis` 的告警与恢复通知、反压计数 `chat.dropped`/`chat.oversize`、
+TURN 并发预算、发布后按 worker 分开回读。这些没做完之前不要顺手加参数。
+## 十三、C11 首屏实测与 CSP 报告模式（2026-11-06，r192 候选）
+
+方案这一条要求"先测首屏与长任务，再分模块按需加载、避免重复请求；逐步移除内联事件后
+引入 CSP 报告模式与正式策略"，验收是"初始关键资源体积相对基线下降、功能无退化；
+正式 CSP 不挡 WebView 桥/音视频/导出；不把未发现 XSS 说成已发现漏洞"。
+
+**测量先于优化**：新增 `tests/frontend-firstscreen.mjs`（真 Chromium + 真 uvicorn + CDP 弱网与
+CPU 降速），11 项全绿。本轮实测：首屏关键资源 856,152 字节、请求 26 个、LCP 1064ms、
+CLS 0.0002、弱网 4× 降速下 3 秒内长任务 3 条（最长 483ms）。LCP/CLS/交互这三条是方案里的
+**拟定目标**，判据只报"达到/未达到/未测到"，不把它们当失败条件，也不冒充"已通过验收"。
+
+重复请求确实被抓出来并修掉：首屏有两个入口各自要 30 天习惯矩阵，各发一次 `/api/habits`。
+`app.js` 改成只合并在途的那一次（写记录之后的重新渲染仍然真重新取数），实测请求 26→25。
+这条修复的证据是决定性的：把它还原成两次请求，首屏判据立刻报重复请求红。
+代价写进了 `tests/frontend-budget.mjs` 的预算注释里——app.js gzip 从 92,160 抬到 93,184，
+买到的是首屏少一个接口往返。
+
+**CSP 只到报告模式，正式策略没开**。落点 `app_modules/content_security.py` + `server.py`
+的响应中间件、`POST /csp-report`、`/health/ready` 的 `csp`。两道转正门槛都是实测出来的：
+
+1. 内联事件处理器还剩 **186 处**（从真要下发的 `index.html` 里数，不抄文档）。
+   目录里一个 HTML 都没有时计数是 `null`，`null` 也挡住转正——拿不到证据不许当成"已经清零"。
+2. 报告窗口内 `would_block` 必须为 0。报告模式下 `disposition` 恒是 `report`、`blocked` 恒是 0，
+   拿 `blocked` 当门槛等于门槛不存在，所以要数的是 `blocked-uri` 那条"转正后会被拦"的数。
+
+`QINGSU_CSP_ENFORCE=1` 只代表"请求转正"，门槛没过就继续发 Report-Only，并把
+`requested_enforce / can_enforce / blockers` 一起报出去。做成一拨就切正式策略，
+等于拿用户界面去赌内联处理器大概清干净了。
+
+`report-uri` 拼成 `SITE_BASE` 的绝对地址：APK 里页面的源是 `appassets.androidplatform.net`，
+相对路径的报告打到那个源上，本站一条也收不到。边界同时说清：**APK 的本地 assets 由 WebView
+直接加载，不经过本站中间件，那一侧响应里根本没有 CSP 头**——现在这套只覆盖经 HTTPS 下发的 H5。
+
+判据：`tests/test_content_security.py` 23 条 + `tests/csp-report-browser.mjs` 11 条
+（真 Chromium 触发一条跨源图片违规，浏览器自己以 `application/csp-report` POST 回来，
+`/health/ready` 里以 `img-src` 归类、`would_block=1`、`blocked=0`，敏感查询串不留存，
+页面脚本照常执行）。变异标定 11/11 被抓，其中第一个（不拆 `{"csp-report":{...}}` 外层）
+原先**根本没被任何判据抓到**：Python 判据一直在用我自己造的顶层字段形状喂解析器，
+假形状能过、真形状会被归成 `unknown`。是浏览器探针实测出真实报文之后才补上的——
+统计有数但一条没分类，这种缺陷在纯函数判据里是隐形的。
+
+未达成，不要对外说成已做：186 处内联处理器还没迁到 `addEventListener`；没在真实流量上把
+`would_block` 压到 0 并保持一个完整窗口；正式 CSP 因此没开。本轮也没有声称发现任何 XSS。
+
+## 十四、两处"文档说的和代码做的"对不上，本轮更正
+
+- 本文件第十一节写"（B06）界面层仍未做：`app.js`/`features.js` 尚无三态消费"。这条作废：
+  `features.js` 的 `refreshMealAiStatus()` 已按 `online_model` 渲染"未配置 / 已配置，尚未跑通 /
+  最近请求成功 / 最近请求失败"并显示上次成功时间与耗时，且 `tests/ai-status-ui.mjs` 已覆盖
+  `untested` 那一路并接在 CI 里。
+- `tests/frontend-firstscreen.mjs` 与 `tests/csp-report-browser.mjs` 此前**不在任何流水线上**
+  （CI 的 node/browser 步骤和 `scripts/test-all.py --kind browser` 都没有它们），
+  也就是"写了判据但没人跑"。本轮同时接进 `.github/workflows/check.yml` 与 `test-all.py`，
+  这正是方案 C13 要防的那类漏法。

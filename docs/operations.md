@@ -28,6 +28,101 @@
 - 自检：`curl -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13'`
   打 `https://…/ws/chat?ticket=bad`，**403 才是对的**（票据被应用拒），404 说明中间某层没透传。
 
+## CSP 报告模式（方案 C11）
+
+实现落点：`app_modules/content_security.py`（策略、回收、转正门槛）+ `server.py` 的响应中间件、
+`POST /csp-report`、`/health/ready` 的 `csp` 字段。判据：`tests/test_content_security.py`（23 条）
+与 `tests/csp-report-browser.mjs`（真 Chromium + 真 uvicorn，11 条）。
+
+**当前发的是 `Content-Security-Policy-Report-Only`，正式策略默认不开。** 这不是偷懒，是因为
+转正的两个条件还没同时成立，而这两个条件都必须是实测出来的：
+
+1. 内联事件处理器还剩多少 —— 从真要下发的那份 HTML 里数（`QINGSU_WEB_DIR/index.html`），
+   本轮实测 **186 处**，`script-src` 因此离不开 `'unsafe-inline'`。目录里一个 HTML 都没有时
+   计数是 `null` 而不是 0：拿不到证据不许当成"已经清零"。
+2. 报告窗口内有多少条违规**在转正后会被拦下来**（`csp.would_block`）—— 报告模式下
+   `disposition` 恒为 `report`、`blocked` 恒为 0，用 `blocked` 当门槛等于门槛不存在，
+   所以要数的是 `blocked-uri` 那一条数。
+
+`QINGSU_CSP_ENFORCE=1` 只代表"请求转正"。两道门槛没过时中间件仍然发 Report-Only，并把
+`csp.requested_enforce=true`、`csp.can_enforce=false`、`csp.blockers=[...]` 一起报出来——
+运维看到的是"为什么还没生效"，而不是"设置没起作用"。把开关做成一拨就切正式策略，
+等于拿用户界面去赌内联处理器大概清干净了。
+
+报告通道用的是绝对地址（`report-uri <SITE_BASE>/csp-report`）。原因：APK 里页面的源是
+`appassets.androidplatform.net`，相对路径的报告会打到那个源上，本站一条也收不到，
+"有报告通道"就成了假话。**同时要说清边界**：APK 的本地 assets 由 WebView 直接加载，
+不经过本站中间件，那一侧的响应根本没有 CSP 头——现在这套只覆盖经 HTTPS 下发的 H5。
+
+真实回环（不是自造 JSON 喂自己）：真 Chromium 打开本站页面、请求一张策略不允许的跨源图片，
+浏览器自己以 `application/csp-report` POST 到 `/csp-report`，外层形状是
+`{"csp-report":{...}}`，里面**没有 `blocked` 布尔**，只有 `disposition` 和 `blocked-uri`。
+解析必须按这个真形状来：只认顶层字段的话每条真实违规都会被归成 `unknown`，统计有数、
+一条没分类，转正门槛看着在其实不在。报告的来源只保留文件名，查询串（可能有令牌）丢掉。
+
+判据有效性：对本层做过 11 个变异，全部被抓到——不拆 `csp-report` 外层（7 条 python + 2 条
+浏览器红）、`disposition=report` 不算会被拦（2+1）、`report-uri` 退回相对路径（2+1）、
+健康接口报告地址丢前缀（1）、中间件不传 base（2+1）、空目录当成 0 处内联（1）、
+开关绕过实测门槛（1）、违规原文连查询串留下（2）、中间件不发 CSP 头（4+6）、
+健康接口不报 CSP（6+2）、端点收了不记（2+3）。
+
+还没做的（不要对外说成已做）：把 186 处内联处理器迁到 `addEventListener`；在真实流量上
+把 `would_block` 压到 0 并保持一个完整窗口；然后才谈 `QINGSU_CSP_ENFORCE=1`。
+本轮也没有声称发现任何 XSS——报告模式只是把"转正会挡到什么"变成有数可看的问题。
+
+## WebSocket 多进程投递（方案 C07）
+
+实现落点：`app_modules/ws_fanout.py`（跨进程层）+ `server.py` 的 `_push`、通话信令、在线判定。
+
+**当前生产仍是单 worker**，systemd 单元里的 `uvicorn` 参数没有改。跨进程能力已经就绪，
+并由 `tests/test_multiprocess.py` 用两个真进程 + 两条真 WebSocket 连接实测（25 条判据），
+但下面"还差什么"没做完之前不要顺手加 `--workers`。
+
+三条全局事实现在长这样：
+
+- 投递：`_push(uid, payload)` 先投本进程手里的连接，再经 Redis 频道 `qs:chat-events`
+  转发给其它进程。订阅端会丢掉"本进程自己发出去的那一条"，所以同一条连接不会收到两次；
+  同一用户在两个进程各有一条连接时两边都收到，因为那是两条不同的连接；两个用户连在同一个
+  worker 时，从频道回来的那一份必须丢掉，否则接收方会收到两条。这一条只有把 A、B 放进
+  同一个 worker 才会撞上，所以判据里单独有一节「同进程投递不重复」。
+  转发是异步出队的（`chat.queue` / `chat.published` 可见），事件循环里不同步等 Redis。
+- 在线：带 worker 身份的键 `qs:presence:<uid>@<worker>`，45 秒 TTL；worker 自己心跳到
+  有序集合 `qs:wsworkers`（90 秒）。"他在不在"= 在任一存活 worker 上有没有这条键，
+  用有限次 `EXISTS` 判定，不用 `KEYS`。断开只删自己那一份；会话列表读的聚合键
+  `qs:presence:<uid>` 只在确认别的 worker 都不再持有时才删。进程崩溃后在线状态最晚 45 秒消失。
+- 通话：`qs:call:<call_id>` 加每人一条忙线位 `qs:calluser:<uid>`，两个忙线位用一条 Lua
+  一起占，不会出现"一方忙、一方空"的半通电话。响铃记录 120 秒过期、接通后 1800 秒；
+  另外占位时会检查持有那通电话的 worker 是否还在心跳，不心跳就当场回收残骸。
+  所以进程崩溃最坏几十秒后就能重新拨通，不会留下永久忙线。
+- 进程崩溃回收：通话记录里写了发起它的那个 worker 的身份；该 worker 停止心跳（90 秒）后，
+  别人再呼叫时 call_reserve 会先回收它名下那通电话的忙线位再重新占。判据是真的杀掉那个
+  进程、再把心跳时间压过 TTL 来验的，不是测试自己手工删键——回收走的就是产品里的 gc_user。
+- 统一撤销：`/api/logout`、改密、恢复口令这些走主应用的撤销都会广播 `kick` 控制帧，
+  按会话哈希精确关闭各进程的连接（多设备登录时退出其中一台不误踢其它台）；
+  后台直接写库的封号靠"以库为准"的空闲检查兜底，间隔 `QINGSU_WS_AUTH_SWEEP_SEC`（默认 15 秒）。
+
+Redis 不可用时的降级必须看得见：`/health/ready` 的 `chat.fanout` 变成 `local-only`
+（`chat.reason` 给原因，`chat.worker` 是本进程身份）。此时投递、在线、通话全部退回原来的
+单进程行为——跨进程不投、对方在别的 worker 上会被判"不在线"。宁可显示离线，
+也不能界面显示在线而消息其实只在本进程投了一份。
+
+要开多 worker 还差什么：
+
+1. SQLite WAL 只有一个写者。workers 增多会先放大写锁竞争。加 workers 之前要用接近生产的
+   混合负载实测锁等待与 P95/P99；达不到目标就单独立项评估 PostgreSQL，不能顺手改参数。
+2. `uploads/`、缩略图、备份都在本机磁盘。跨机扩 worker 要先解决共享存储与媒体一致性，
+   否则会出现"worker1 上传的文件 worker2 读不到"。
+3. 空闲连接重新问库的频率。调小 `QINGSU_WS_AUTH_SWEEP_SEC` 能更快发现后台封号，
+   代价是按连接数放大的 SQLite 读；调大则撤销有可观察的延迟。两端都要写进告警与验收。
+4. Redis 成为私信实时链路的依赖。Redis 挂了功能不丢（退回单进程），但跨进程投递会停，
+   所以必须给 `chat.fanout != redis` 配低频告警与恢复通知，而不是等人去翻界面。
+5. 反压计数。跨进程转发队列上限 4096 条，满了只丢"转发"（本地投递与库不受影响），
+   计数在 `chat.dropped`；`chat.oversize` 记录超过 192KB 的信令。开 workers 后要盯这两项。
+6. 通话媒体仍是浏览器之间的 P2P/TURN，不经服务器转发，加 workers 不改变它；
+   但 TURN 的并发与带宽预算要按新的连接分布重算。
+7. 发布与回退：`chat.fanout`、`chat.worker` 要进发布后回读清单，
+   多 worker 下 `/health/ready` 报的是被负载均衡到的那一个进程，看板上要按 worker 分开统计。
+
 ## 正式服务
 
 ### r164 私聊媒体验收
