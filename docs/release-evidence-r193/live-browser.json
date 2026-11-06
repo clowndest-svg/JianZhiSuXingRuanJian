@@ -1,0 +1,65 @@
+{
+ "url": "https://scientificexploration.art",
+ "checks": [
+  {
+   "name": "线上 version.json 的 apk_url 是现役域名",
+   "ok": true,
+   "detail": "https://scientificexploration.art/qingsu.apk"
+  },
+  {
+   "name": "线上清单已是 r193",
+   "ok": true,
+   "detail": [
+    77,
+    "2.4.4"
+   ]
+  },
+  {
+   "name": "线上弹窗里写的地址 = 点下去的地址",
+   "ok": true,
+   "detail": {
+    "写的": "https://scientificexploration.art/qingsu.apk?v=d8717cc5eb94",
+    "点的": "https://scientificexploration.art/qingsu.apk?v=d8717cc5eb94"
+   }
+  },
+  {
+   "name": "两条都是现役域名（不再是 IP）",
+   "ok": true,
+   "detail": "https://scientificexploration.art/qingsu.apk?v=d8717cc5eb94"
+  },
+  {
+   "name": "屏幕上不再出现旧 IP",
+   "ok": true,
+   "detail": "https://scientificexploration.art/qingsu.apk?v=d8717cc5eb94"
+  },
+  {
+   "name": "复制到的就是屏幕上那一条",
+   "ok": true,
+   "detail": "https://scientificexploration.art/qingsu.apk?v=d8717cc5eb94"
+  },
+  {
+   "name": "版本行与清单一致",
+   "ok": true,
+   "detail": {
+    "屏上": "v2.4.4 · build 77",
+    "清单": "2.4.4/77"
+   }
+  },
+  {
+   "name": "包指纹行说的是线上这一版",
+   "ok": true,
+   "detail": "这个包 build 77（指纹 d8717cc5） · 手机版本读不到"
+  },
+  {
+   "name": "二维码取自服务端并带清单指纹",
+   "ok": true,
+   "detail": "https://scientificexploration.art/qr.svg?v=d8717cc5"
+  },
+  {
+   "name": "打开弹窗没有引入页面报错",
+   "ok": true,
+   "detail": []
+  }
+ ],
+ "verdict": "PASS"
+}

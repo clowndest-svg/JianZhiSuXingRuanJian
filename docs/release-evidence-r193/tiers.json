@@ -1,0 +1,46 @@
+{
+ "candidate_run": {
+  "python": {
+   "suites": 32,
+   "red_suites": [
+    "legacy-backend.py"
+   ],
+   "red_checks": 3,
+   "why": "发布顺序判据：清单与仓库根那份现役包还停在 76，gradle 已是 77"
+  },
+  "node": {
+   "exit": 0
+  },
+  "browser": {
+   "suites": 15,
+   "exit": 0,
+   "note": "含本轮新增的 download-link-ui 14 条"
+  }
+ },
+ "after_close": {
+  "legacy_backend": {
+   "green": 628,
+   "red": 0,
+   "exit": 0
+  },
+  "note": "同步成 CI 产物后那 3 条自然变绿；没有把它们改成\"不比\""
+ },
+ "firstscreen_determinism": {
+  "runs": 2,
+  "requests": [
+   25,
+   25
+  ],
+  "duplicate_api": "无",
+  "before_fix": "同一份代码实测一次 25、一次 26（2× /api/habits）",
+  "note": "去重从\"合并在途\"改成\"首屏只有一个取数入口\"，两次连跑都是 25"
+ },
+ "legacy_frontend": {
+  "exit": 0,
+  "note": "矩阵那条既有判据（每次显式调用真取数、失败要说原因）拦住了我先写的代次缓存方案，判据是对的"
+ },
+ "frontend_budget": {
+  "exit": 0,
+  "checks": 34
+ }
+}

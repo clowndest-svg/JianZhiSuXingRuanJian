@@ -1,0 +1,28 @@
+{
+ "run": 42171538711,
+ "url": "https://github.com/clowndest-svg/JianZhiSuXingRuanJian/actions/runs/42171538711",
+ "status": "completed",
+ "conclusion": "success",
+ "head_sha": "648c511c673bd4058ebc6cd373df5e1dc63df406",
+ "jobs": [
+  {
+   "name": "android",
+   "conclusion": "success"
+  },
+  {
+   "name": "integration",
+   "conclusion": "success"
+  },
+  {
+   "name": "deploy",
+   "conclusion": "success"
+  }
+ ],
+ "how_obtained": [
+  "逐 job 结论取自轮询期间 /actions/runs/<id>/jobs 的一次成功返回（android/integration 先完成，deploy 随后完成 success）",
+  "run 级状态与 SHA 取自 /actions/runs?per_page=3 列表回读；本轮稍后再取单 run 详情时 GitHub 返回 404，因此这里同时留下列表那份",
+  "生产侧独立佐证：/health/ready 的 release 已变成 r42171538711、source_revision 变成 648c511c6——部署真的落地了，不是只看流水线颜色"
+ ],
+ "note": "integration 里包含本轮新增的 tests/download-link-ui.mjs（真 Chromium + 真 uvicorn）",
+ "deployed_at": "2026-11-06 14:38:35"
+}

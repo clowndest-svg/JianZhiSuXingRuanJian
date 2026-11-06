@@ -1,0 +1,70 @@
+{
+ "command": "python /e/tmp/mutate_dl.py（每个变异同时跑真 Chromium 契约与 legacy-backend，跑完按原始字节还原）",
+ "count": 6,
+ "all_caught": true,
+ "runs": [
+  {
+   "mutation": "D1 模板里把地址写死回 IP",
+   "browser_red": 1,
+   "legacy_red": 2,
+   "exits": [
+    1,
+    1
+   ]
+  },
+  {
+   "mutation": "D2 可见文本不再跟着 href 走",
+   "browser_red": 2,
+   "legacy_red": 2,
+   "exits": [
+    1,
+    1
+   ]
+  },
+  {
+   "mutation": "D3 复制函数自己拼主机名",
+   "browser_red": 1,
+   "legacy_red": 2,
+   "exits": [
+    1,
+    1
+   ]
+  },
+  {
+   "mutation": "D4 包内二维码退回 IP",
+   "browser_red": 0,
+   "legacy_red": 3,
+   "exits": [
+    0,
+    1
+   ]
+  },
+  {
+   "mutation": "D5 二维码继续用包内那份死的",
+   "browser_red": 0,
+   "legacy_red": 1,
+   "exits": [
+    0,
+    1
+   ]
+  },
+  {
+   "mutation": "D6 老客户端回落 IP 的兼容分支被删",
+   "browser_red": 1,
+   "legacy_red": 1,
+   "exits": [
+    1,
+    1
+   ]
+  }
+ ],
+ "D5_recheck_after_fix": [
+  {
+   "mutation": "D5 二维码继续用包内那份死的",
+   "browser_red": 1,
+   "legacy_red": 0,
+   "reading": "浏览器契约 1 红、legacy 0 红：捕获点从写法换成了实际行为"
+  }
+ ],
+ "note": "D5（二维码不接服务端）第一轮那 1 条 legacy 红其实是**旧的拼串判据被我的改动碰红**的连带，不是它真的抓到了二维码问题——把那条判据按意图重写之后，D5 在 legacy 层就是 0 红，只由真 Chromium 契约抓到（src 必须带清单指纹，且服务端那张 == 本站生成、!= 包内那张）。这里如实记成\"结构判据换成行为判据\"，不把它写成两轮都抓到。"
+}

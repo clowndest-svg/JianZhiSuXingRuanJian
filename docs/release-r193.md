@@ -64,8 +64,37 @@ App 内**接口请求**的主机名仍是 `app.js` 里 `API_BASE` 的默认值�
 
 ## 验证与发布记录
 
-（回填：三档全量结果、CI run、生产四条出口一致性实测、APK 指纹与包内构建号 77、二维码解码对照、
-`version.json`/`qingsu.apk`/`build.gradle` 三者一致的复跑、回退入口。）
+CI：[42171538711](https://github.com/clowndest-svg/JianZhiSuXingRuanJian/actions/runs/42171538711)
+android / integration / deploy 三项全部 success，源码 `648c511c6`；`integration` 里就包含本轮新增的
+`tests/download-link-ui.mjs`。取单 run 详情时 GitHub 返回过 404，所以 `main-ci.json` 同时留了
+runs 列表那份，并用生产侧 `release=r42171538711`、`source_revision=648c511c6` 独立佐证部署真的落地。
+
+生产真浏览器回读 10 项全绿（`live-browser.json`）：线上弹窗里**写的**与**点下去的**都是
+`https://scientificexploration.art/qingsu.apk?v=d8717cc5eb94`，复制按钮得到的还是同一条，
+屏幕上不再出现 `124.220.54.64`；版本行 `v2.4.4 · build 77`、包指纹行前缀取自现役清单；
+二维码 src 是服务端 `/qr.svg?v=d8717cc5` 且真的加载出图；打开弹窗没有引入页面报错。
+
+二维码内容用点阵比对，不靠人眼扫：线上 `/qr.svg` == 按现役域名 URL 现算的点阵、!= 按旧 IP 算的；
+包内 `assets/qr.svg` 同样 == 域名、!= IP。两张尺寸不同（线上 viewBox 32.8mm、包内 29.6mm），
+正说明服务端那张是按当前 URL 现算的，不是把静态图挂上去糊过去。
+
+安装包：9,421,123 字节，SHA-256 `d8717cc5eb94f3fc…`、MD5 `7fd3d6dd…`，与线上 `version.json`
+逐字段相同；包内 `APP_BUILD=77`、`sw.js BUILD=77`。仓内 `web_version.json` 与 `qingsu.apk`
+已同步成 CI 产物，`legacy-backend` 复跑 628 条全绿——候选阶段那 3 条红（清单/包体还是 76 而 gradle 是 77）
+是发布顺序本身造成的，同步完自然变绿，没有把判据改成"不比"。
+
+判据：`tests/download-link-ui.mjs` 14 条、`legacy-backend` 补 4 条、`frontend-firstscreen` 连跑两次
+（25 / 25，无重复请求）、`legacy-frontend` 全绿、`frontend-budget` 34 条全绿。
+变异标定 6/6 被抓，其中 D5 的说明保持诚实：第一轮那条 legacy 红是旧拼串判据被我的改动碰红的连带，
+不是它抓到了二维码问题；重写判据后 D5 只由真 Chromium 契约抓到。
+
+中途还有一次自己的误读值得留档：第一次比对 APK 与清单时用的是部署进行中取到的旧清单快照，
+于是显示"与 version.json 一致 False"；重新取现役清单后 size/md5/sha 全同。
+"取到半路上的数据"最容易被当成产品缺陷，所以这句话写在证据里而不是删掉。
+
+本轮没有重新实测的（不计入通过）：实体 Android 安装后弹窗的实际显示与扫码落地（判据是桌面 Chromium
++ 包内字节比对，App 内 `API_BASE` 主机名仍是 IP，本轮只把**下载入口**四处接到清单真源）；
+行集合摘要、integrity/外键、备份隔离恢复、监控 problems 与 5xx 仍以 CI 发布步骤自己的结果为准。
 
 ## 打开与入口
 

@@ -1,0 +1,24 @@
+{
+ "downloaded": "https://scientificexploration.art/qingsu.apk",
+ "size": 9421123,
+ "sha256": "d8717cc5eb94f3fc30b0a2fdce2c625544199b4faec6384c65b5bd2dc39fadfd",
+ "md5": "7fd3d6ddad676e45c937af2c094d397b",
+ "与线上 version.json 逐字段一致": true,
+ "包内构建标识": {
+  "APP_BUILD": 77,
+  "sw BUILD": 77
+ },
+ "包内二维码": {
+  "等于按现役域名生成的点阵": true,
+  "等于按旧 IP 生成的点阵": false
+ },
+ "服务端 /qr.svg": {
+  "HTTP": 200,
+  "media_type": "image/svg+xml",
+  "bytes": 12977,
+  "等于按现役域名生成的点阵": true,
+  "等于按旧 IP 生成的点阵": false,
+  "说明": "线上那张 viewBox 32.8mm、包内 29.6mm，模块数不同——正说明服务端是按当前 URL 现算的，不是把静态图挂上去"
+ },
+ "中途一次误读留档": "第一次比对用的是部署进行中取到的旧清单快照（size 9,417,027），于是显示\"与 version.json 一致 False\"；重新取现役清单后 size/md5/sha 全同。记下来是因为\"取到半路上的数据\"最容易被当成产品缺陷"
+}
