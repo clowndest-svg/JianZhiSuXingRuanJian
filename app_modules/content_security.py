@@ -34,7 +34,7 @@ DIRECTIVES = {
     "frame-ancestors": "'none'",
 }
 
-_reports = []           # [(epoch, directive, blocked, short_source)]
+_reports = []           # [(epoch, directive, blocked, would_block, short_source)]
 _seen = {}
 
 

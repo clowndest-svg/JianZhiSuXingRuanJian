@@ -1,0 +1,106 @@
+{
+ "command": "python /e/tmp/mutate_csp2.py（python 判据 + 真 Chromium 回环各跑一次）",
+ "count": 11,
+ "all_caught": true,
+ "mutations": [
+  {
+   "mutation": "X1 不拆浏览器那个 csp-report 外层",
+   "python_red": 7,
+   "browser_red": 2,
+   "exits": [
+    1,
+    1
+   ]
+  },
+  {
+   "mutation": "X2 disposition=report 不当成\"转正会被拦\"",
+   "python_red": 2,
+   "browser_red": 1,
+   "exits": [
+    1,
+    1
+   ]
+  },
+  {
+   "mutation": "X3 report-uri 退回相对路径",
+   "python_red": 2,
+   "browser_red": 1,
+   "exits": [
+    1,
+    1
+   ]
+  },
+  {
+   "mutation": "X4 健康接口的报告地址不带本站前缀",
+   "python_red": 1,
+   "browser_red": 0,
+   "exits": [
+    1,
+    0
+   ]
+  },
+  {
+   "mutation": "X5 中间件不再传 base",
+   "python_red": 2,
+   "browser_red": 1,
+   "exits": [
+    1,
+    1
+   ]
+  },
+  {
+   "mutation": "X6 没数出来当成 0（空目录骗过门槛）",
+   "python_red": 1,
+   "browser_red": 0,
+   "exits": [
+    1,
+    0
+   ]
+  },
+  {
+   "mutation": "X7 开关绕过实测门槛",
+   "python_red": 1,
+   "browser_red": 0,
+   "exits": [
+    1,
+    0
+   ]
+  },
+  {
+   "mutation": "X8 违规原文连查询串留下",
+   "python_red": 2,
+   "browser_red": 0,
+   "exits": [
+    1,
+    0
+   ]
+  },
+  {
+   "mutation": "X9 中间件不发 CSP 头",
+   "python_red": 4,
+   "browser_red": 6,
+   "exits": [
+    1,
+    1
+   ]
+  },
+  {
+   "mutation": "X10 健康接口不报 CSP",
+   "python_red": 7,
+   "browser_red": 2,
+   "exits": [
+    1,
+    1
+   ]
+  },
+  {
+   "mutation": "X11 报告端点收了不记",
+   "python_red": 2,
+   "browser_red": 3,
+   "exits": [
+    1,
+    1
+   ]
+  }
+ ]
+}

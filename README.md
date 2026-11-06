@@ -1,6 +1,6 @@
 # 轻塑：Android 与网页记录工具
 
-当前生产版本：r191 / Android **2.4.2（75）**，前后台CI与真实生产验收通过。线上下载指纹以 [version.json](https://scientificexploration.art/version.json) 为准；关联加固、验收与剩余边界见 [r191发布记录](docs/release-r191.md)。
+当前生产版本：r192 / Android **2.4.3（76）**，前后台CI与生产回读通过。线上下载指纹以 [version.json](https://scientificexploration.art/version.json) 为准；跨进程实时链路、首屏与CSP报告模式的实测与剩余边界见 [r192发布记录](docs/release-r192.md)。
 
 r191统一保存回执、离线重试与历史修改版本，阻止重复记账和旧页面覆盖新记录；首页、图表与流水使用一致快照，迟到刷新与旧账号响应不回写当前状态。原有业务记录及轻塑号已核对未变。
 

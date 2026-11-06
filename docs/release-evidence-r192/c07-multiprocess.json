@@ -1,0 +1,134 @@
+{
+ "generated_at": "2026-11-06 11:59:54",
+ "command": "QINGSU_REQUIRE_REDIS=1 python tests/test_multiprocess.py",
+ "items": 25,
+ "red": 0,
+ "note": "两个独立 uvicorn 进程 + 两条真 WebSocket；条数自证一行不计入判据数",
+ "rows": [
+  {
+   "flag": "绿",
+   "name": "两个进程都报 rate.store=redis",
+   "evidence": "{\"18003\": \"redis\", \"18004\": \"redis\"}"
+  },
+  {
+   "flag": "绿",
+   "name": "两个进程合计只放行 20 次（放行 20 / 拒绝 4）",
+   "evidence": "{\"放行\": 20, \"拒绝\": 4}"
+  },
+  {
+   "flag": "绿",
+   "name": "两个 worker 都如实报 chat.fanout=redis（投递层真的起来了）",
+   "evidence": "{\"18003\": \"redis\", \"18004\": \"redis\"}"
+  },
+  {
+   "flag": "绿",
+   "name": "两个进程有各自的 worker 身份（否则跨进程判定是在骗自己）",
+   "evidence": "{\"18003\": \"b95d86be2c15\", \"18004\": \"5fb4fda18a6b\"}"
+  },
+  {
+   "flag": "绿",
+   "name": "A@worker1 发的消息到达连在 worker2 的 B",
+   "evidence": "\"msg\""
+  },
+  {
+   "flag": "绿",
+   "name": "发送方只收到一条 ack，没有被重复投递",
+   "evidence": "[\"ack\", null]"
+  },
+  {
+   "flag": "绿",
+   "name": "接收方同一条连接只收到一次",
+   "evidence": "null"
+  },
+  {
+   "flag": "绿",
+   "name": "同一个 worker 上的两个用户：接收方只收到一条",
+   "evidence": "{\"第一条\": \"msg\", \"多出来的\": null}"
+  },
+  {
+   "flag": "绿",
+   "name": "发送方只有一条 ack，频道回投没有变成第二条消息",
+   "evidence": "{\"第一条\": \"ack\", \"多出来的\": null}"
+  },
+  {
+   "flag": "绿",
+   "name": "A@worker1 呼叫连在 worker2 的 B，B 收到 call_invite",
+   "evidence": "\"call_invite\""
+  },
+  {
+   "flag": "绿",
+   "name": "B 在另一个 worker 上拒绝，A 当场收到",
+   "evidence": "\"call_reject\""
+  },
+  {
+   "flag": "绿",
+   "name": "拒绝后立刻再呼叫：不许残留忙线（回 call_busy 就是遗留）",
+   "evidence": "\"call_ringing\""
+  },
+  {
+   "flag": "绿",
+   "name": "取消后再呼叫：同样不许残留忙线",
+   "evidence": "\"call_ringing\""
+  },
+  {
+   "flag": "绿",
+   "name": "worker1 断开后：全局在线键仍在，只剩 worker2 那一份",
+   "evidence": "{\"聚合键\": 1, \"worker1 那份\": 0, \"worker2 那份\": 1}"
+  },
+  {
+   "flag": "绿",
+   "name": "连在 worker1 的呼叫方看到的仍是\"对方在线\"（不会误判离线）",
+   "evidence": "\"call_ringing\""
+  },
+  {
+   "flag": "绿",
+   "name": "响铃确实送到了 worker2 上那条连接",
+   "evidence": "\"call_invite\""
+  },
+  {
+   "flag": "绿",
+   "name": "本进程的连接当场被关掉（4401 且 <1.5s）",
+   "evidence": "{\"关闭码\": 4401, \"用时\": \"0.03s\"}"
+  },
+  {
+   "flag": "绿",
+   "name": "另一个 worker 上的连接也当场被关掉（4401 且 <1.5s）",
+   "evidence": "{\"关闭码\": 4401, \"用时\": \"0.03s\"}"
+  },
+  {
+   "flag": "绿",
+   "name": "关闭事件跨进程送达，不靠 3s 空闲检查兜底（最慢 0.03s）",
+   "evidence": "\"0.03s < 1.5s\""
+  },
+  {
+   "flag": "绿",
+   "name": "以库为准的空闲检查在双进程下仍然成立（封号 3s 内断开）",
+   "evidence": "4403"
+  },
+  {
+   "flag": "绿",
+   "name": "崩溃前那通电话确实把 B 锁成了忙线（前提成立，否则下一条是空话）",
+   "evidence": "{\"响铃\": \"call_ringing\", \"B 忙线位\": 1}"
+  },
+  {
+   "flag": "绿",
+   "name": "崩溃 worker 名下的忙线被自动回收，B 能重新拨通（不靠重启服务）",
+   "evidence": "\"call_ringing\""
+  },
+  {
+   "flag": "绿",
+   "name": "Redis 不可用时两边都如实报 chat.fanout=local-only",
+   "evidence": "{\"18003\": \"local-only\", \"18004\": \"local-only\"}"
+  },
+  {
+   "flag": "绿",
+   "name": "local-only 下跨进程确实不投（不谎报\"已投递\"）",
+   "evidence": "{\"本进程 ack\": \"ack\", \"另一进程收到\": null}"
+  },
+  {
+   "flag": "绿",
+   "name": "降级时通话门禁不谎报对方在线",
+   "evidence": "\"call_unavailable\""
+  }
+ ]
+}

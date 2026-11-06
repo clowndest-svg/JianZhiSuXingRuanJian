@@ -1,0 +1,16 @@
+{
+ "downloaded": "https://scientificexploration.art/qingsu.apk",
+ "size": 9417027,
+ "sha256": "41aef127fb483431ba34986173009b0df0d0edb95b76a5fb7c32e03dee1d3c40",
+ "md5": "63916bc2969d884be27c36cf465ca86f",
+ "version_json_matches_download": true,
+ "包内 assets 与仓库一致": "6/6（app.js/sw.js/features.js/index.html/style.css/features.css 逐字节相同）",
+ "包内构建标识": {
+  "APP_BUILD": 76,
+  "sw BUILD": 76,
+  "versionCode": 76,
+  "versionName": "2.4.3"
+ },
+ "线上静态资源与仓库一致": "14/15 逐字节一致；manifest.webmanifest 只差行尾，CRLF 归一后一致",
+ "签名与v2/v3校验": "由正式 CI 的签名步骤完成（见 main-ci.json 的 android/deploy），本机不重复签包"
+}

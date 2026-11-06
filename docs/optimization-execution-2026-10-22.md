@@ -216,8 +216,8 @@ TURN 并发预算、发布后按 worker 分开回读。这些没做完之前不�
 正式 CSP 不挡 WebView 桥/音视频/导出；不把未发现 XSS 说成已发现漏洞"。
 
 **测量先于优化**：新增 `tests/frontend-firstscreen.mjs`（真 Chromium + 真 uvicorn + CDP 弱网与
-CPU 降速），11 项全绿。本轮实测：首屏关键资源 856,152 字节、请求 26 个、LCP 1064ms、
-CLS 0.0002、弱网 4× 降速下 3 秒内长任务 3 条（最长 483ms）。LCP/CLS/交互这三条是方案里的
+CPU 降速），11 项全绿。首轮实测：首屏关键资源 856,152 字节、请求 26 个、LCP 1064ms、CLS 0.0002、弱网 4× 降速下长任务 3 条（最长 483ms）。
+收尾在最终代码上单跑复验：856,552 字节、请求 25 个、LCP 844ms、CLS 0.0002、长任务 2 条（最长 448ms）——字节涨了 400 是 app.js 那七行合并逻辑，请求少一个就是它买来的。LCP/CLS/交互这三条是方案里的
 **拟定目标**，判据只报"达到/未达到/未测到"，不把它们当失败条件，也不冒充"已通过验收"。
 
 重复请求确实被抓出来并修掉：首屏有两个入口各自要 30 天习惯矩阵，各发一次 `/api/habits`。
@@ -259,6 +259,11 @@ CLS 0.0002、弱网 4× 降速下 3 秒内长任务 3 条（最长 483ms）。LC
   `features.js` 的 `refreshMealAiStatus()` 已按 `online_model` 渲染"未配置 / 已配置，尚未跑通 /
   最近请求成功 / 最近请求失败"并显示上次成功时间与耗时，且 `tests/ai-status-ui.mjs` 已覆盖
   `untested` 那一路并接在 CI 里。
+- 发布收尾时 `legacy-backend` 报「version.json 与实际包体不一致、包内 app.js 还是 75」。数字摊开才看清：清单已经是
+  r192 的线上包（md5 `63916bc2`），判据读的是仓库根上那份**上一版留下的现役包**（md5 `13da252e`）。判据没错，
+  是工件过期；取回线上现役包覆盖 `qingsu.apk` 后两条都绿。**过期工件和真缺陷长得一模一样**，
+  只有把 md5 / size / 包内构建号摆出来才分得开，所以这条既不改判据也不"重跑一次算了"。
+
 - `tests/frontend-firstscreen.mjs` 与 `tests/csp-report-browser.mjs` 此前**不在任何流水线上**
   （CI 的 node/browser 步骤和 `scripts/test-all.py --kind browser` 都没有它们），
   也就是"写了判据但没人跑"。本轮同时接进 `.github/workflows/check.yml` 与 `test-all.py`，

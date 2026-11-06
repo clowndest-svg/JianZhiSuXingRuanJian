@@ -1,0 +1,64 @@
+{
+ "generated_at": "2026-11-06 12:00:30",
+ "command": "node tests/frontend-firstscreen.mjs（真 Chromium + CDP 弱网与 4× CPU 降速，机器空闲时单跑）",
+ "items": 11,
+ "red": 0,
+ "note": "LCP/CLS/交互是方案里的拟定目标，只报状态不判红；回归线才是判据。「接口与脚本不被重复请求」这条是 app.js 合并在途 /api/habits 的决定性证据",
+ "rows": [
+  {
+   "flag": "绿",
+   "name": "首屏关键资源字节没越过回归线",
+   "evidence": "实测 856552 B（原始，未压缩）/ 回归线 900000 B"
+  },
+  {
+   "flag": "绿",
+   "name": "首屏资源请求数没越过回归线",
+   "evidence": "实测 25 个 / 回归线 30"
+  },
+  {
+   "flag": "绿",
+   "name": "接口与脚本不被重复请求",
+   "evidence": ""
+  },
+  {
+   "flag": "绿",
+   "name": "图标类重复（不判红）",
+   "evidence": "2× p://127.0.0.1:18045/app-icon.png"
+  },
+  {
+   "flag": "绿",
+   "name": "拟定目标 LCP（不判红）",
+   "evidence": "844 ms 达到（目标 ≤2500ms）"
+  },
+  {
+   "flag": "绿",
+   "name": "拟定目标 CLS（不判红）",
+   "evidence": "0.0002 达到（目标 ≤0.1）"
+  },
+  {
+   "flag": "绿",
+   "name": "弱网降速下长任务条数没越过回归线",
+   "evidence": "实测 2 条 / 回归线 6"
+  },
+  {
+   "flag": "绿",
+   "name": "弱网降速下单条长任务没越过回归线",
+   "evidence": "最长 448 ms / 回归线 1200 ms"
+  },
+  {
+   "flag": "绿",
+   "name": "拟定目标 交互反馈（不判红）",
+   "evidence": "未测到（该次点击没有超过 16ms 的事件，属好消息）"
+  },
+  {
+   "flag": "绿",
+   "name": "脚本加载方式",
+   "evidence": "8 个 script 标签，其中 defer/module 0 个"
+  },
+  {
+   "flag": "绿",
+   "name": "正式 CSP 前提",
+   "evidence": "内联事件处理器 186 处：全部摘掉之前只能上 Report-Only"
+  }
+ ]
+}

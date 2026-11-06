@@ -1,0 +1,66 @@
+{
+ "generated_at": "2026-11-06 12:39:38",
+ "python_kind": {
+  "suites": 32,
+  "failed_first_round": [
+   {
+    "suite": "test_consistency.py",
+    "原因": "Windows 上子进程句柄未释放，TemporaryDirectory 清理抛 PermissionError，把已经跑完的判据整段吞掉（日志里只剩栈，没有一条结果）",
+    "处置": "与其它套件同口径改成 ignore_cleanup_errors=True，复跑 exit 0"
+   },
+   {
+    "suite": "media-cache-ui.mjs（browser kind）",
+    "原因": "/csp-report 被插进 @app.get(\"/health\") 与 @app.get(\"/health/ready\") 两个堆叠装饰器之间，把 /health 变成恒返回 204 的处理函数",
+    "处置": "端点移到 /health/live 之前，并新增「三条路由各自归属」判据；复跑 PASS"
+   }
+  ],
+  "final": "32/32 exit 0（含 legacy-backend、test_multiprocess 25 条、test_content_security 24 条）"
+ },
+ "node_kind": {
+  "exit": 0
+ },
+ "browser_kind": {
+  "items": 14,
+  "final": "14/14 exit 0（含新接入的 frontend-firstscreen 与 csp-report-browser）"
+ },
+ "firstscreen_alone": "机器空闲时单跑复验：11 项 0 红（请求 25、关键资源 856,552 B、LCP 844ms、CLS 0.0002、长任务 2 条最长 448ms）",
+ "mutation_calibration": {
+  "c07": "7/7 抓到（M2 第一轮红 0 行，补同进程判据后复跑为红 1 行）",
+  "csp": "11/11 抓到（X1 不拆 csp-report 外层是第一轮 Python 判据完全抓不到的那个）"
+ },
+ "environment_gaps": [
+  "本机 ffmpeg 不在 PATH，语音整套需要 QINGSU_FFMPEG/QINGSU_FFPROBE 指到本机二进制；不设就是 setUpClass 报错，不会被记成通过"
+ ],
+ "not_verified": [
+  "实体 Android 安装与相机授权",
+  "双实体设备真实通话",
+  "Linux 专属备份快照用例（本机跳过，正式 CI 另验）"
+ ],
+ "final_rerun": {
+  "at": "2026-11-06 12:56:12",
+  "python": {
+   "suites": 32,
+   "first_pass": "31 exit 0，1 红（见 artifact_finding）",
+   "after_fix": "legacy-backend 复跑 exit 0，0 红 → 32/32"
+  },
+  "node": {
+   "exit": 0
+  },
+  "browser": {
+   "suites": 14,
+   "exit": "14/14 exit 0（含 frontend-firstscreen 与 csp-report-browser）"
+  },
+  "reason_of_rerun": "路由修复改了 server.py，之后没有在最终代码上整档复跑过，不能拿修复前的批次充当最终结果"
+ },
+ "artifact_finding": {
+  "现象": "legacy-backend 两条红：「version.json 字段齐且与实际包体一致」与「包里那份 app.js 也是当前构建号」",
+  "实际数字": {
+   "清单md5": "63916bc2（r192 线上包）",
+   "判据读到的包 md5": "13da252e（r191 的包）",
+   "包内 APP_BUILD": "75 而 gradle 是 76"
+  },
+  "根因": "仓库根的 qingsu.apk 是上一版留下的现役包副本，判据拿它跟这一版的清单比——判据没错，是工件过期",
+  "处置": "把线上现役 APK 重新取回覆盖 qingsu.apk（md5 63916bc2、size 9,417,027），复跑两条都绿",
+  "为什么值得记下来": "如果只把清单同步成 r192 就交付，这条判据会长期红或者被人顺手改成\"只比 size\"；过期工件和真缺陷长得一模一样，只有把数字摊开才能分开"
+ }
+}

@@ -1,0 +1,43 @@
+{
+ "command": "python /e/tmp/mutate_c07.py（在最终代码上复跑；只改 ws_fanout.py，跑完按 md5 还原）",
+ "count": 7,
+ "all_caught": true,
+ "note": "M2 曾红 0 行：跨进程那节把双方放在两个 worker，绕开了同进程回投路径；补「同进程投递不重复」一节后复跑为红 1 行",
+ "runs": [
+  {
+   "mutation": "M1 跨进程转发直接不发",
+   "red_rows": 5,
+   "exit": 1
+  },
+  {
+   "mutation": "M2 不丢掉本进程自己发出的那一条",
+   "red_rows": 1,
+   "exit": 1
+  },
+  {
+   "mutation": "M3 断开时把聚合在线键一起删",
+   "red_rows": 1,
+   "exit": 1
+  },
+  {
+   "mutation": "M4 控制帧不广播（撤销只本进程）",
+   "red_rows": 2,
+   "exit": 1
+  },
+  {
+   "mutation": "M5 状态接口谎报 fanout=redis",
+   "red_rows": 1,
+   "exit": 1
+  },
+  {
+   "mutation": "M6 忙线残骸不回收",
+   "red_rows": 1,
+   "exit": 1
+  },
+  {
+   "mutation": "M7 死掉的 worker 仍算活着",
+   "red_rows": 1,
+   "exit": 1
+  }
+ ]
+}

@@ -1,0 +1,47 @@
+{
+ "fetched_at": "2026-11-06 12:39:38",
+ "url": "https://scientificexploration.art/health/ready",
+ "release": "r42158793408",
+ "source_revision": "ca3fb619a57349ef6b5326edb4f1a4cf9a7a33b6",
+ "schema": [
+  17,
+  17
+ ],
+ "site_base": "https://scientificexploration.art",
+ "min_build": 0,
+ "build_override": true,
+ "rate_store": "redis",
+ "chat_fanout": "redis",
+ "chat_worker": "9337a8207e90",
+ "csp": {
+  "window_seconds": 300,
+  "count": 0,
+  "blocked": 0,
+  "would_block": 0,
+  "by_directive": {},
+  "mode": "report-only",
+  "requested_enforce": false,
+  "inline_handlers": 186,
+  "can_enforce": false,
+  "blockers": [
+   "还有 186 处内联事件处理器，script-src 离不开 'unsafe-inline'"
+  ],
+  "report_endpoint": "https://scientificexploration.art/csp-report"
+ },
+ "version_json": {
+  "version_code": 76,
+  "version_name": "2.4.3",
+  "min_version_code": 76,
+  "apk_url": "https://scientificexploration.art/qingsu.apk",
+  "size": 9417027,
+  "md5": "63916bc2969d884be27c36cf465ca86f",
+  "sha256": "41aef127fb483431ba34986173009b0df0d0edb95b76a5fb7c32e03dee1d3c40",
+  "notes": "r192 / 2.4.3 (76)\n- 私信实时投递、在线状态与通话忙线改为跨进程共享一份事实，Redis 不可用时显式降级并能在健康接口看到。\n\n更新内容：\n• 私信实时投递、在线状态与通话忙线改为跨进程共享一份事实，Redis 不可用时显式降级并能在健康接口看到。\n• 首屏实测抓出并合并重复的 30 天矩阵请求；新增 CSP 报告模式与违规回收，正式策略仍按实测门槛关闭。"
+ },
+ "before_this_release": {
+  "release": "r42072201117",
+  "source_revision": "c1d7c0bbb949a4e33ae6d59dfaccb2812e0c6860",
+  "chat_keys_had_fanout": false,
+  "had_csp_field": false
+ }
+}

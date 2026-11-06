@@ -1,0 +1,82 @@
+{
+ "checked": 15,
+ "identical": 15,
+ "not_served": [],
+ "files": {
+  "app.js": {
+   "bytes": 276804,
+   "一致": true
+  },
+  "features.js": {
+   "bytes": 269608,
+   "一致": true
+  },
+  "style.css": {
+   "bytes": 84602,
+   "一致": true
+  },
+  "features.css": {
+   "bytes": 77685,
+   "一致": true
+  },
+  "sw.js": {
+   "bytes": 2846,
+   "一致": true
+  },
+  "bubble-themes.js": {
+   "bytes": 17813,
+   "一致": true
+  },
+  "training.js": {
+   "bytes": 29152,
+   "一致": true
+  },
+  "meal-photo.js": {
+   "bytes": 16647,
+   "一致": true
+  },
+  "companion.js": {
+   "bytes": 15127,
+   "一致": true
+  },
+  "manifest.webmanifest": {
+   "bytes": 546,
+   "一致": false
+  },
+  "chat-backgrounds.js": {
+   "bytes": 14179,
+   "一致": true
+  },
+  "chat-tools.js": {
+   "bytes": 15420,
+   "一致": true
+  },
+  "bubble-themes.css": {
+   "bytes": 16237,
+   "一致": true
+  },
+  "guidance.json": {
+   "bytes": 8132,
+   "一致": true
+  },
+  "app-icon.png": {
+   "bytes": 214919,
+   "一致": true
+  }
+ },
+ "apk": {
+  "size": 9417027,
+  "sha256": "41aef127fb483431ba34986173009b0df0d0edb95b76a5fb7c32e03dee1d3c40",
+  "md5": "63916bc2969d884be27c36cf465ca86f"
+ },
+ "note": "index.html 由 / 提供，不在静态清单里逐路径回读",
+ "manifest_explained": {
+  "现象": "manifest.webmanifest 线上与仓库 sha256 不同，但逐行文本完全相同",
+  "repo_crlf": 26,
+  "live_crlf": 0,
+  "apk_crlf": 0,
+  "归一后一致": true,
+  "结论": "差异只在工作区行尾（仓库这份是 CRLF、线上与包内是 LF），不是部署了另一版资源"
+ },
+ "identical_note": "14/15 逐字节一致；manifest.webmanifest 只差行尾，CRLF 归一后一致"
+}

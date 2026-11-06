@@ -1,0 +1,14 @@
+{
+ "repo": "JianZhiSuXingRuanJianHouTai",
+ "commit": "a4a7adb",
+ "change": "deploy/APP_REVISION: c1d7c0bbb -> ca3fb619a（指到 r192 的功能提交）",
+ "run": "CI and production deployment Run #15",
+ "conclusion": "success",
+ "verified_by": "GitHub Actions 运行页回读（匿名 REST 配额已用尽，改用页面确认，不把配额限制写成通过）",
+ "local_cross_repo_test": "QINGSU_APP_REPO=主仓 python tests/test_ops_api.py -> exit 0",
+ "pairing_readback": {
+  "生产 source_revision": "ca3fb619a57349ef6b5326edb4f1a4cf9a7a33b6",
+  "后台 APP_REVISION": "ca3fb619a57349ef6b5326edb4f1a4cf9a7a33b6",
+  "结论": "两仓配对指向同一版主应用源码"
+ }
+}

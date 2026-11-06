@@ -1,0 +1,82 @@
+{
+ "url": "https://scientificexploration.art",
+ "checks": [
+  {
+   "name": "生产首页响应带 Report-Only 头",
+   "ok": true,
+   "detail": "default-src 'self'; script-src 'self' 'unsafe-inline'; style…"
+  },
+  {
+   "name": "生产没有发正式策略（内联处理器还没清零，发了就会拦白）",
+   "ok": true,
+   "detail": [
+    "content-security-policy-report-only"
+   ]
+  },
+  {
+   "name": "report-uri 指向本站可信域名",
+   "ok": true,
+   "detail": "report-uri https://scientificexploration.art/csp-report"
+  },
+  {
+   "name": "页面脚本照常执行（APP_BUILD 与内联处理器要的全局函数都在）",
+   "ok": true,
+   "detail": {
+    "build": 76,
+    "handler": "function",
+    "loginVisible": true,
+    "scripts": 9
+   }
+  },
+  {
+   "name": "首屏脚本标签全部加载",
+   "ok": true,
+   "detail": {
+    "script标签": 9
+   }
+  },
+  {
+   "name": "除了本地探测之外没有页面级 JS 报错",
+   "ok": true,
+   "detail": []
+  },
+  {
+   "name": "除了本地探测之外没有资源请求失败",
+   "ok": true,
+   "detail": []
+  },
+  {
+   "name": "同站接口在 CSP 下正常可达（/health/ready 拿到 JSON）",
+   "ok": true,
+   "detail": {
+    "release": "r42158793408",
+    "schema": [
+     17,
+     17
+    ],
+    "csp_mode": "report-only",
+    "inline": 186,
+    "can_enforce": false,
+    "fanout": "redis"
+   }
+  },
+  {
+   "name": "生产仍然只有被负载均衡到的那一个 worker（跨进程能力就绪≠已扩容）",
+   "ok": true,
+   "detail": {
+    "fanout": "redis",
+    "worker": "9337a8207e90",
+    "online": 0,
+    "sockets": 0
+   }
+  }
+ ],
+ "local_probe": {
+  "说明": "auto 引擎会探本机视觉服务，这台机器没开，请求按预期失败并回退线上引擎",
+  "条数": 1,
+  "样例": [
+   "http://127.0.0.1:8081/health :: net::ERR_CONNECTION_REFUSED"
+  ]
+ },
+ "verdict": "PASS"
+}
