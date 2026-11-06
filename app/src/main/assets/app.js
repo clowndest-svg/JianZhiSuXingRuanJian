@@ -11,7 +11,7 @@ const USER_KEY = "QINGSU_AUTH_USER";
 
 // ── 强制更新门（客户端这一半）────────────────────────────────────────
 // 打包时由 make_version_json.py 从 build.gradle 同步，手改会被判据拦下。
-const APP_BUILD = 76;
+const APP_BUILD = 77;
 // 不参与强更的访客侧接口，必须与服务端 GATE_EXEMPT_PATHS 逐条一致（判据核对两边）。
 const VIEWER_API_PATHS = ["/api/public/dashboard", "/api/public/charts", "/api/cheer",
     "/api/account/recovery-status", "/api/account/forgot", "/api/account/reset"];
@@ -869,6 +869,8 @@ async function syncRemoteDashboard() {
         if (generation !== sessionGeneration || readSeq !== dashboardReadSeq || mutation !== recordMutationSeq) return;
         console.error("Failed to sync remote dashboard", e);
         if(typeof restoreOfflineDashboard === "function") restoreOfflineDashboard(e);
+        // 仪表盘没取到，矩阵这块也不能静默空着：它自己会写"矩阵没取到数据：原因"
+        renderHabitMatrix();
     }
 }
 
@@ -3044,7 +3046,7 @@ function initWebWorkbench() {
     if (!isPublicScreen() && !inApp()) {
         const host = document.getElementById("web-workbench");
         if (host) host.style.display = "block";
-        if (state.token) renderHabitMatrix();
+        // 矩阵由仪表盘那条刷新路径渲染（成功重绘、失败也要说原因），这里不再单独取一次
         paintCheerCount();
         return;
     }
@@ -3055,8 +3057,9 @@ function initWebWorkbench() {
 /** 30 天自律矩阵。三处必须同时成立才是真功能：后端真给 30 天、日期按本地历法算、
     取数失败要在屏上说原因——之前它读的是只有 7 天的 deficitHistory，
     23 个格子永远灰着，而且首屏在任何数据到位之前渲染，进去看就是全灰。 */
-// 首屏有两个入口会要这份矩阵（仪表盘渲染 + 网页工作台初始化），各发一次就浪费一个请求。
-// 只合并"同时在途"的那一次：写记录之后重新渲染仍然会真的重新取数。
+// 首屏这块矩阵只有一个取数入口（仪表盘刷新），工作台不再自己发一次：
+// 之前两个入口靠"合并在途"去重，撞不撞得上全看两条请求有没有重叠——同一份代码实测一次 25 个请求、
+// 一次 26 个。首屏要的是确定值，不是运气。写入后的重绘仍然走同一条路，照样真重新取数。
 let habitMatrixFlight = null;
 
 async function renderHabitMatrix() {
@@ -5193,12 +5196,21 @@ async function loadApkMeta() {
     }).catch(() => put("apk-speed-line", "下载速度未测（测速请求没成功）"));
     const link = document.getElementById("apk-direct-link");
     if (link) {
-        // href 必须带源：App 里根相对路径指向 assets 域，点下去什么都不会发生
-        link.href = API_BASE + "/qingsu.apk?v=" + String(v.sha256 || "").slice(0, 12);
+        // 地址只有一个真源：服务端 /version.json 的 apk_url（按 SITE_BASE 现算，
+        // 只有 build<45 的老客户端才会拿到 IP）。前端不再自己拼主机名——
+        // 之前模板里写死的那串 IP 永远不会被 JS 更新，界面说的和点下去的不是一个地址。
+        const base = String(v.apk_url || (API_BASE + "/qingsu.apk"));
+        const stamp = String(v.sha256 || "").slice(0, 12);
+        link.href = base + (base.indexOf("?") < 0 ? "?" : "&") + "v=" + stamp;
         link.setAttribute("download", "轻塑_" + v.version_name + "_b" + v.version_code + ".apk");
+        // 可见文本必须跟着 href 走：写死在模板里的地址是死的，换域名/换指纹都不会动它
+        link.textContent = link.href;
         const box = document.getElementById("modal-download-url");
         if (box) { box.textContent = link.href; box.setAttribute("href", link.href); }
     }
+    // 二维码交给服务端现生成：它编码的就是 SITE_BASE 那一条，前端抄不到第二份地址
+    const qr = document.getElementById("download-qr-img");
+    if (qr) qr.src = API_BASE + "/qr.svg?v=" + String(v.sha256 || "").slice(0, 8);
     state.apkMeta = v;
     return v;
 }
@@ -5239,7 +5251,12 @@ async function exportMyData() {
 }
 
 function copyApkDownloadUrl() {
-    const url = API_BASE + "/qingsu.apk";
+    // 复制出去的必须就是弹窗里显示的那一条，不然"复制到的地址"和"看到的地址"两套
+    const meta = state.apkMeta || null;
+    const url = meta && meta.apk_url
+        ? meta.apk_url + (String(meta.apk_url).indexOf("?") < 0 ? "?" : "&") +
+          "v=" + String(meta.sha256 || "").slice(0, 12)
+        : API_BASE + "/qingsu.apk";
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(url).then(() => {
             callNativeToast("📋 公网直链已复制！可直接发送给手机/微信打开！");

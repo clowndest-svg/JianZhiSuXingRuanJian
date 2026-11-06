@@ -483,7 +483,7 @@ public class DeviceSmokeTest {
                    +"&&isGatedApi('https://x/version.json')===false"));
         assertEquals("遮罩不该在正常版本下出现","true",js("!document.body.classList.contains('update-blocked')"));
         js("showUpdateWall({code:'update_required',min_build:"+(packaged+1)+",your_build:"+packaged
-           +",latest:{version_code:"+(packaged+1)+",version_name:'9.9.9',apk_url:'https://124.220.54.64/qingsu.apk',size:5322721}})");
+           +",latest:{version_code:"+(packaged+1)+",version_name:'9.9.9',apk_url:'https://scientificexploration.art/qingsu.apk',size:5322721}})");
         waitFor("!!document.getElementById('update-wall')");
         assertEquals("强更遮罩没盖满整屏","true",js("(()=>{const w=document.getElementById('update-wall');"
                 +"return w.offsetHeight>=innerHeight-2&&w.offsetWidth>=innerWidth-2;})()"));

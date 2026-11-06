@@ -34,11 +34,13 @@ r165 补充真正的网络梗图：可搜索 Memegen 模板库的名称、关键
 
 r164 补齐私聊语音（录制、试听、确认发送、Opus 播放）、18枚轻小团表情、光标插入普通表情和附件预览。收到消息和发送回执不再重建输入栏或播放器。网络表情可选 OpenMoji / Wikimedia Commons，保留作者、来源和许可；OpenMoji 使用17.0.0固定索引，实际图片按需从上游下载。Commons 在当前服务器网络下握手超时，会如实提示不可用；这不是全网梗图搜索，可上传自己的 GIF/图片表情。
 
-- 网页：https://124.220.54.64/
-- 介绍与教程：https://124.220.54.64/about
-- 安装包：https://124.220.54.64/qingsu.apk
-- 版本与指纹：https://124.220.54.64/version.json
-- 就绪检查：https://124.220.54.64/health/ready
+- 网页：https://scientificexploration.art/
+- 介绍与教程：https://scientificexploration.art/about
+- 安装包：https://scientificexploration.art/qingsu.apk
+- 版本与指纹：https://scientificexploration.art/version.json
+- 就绪检查：https://scientificexploration.art/health/ready
+- 兼容入口（只给很旧的客户端）：https://124.220.54.64/ —— 清单里 `apk_url` 由服务器按现役入口现算，
+  只有 build<45 且从 IP 取清单时才回落 IP，所以上面五条与这一条不是两个版本
 
 当前已启用可信 HTTPS 域名 `scientificexploration.art`，主服务/health/ready的site_base回读为该域名；IP继续提供兼容升级入口。域名维护沿用scripts/enable-domain.py和运维手册。
 

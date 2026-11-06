@@ -404,6 +404,41 @@ def main():
         h = (getattr(m, fn)().headers or {}).get("Cache-Control", "")
         check("静态件 %s 带 no-cache" % fn, "no-cache" in h, h)
 
+    # --- 8b. 下载入口只有一个真源：模板里不许留绝对地址，包内二维码必须是现役入口 ---
+    # 用户截图里那条 IP 就是这么来的：href 由 JS 现算，可见文本却是模板字面量，
+    # 换域名之后界面永远说旧地址。
+    _assets = os.path.join(ROOT, "app", "src", "main", "assets")
+    _tpl = io.open(os.path.join(_assets, "index.html"), encoding="utf-8", errors="replace").read()
+    _appjs = io.open(os.path.join(_assets, "app.js"), encoding="utf-8", errors="replace").read()
+    import re as _re_dl
+    _hard = _re_dl.findall(r"https?://[^\s<>]+/qingsu" + "\\.apk", _tpl + _appjs)
+    check("前端模板与脚本里没有写死的绝对 APK 地址", not _hard, _hard[:3])
+    check("弹窗可见文本跟着 href 走（说的就是点下去的那条）",
+          "link.textContent = link.href" in _appjs, "")
+    check("复制按钮也走清单里的 apk_url，不再自己拼主机名",
+          "meta.apk_url" in _appjs.split("function copyApkDownloadUrl")[1][:700], "")
+
+    # 包内那份 qr.svg 是 App 里的离线兜底：它编码错了，用户扫出来就是旧入口。
+    # 同一条判据自带正反样本——域名版必须相同、IP 版必须不同，否则这条是摆设。
+    import io as _io_qr
+    import qrcode as _qrlib
+    import qrcode.image.svg as _qrlib_svg
+
+    def _qr_bytes(url):
+        buf = _io_qr.BytesIO()
+        _qrlib.make(url, image_factory=_qrlib_svg.SvgPathImage, box_size=8, border=4).save(buf)
+        return buf.getvalue()
+
+    def _modules(blob):
+        return _re_dl.findall(rb"[0-9.]{2,}", blob)[:80]
+
+    _packaged_qr = open(os.path.join(_assets, "qr.svg"), "rb").read()
+    _entry = "https://scientificexploration.art/qingsu.apk"
+    check("包内二维码编码的是现役入口地址", _modules(_packaged_qr) == _modules(_qr_bytes(_entry)),
+          _packaged_qr[:40])
+    check("同一个判据必须认不出旧 IP 那张（否则它证明不了任何事）",
+          _modules(_packaged_qr) != _modules(_qr_bytes("https://124.220.54.64/qingsu.apk")), "")
+
     # --- 9. 外卖自律统计：没有记录就必须是 0，不替用户预先记功 ---
     st0 = m.compute_dashboard_data(user)["takeout_stats"]
     check("新用户拦截统计全 0", st0["intercepted"] == 0 and st0["cal_saved"] == 0 and st0["fat_jin"] == 0, st0)
@@ -1978,10 +2013,14 @@ def main():
         check("下载按钮旁要看得见手机现装版本与包指纹",
               "apk-fresh-line" in js_txt_for_build and 'id="apk-fresh-line"' in html_txt, "")
         # App 里页面源是 assets 域，根相对路径既取不到清单也下不了包
-        check("取线上资源一律带 API_BASE，不用根相对路径",
+        # 钉的是"取线上资源必须带源"这件事，不是某一种拼串写法：
+        # 下载地址的唯一真源改成清单里的 apk_url 之后，再断言旧写法就是在奖励过期实现。
+        check("取线上资源一律带源，不用根相对路径",
               'fetch(API_BASE + "/version.json"' in js_txt_for_build
               and 'fetch(API_BASE + "/qingsu.apk"' in js_txt_for_build
-              and 'link.href = API_BASE + "/qingsu.apk' in js_txt_for_build, "")
+              and 'const base = String(v.apk_url || (API_BASE + "/qingsu.apk"));' in js_txt_for_build
+              and 'link.href = base + ' in js_txt_for_build
+              and 'link.href = "/qingsu.apk' not in js_txt_for_build, "")
         check("App 里点下载要交给系统浏览器（WebView 自己不会下 apk）",
               "AndroidBridge.openBrowser" in js_txt_for_build
               and "return onDirectDownloadClick(event)" in html_txt, "")

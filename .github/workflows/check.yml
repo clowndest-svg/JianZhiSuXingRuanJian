@@ -215,6 +215,7 @@ jobs:
           node tests/admin-pagination-ui.mjs
           node tests/frontend-firstscreen.mjs
           node tests/csp-report-browser.mjs
+          node tests/download-link-ui.mjs
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

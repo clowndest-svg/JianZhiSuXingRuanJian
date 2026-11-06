@@ -28,6 +28,20 @@
 - 自检：`curl -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13'`
   打 `https://…/ws/chat?ticket=bad`，**403 才是对的**（票据被应用拒），404 说明中间某层没透传。
 
+## 下载入口的唯一真源
+
+用户能拿到安装包的四个出口——弹窗里显示的文本、点下去的链接、"复制下载网址"、二维码——
+都必须来自同一个值：服务器 `/version.json` 的 `apk_url`。这个字段由 `server.py` 按 `SITE_BASE`
+现算，不在前端或模板里写主机名；只有 `build<45` 且从 IP 入口取清单的老客户端才回落到 IP，
+这条兼容分支由 `tests/download-link-ui.mjs` 用 `Host` 头真打了一遍。
+
+二维码在线时取服务端 `/qr.svg?v=<指纹>`（编码的就是 `SITE_BASE`），包内 `assets/qr.svg`
+只作离线兜底，因此它也必须重新生成成现役入口——判据同时钉"服务端那张 == 本站生成"和
+"服务端那张 != 包内那张"，两张不一样才说明前端确实在用服务端那份，而不是挂个查询串骗过检查。
+
+换域名/换备案入口时要动的只有 `SITE_BASE`（`scripts/enable-domain.py` 写 `/opt/qingsu/site-base`），
+不要再去改模板字面量：本轮那条 IP 就是这么留下来的——`href` 会被 JS 重算，可见文本没人更新。
+
 ## CSP 报告模式（方案 C11）
 
 实现落点：`app_modules/content_security.py`（策略、回收、转正门槛）+ `server.py` 的响应中间件、
