@@ -40,6 +40,14 @@ await feature('logoutUser()');feature('state.user={username:"alice"};');assert.e
 const report=fs.readFileSync(path.join(root,'app/src/main/assets/sw.js'),'utf8');
 assert.ok(report.includes("!SHELL.includes(url.pathname)"));assert.ok(!report.includes("'/api/"));
 console.log('PASS: persistent request IDs, offline sync, account isolation, malformed storage, logout cleanup, static-only PWA cache');
+// @ 面板：昵称曾被拼进 onclick 的单引号字符串。escapeHtml 把 ' 变成 &#39;，
+// 浏览器先解码再交给 JS，恶意昵称仍能提前闭合字符串。按钮只该传数字 id。
+feature('cm.atRows=[{id:5,name:"x\');alert(1)//",public_id:"12345678",region:""}];renderAtList("");');
+const atHtml=f.mkEl("cmt-at-list").innerHTML;
+assert.ok(atHtml.includes('pickMentionById(5)'), atHtml);
+assert.ok(!/onclick="pickMention\(/.test(atHtml), atHtml);
+assert.ok(!/onclick="[^"]*alert\(1\)/.test(atHtml), atHtml);
+console.log('PASS: @ list keeps nicknames out of inline JS strings');
 feature('state.user={username:"alice"};state.token="a";');
 f.sandbox.__fetchHandler=async()=>ok({private:'alice-only'});
 const oldRead=feature('getJson("/api/records")');

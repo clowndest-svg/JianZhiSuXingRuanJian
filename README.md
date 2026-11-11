@@ -2,6 +2,8 @@
 
 当前生产版本：r193 / Android **2.4.4（77）**，前后台CI与生产回读通过。线上下载指纹以 [version.json](https://scientificexploration.art/version.json) 为准；下载地址唯一真源、首屏取数确定化与剩余边界见 [r193发布记录](docs/release-r193.md)。
 
+r194 做了一轮安全审计：修补 AI 搜索来源行与评论区 @ 昵称的注入入口，下线公开接口文档，收紧登录/找回密码与上传/导出接口的滥用限制，升级图片解码组件；Android 端定位授权与震动调用同步收紧。详见 [r194发布记录](docs/release-r194.md)。
+
 r191统一保存回执、离线重试与历史修改版本，阻止重复记账和旧页面覆盖新记录；首页、图表与流水使用一致快照，迟到刷新与旧账号响应不回写当前状态。原有业务记录及轻塑号已核对未变。
 
 r189新增照片识餐与逐项食材核对、营养汇总、参考食材改选和历史修正；后台提供本机开源视觉模型及外部API设置。初始每项100g是待核对假设，照片不用于精确称重。
@@ -59,6 +61,7 @@ python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements-dev.txt
 .venv/Scripts/python tests/test_integration.py
 .venv/Scripts/python tests/test_ai_contract.py
+.venv/Scripts/python tests/test_security_hardening.py
 .venv/Scripts/python tests/test_update_copy.py
 .venv/Scripts/python tests/test_companion.py
 .venv/Scripts/python tests/test_chat_media.py

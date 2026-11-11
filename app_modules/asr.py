@@ -56,7 +56,10 @@ def transcribe(path, timeout=120):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         try:
             with opener.open(req, timeout=timeout) as response:
-                data = json.loads(response.read() or b"{}")
+                raw = response.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                raise AsrUnavailable("语音转文字返回内容过大")
+            data = json.loads(raw or b"{}")
         except (urllib.error.URLError, TimeoutError, ValueError, OSError) as error:
             raise AsrUnavailable("语音转文字暂不可用") from error
         return str(data.get("text") or "").strip()[:500]

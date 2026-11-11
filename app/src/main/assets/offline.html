@@ -52,16 +52,28 @@
   <script>
   (function () {
     // 失败的是哪一页就回哪一页：不带这个参数时退回首页，避免刷新到一个空地址。
+    // 只接受本应用资产源 / 现役 HTTPS 入口。query 是可以被拼出来的，
+    // 不校验协议就把 location.replace 的地址交出去，等于给自己留一条 javascript: 通道。
     var params = new URLSearchParams(location.search);
-    var target = params.get("retry") || "";
+    function safeTarget(value) {
+      try {
+        var u = new URL(String(value || ""));
+        if (u.protocol !== "https:" || u.username || u.password) return "";
+        // 本页自己的源就是内置资产源；用 origin 比较，不在页面上写内部地址。
+        if (u.origin === location.origin) return u.href;
+        if (u.host === "scientificexploration.art" || u.host === "124.220.54.64") return u.href;
+        return "";
+      } catch (e) { return ""; }
+    }
+    var target = safeTarget(params.get("retry") || "");
     var retry = document.getElementById("retry");
     var home = document.getElementById("home");
     function go(url) {
       if (!url) return;
       location.replace(url);
     }
-    retry.addEventListener("click", function () { go(target || location.href); });
-    home.addEventListener("click", function () { go(target || location.href); });
+    retry.addEventListener("click", function () { go(target); });
+    home.addEventListener("click", function () { go(new URL("index.html", location.href).href); });
     if (!target) { retry.disabled = true; retry.textContent = "没有可重试的页面"; }
   })();
   </script>

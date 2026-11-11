@@ -159,7 +159,9 @@ def main():
         # 默认策略就是"只许最新版"；要放行旧版得在服务器上放一个 min_build 文件踩刹车，
         # 这样"忘了抬门"不会变成静默失效。
         "min_version_code": code,
-        "apk_url": "https://124.220.54.64/qingsu.apk",
+        # 清单文件本身也只写现役入口；服务器 /version.json 路由还会按请求的
+        # Host / X-App-Build 再算一次，给很旧的客户端保留 IP 兼容分支。
+        "apk_url": os.environ.get("QINGSU_SITE_BASE", "https://scientificexploration.art").rstrip("/") + "/qingsu.apk",
         "size": len(blob),
         "md5": hashlib.md5(blob).hexdigest(),
         "sha256": hashlib.sha256(blob).hexdigest(),

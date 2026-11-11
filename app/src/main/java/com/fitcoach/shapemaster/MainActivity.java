@@ -146,6 +146,12 @@ public class MainActivity extends Activity {
 
             @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
+                // 只给内置页面的源授定位。WebView 里若出现任何别的源（或将来加了 iframe），
+                // 不能因为系统权限已给过就把坐标交出去。
+                if (!isTrustedPageOrigin(origin)) {
+                    callback.invoke(origin, false, false);
+                    return;
+                }
                 // 网页问"能不能拿位置"时，先看 Android 运行时权限在不在：
                 // 没拿到系统权限就直接 allow，H5 只会收到一个说不清的位置错误。
                 if (hasLocationPermission()) {
@@ -304,6 +310,19 @@ public class MainActivity extends Activity {
         // 混合摄像头/DRM 等资源的请求也整条拒绝，不转交系统授权。
         return resources != null && resources.length == 1
                 && PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resources[0]);
+    }
+
+    private static boolean isTrustedPageOrigin(String origin) {
+        if (origin == null) return false;
+        try {
+            Uri u = Uri.parse(origin);
+            return "https".equals(u.getScheme())
+                    && "appassets.androidplatform.net".equals(u.getHost())
+                    && u.getUserInfo() == null
+                    && (u.getPort() == -1 || u.getPort() == 443);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void settleMediaRequest(PermissionRequest request, boolean granted) {

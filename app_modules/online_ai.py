@@ -139,7 +139,11 @@ def online_chat(prompt, max_tokens=400, temperature=0.3):
     began = time.time()
     try:
         with urllib.request.urlopen(request, timeout=_TIMEOUT) as response:
-            got = json.loads(response.read().decode("utf-8", "replace"))
+            raw = response.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            _note_fail("response_too_large", began)
+            return None, "在线模型返回内容过大"
+        got = json.loads(raw.decode("utf-8", "replace"))
     except urllib.error.HTTPError as error:
         _note_fail("http_%d" % error.code, began)
         return None, "在线模型返回 HTTP %d" % error.code

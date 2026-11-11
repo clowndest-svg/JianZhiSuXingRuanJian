@@ -151,7 +151,7 @@ def record(raw):
         # 聚合数字看着有、其实一条都没分类，转正门槛就被一个假形状骗过去了。
         item = inner
     raw_directive = item.get("effective-directive") or item.get("violated-directive") or "unknown"
-    directive = str(raw_directive).split()[0] if str(raw_directive).split() else "unknown"
+    directive = str(raw_directive).split()[0][:40] if str(raw_directive).split() else "unknown"
     disposition = str(item.get("disposition") or "").lower()
     blocked = bool(item.get("blocked")) or disposition == "enforce"
     # 报告模式下 disposition 是 "report"：这条没真被拦，但转正后会被拦。
@@ -162,6 +162,14 @@ def record(raw):
     source = source.split("?")[0].split("#")[0].split("/")[-1][:60]
     key = "%s|%s|%s" % (directive, "e" if blocked else "r", source)
     now = time.time()
+    # 匿名报告可以构造无限多个不同来源文件名；_seen 不设上限就是一条内存增长通道。
+    if len(_seen) > 4096:
+        cutoff = now - REPORT_WINDOW
+        for stale_key, seen_at in list(_seen.items()):
+            if seen_at < cutoff:
+                _seen.pop(stale_key, None)
+        if len(_seen) > 4096:
+            _seen.clear()
     hit = _seen.get(key)
     if hit and now - hit < 5:
         return False

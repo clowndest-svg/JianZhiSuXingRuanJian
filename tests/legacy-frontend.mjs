@@ -2154,8 +2154,15 @@ try {
   const atHtml = r160('(function(){cm.atRows=[{id:3,name:"小田",region:"浙江",avatar:""}];renderAtList("");'
     + 'return document.getElementById("cmt-at-list").innerHTML;})()');
   check("@ 列表那一行的 onclick 属性闭合，且行内子元素没被吃进属性",
-        /onclick="pickMention\(3,'小田'\)"/.test(atHtml) && atHtml.indexOf('class="cmt-at-name"') > 0
+        /onclick="pickMentionById\(3\)"/.test(atHtml) && atHtml.indexOf('class="cmt-at-name"') > 0
           && atHtml.indexOf("</button>") > 0, atHtml.slice(0, 240));
+  // 昵称是用户输入：escapeHtml 把 ' 变成 &#39;，浏览器解码后仍能提前闭合
+  // onclick 里的单引号字符串。按钮只传数字 id，昵称不能出现在 onclick 里。
+  const atEvil = r160('(function(){cm.atRows=[{id:4,name:"x\');alert(1)//",region:"",avatar:""}];renderAtList("");'
+    + 'return document.getElementById("cmt-at-list").innerHTML;})()');
+  check("恶意昵称不能拼进 onclick 的 JS 字符串",
+        atEvil.indexOf("pickMentionById(4)") > 0 && !/onclick="[^"]*alert\(1\)/.test(atEvil),
+        atEvil.slice(0, 260));
   check("表情按钮生成的 onclick 也是闭合的",
         /onclick="cmtInsert\('😀'\)"/.test(foot), (foot.match(/onclick="cmtInsert[^"]*/) || ["没找到"])[0]);
   h160.sandbox.__fetchHandler = () => Promise.resolve({

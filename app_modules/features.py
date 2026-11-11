@@ -100,6 +100,9 @@ def install(app, env):
     def food_estimate(req:EstimateReq,user:dict=Depends(current)):
         """让在线模型按菜名估热量。没配置就如实返回原因，绝不给一个来路不明的数。"""
         from app_modules.online_ai import online_estimate_food, online_status
+        ok, _where, _n = env['rate_hit']('food-estimate:' + str(user['id']), 20, 60)
+        if not ok:
+            raise HTTPException(429, '估算太频繁，请稍后再试')
         if req.grams is not None and not 1<=float(req.grams)<=3000:
             raise HTTPException(400,'重量要在 1 到 3000 克之间')
         ok,why=online_estimate_food(req.food_name,req.grams)

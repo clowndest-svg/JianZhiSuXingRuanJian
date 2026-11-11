@@ -138,12 +138,15 @@ public class WebAppInterface {
 
     @JavascriptInterface
     public void vibrate(long milliseconds) {
+        // 页面只能请求短震；不设上限时一次 XSS/误调用就能把马达按住。
+        long ms = Math.max(0, Math.min(milliseconds, 1000));
+        if (ms == 0) return;
         Vibrator v = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
         if (v != null && v.hasVibrator()) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                v.vibrate(VibrationEffect.createOneShot(milliseconds, VibrationEffect.DEFAULT_AMPLITUDE));
+                v.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE));
             } else {
-                v.vibrate(milliseconds);
+                v.vibrate(ms);
             }
         }
     }
@@ -487,7 +490,11 @@ public class WebAppInterface {
             }catch(Exception e){try{result.put("error",e.getClass().getSimpleName());}catch(Exception ignored){}}
             finally{if(connection!=null)connection.disconnect();}
             String script="if(window.onLocalAiResponse)window.onLocalAiResponse("+org.json.JSONObject.quote(id)+","+result.toString()+");";
-            webView.post(()->{if(context instanceof android.app.Activity && ((android.app.Activity)context).isDestroyed())return;webView.evaluateJavascript(script,null);});
+            // 模型返回的是不可信文本；U+2028/U+2029 在老 WebView 的 JS 字符串里
+            // 会被当成换行，提前结束字符串。先转成 \\u 转义再交给 evaluateJavascript。
+            script=script.replace("\u2028","\\u2028").replace("\u2029","\\u2029");
+            final String finalScript=script;
+            webView.post(()->{if(context instanceof android.app.Activity && ((android.app.Activity)context).isDestroyed())return;webView.evaluateJavascript(finalScript,null);});
         }); } catch (java.util.concurrent.RejectedExecutionException busy) {
             String script="window.onLocalAiResponse&&window.onLocalAiResponse("+org.json.JSONObject.quote(id)+",{error:'busy'});";
             webView.post(() -> { if (context instanceof Activity && !((Activity) context).isDestroyed()) webView.evaluateJavascript(script,null); });

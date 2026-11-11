@@ -48,7 +48,13 @@ CSP_SCAN_DIRS = [WEB_DIR, os.path.join(os.path.dirname(os.path.abspath(__file__)
 
 SITE_BASE = os.environ.get("QINGSU_SITE_BASE", "https://124.220.54.64").rstrip("/")
 
-app = FastAPI(title="轻塑·减脂塑形严管伴侣 API", version="5.0.0")
+# 线上不暴露 Swagger / OpenAPI：151 条路由、请求体形状和内部端点都在这份文档里，
+# 对攻击者是免费的侦察地图，对用户没有任何价值。本地排查时显式设 QINGSU_DOCS=1 才开。
+_DOCS = os.environ.get("QINGSU_DOCS") == "1"
+app = FastAPI(title="轻塑·减脂塑形严管伴侣 API", version="5.0.0",
+              docs_url="/docs" if _DOCS else None,
+              redoc_url="/redoc" if _DOCS else None,
+              openapi_url="/openapi.json" if _DOCS else None)
 
 @app.middleware("http")
 async def response_policy(request: Request, call_next):
@@ -66,11 +72,17 @@ async def response_policy(request: Request, call_next):
     response.headers["X-Content-Type-Options"]="nosniff"
     response.headers["Referrer-Policy"]="no-referrer"
     response.headers["X-Frame-Options"]="DENY"
+    # 页面只用自己的麦克风与定位；摄像头走原生拍照/相册，不需要 getUserMedia。
+    # 显式关掉其余能力，XSS 即使出现也少几条可用的逃生通道。
+    response.headers["Permissions-Policy"]=(
+        "camera=(), geolocation=(self), microphone=(self), payment=(), usb=()")
     # C11：默认只发 Report-Only。开关拨到转正也要先过实测门槛（内联处理器清零 +
     # 窗口内没有被拦的违规），门槛没过就照旧报告——宁可晚一步收紧，不把界面拦白。
     content_security.apply(response.headers, directories=CSP_SCAN_DIRS,
                                base=SITE_BASE)
-    if request.url.path.startswith(("/api/", "/u/")) or (request.url.path.startswith("/uploads/") and "cache-control" not in response.headers):
+    if (request.url.path.startswith(("/api/", "/u/"))
+            or request.url.path in ("/health", "/health/ready", "/health/live")
+            or (request.url.path.startswith("/uploads/") and "cache-control" not in response.headers)):
         response.headers["Cache-Control"]="private, no-store"
     route = getattr(request.scope.get('route'), 'path', '/unmatched')
     logging.getLogger("uvicorn.error").info("request id=%s path=%s status=%s elapsed_ms=%.1f",request_id,route,response.status_code,(time.monotonic()-started)*1000)
@@ -724,8 +736,8 @@ def verify_pw(pw, user_row):
     # sqlite3.Row 没有 .get()，只能先确认列在再取值
     salt = user_row["pw_salt"] if "pw_salt" in (user_row.keys() or []) else None
     if salt:
-        return _scrypt(pw, salt) == user_row["password_hash"]
-    return hash_pw(pw) == user_row["password_hash"]
+        return hmac.compare_digest(_scrypt(pw, salt), user_row["password_hash"])
+    return hmac.compare_digest(hash_pw(pw), user_row["password_hash"])
 
 
 # ============================ 账号中心：口令、验证码、忌口、定位 ============================
@@ -889,7 +901,9 @@ def check_share(conn, username, key):
     c = conn.cursor()
     c.execute("SELECT * FROM users WHERE username = ?", ((username or "").strip(),))
     user = c.fetchone()
-    if not user or not key or key != (user["share_secret"] or ""):
+    secret = (user["share_secret"] or "") if user else ""
+    if (not user or not key or not secret
+            or not secrets.compare_digest(str(key).encode("utf-8"), str(secret).encode("utf-8"))):
         return None
     settings=share_settings(conn,user['id'])
     if not settings['enabled'] or (settings['expires_at'] and settings['expires_at']<time.time()):
@@ -911,6 +925,14 @@ _SHARE_LOST_HTML = (
 
 _LOGIN_WINDOW = 900
 _LOGIN_MAX_FAILS = 5
+# 单账号 5 次/15 分钟只挡住猜口令，不挡"换一堆用户名各试一次"的 CPU 消耗。
+# 再加一层按 IP 的总闸；60 次/分钟对正常人和共享出口都够用。
+_LOGIN_IP_LIMIT = 60
+_LOGIN_IP_WINDOW = 60
+# 找回密码在"邮箱没绑过"这条路上不走 _send_code，所以没有发信限流。
+# 不留总闸的话，这个匿名接口可以被人拿来按响应时间枚举邮箱。
+_FORGOT_IP_LIMIT = 6
+_FORGOT_IP_WINDOW = 600
 _login_fails = {}
 _public_hits = defaultdict(list)
 
@@ -1350,7 +1372,11 @@ def register(req: RegisterReq, request: Request):
 
 @app.post("/api/login")
 def login(req: LoginReq, request: Request):
-    key = "%s|%s" % (_ip(request), req.username.strip().lower())
+    ip = _ip(request)
+    ip_ok, _ip_where, _ip_n = rate_hit("login-ip:" + ip, _LOGIN_IP_LIMIT, _LOGIN_IP_WINDOW)
+    if not ip_ok:
+        raise HTTPException(status_code=429, detail="登录尝试太频繁，请稍后再试")
+    key = "%s|%s" % (ip, req.username.strip().lower())
     if _login_blocked(key):
         raise HTTPException(status_code=429, detail="失败次数过多，请 15 分钟后再试")
 
@@ -1359,6 +1385,10 @@ def login(req: LoginReq, request: Request):
     c.execute("SELECT * FROM users WHERE username = ?", (req.username.strip(),))
     user = c.fetchone()
     if not user or not verify_pw(req.password, user):
+        if not user:
+            # 不存在与密码错必须连"算一次哈希"的代价也一致：否则按响应时间
+            # 就能把注册过的用户名筛出来，和 400 文案刻意不区分是矛盾的。
+            _scrypt(req.password, "0" * 32)
         _login_fail(key)
         conn.close()
         # 不区分"用户不存在"与"密码错"，免得给枚举留信号
@@ -1409,10 +1439,14 @@ def login(req: LoginReq, request: Request):
 @app.post("/api/login/email")
 def login_email(req: EmailLoginReq, request: Request):
     """邮箱验证码登录：账号密码之外的第二条路，失败同样计入 15 分钟限流。"""
+    ip = _ip(request)
+    ip_ok, _ip_where, _ip_n = rate_hit("login-ip:" + ip, _LOGIN_IP_LIMIT, _LOGIN_IP_WINDOW)
+    if not ip_ok:
+        raise HTTPException(status_code=429, detail="登录尝试太频繁，请稍后再试")
     addr = mailer.normalize(req.email)
     if not mailer.email_shape_ok(addr):
         raise HTTPException(status_code=400, detail="邮箱格式不对")
-    key = "%s|email|%s" % (_ip(request), addr)
+    key = "%s|email|%s" % (ip, addr)
     if _login_blocked(key):
         raise HTTPException(status_code=429, detail="失败次数过多，请 15 分钟后再试")
     conn = get_db()
@@ -1427,7 +1461,9 @@ def login_email(req: EmailLoginReq, request: Request):
     if not ok:
         _login_fail(key)
         conn.close()
-        raise HTTPException(status_code=400, detail=why)
+        # 只有绑过邮箱的账号才可能走到这里，具体原因（没验证码/过期/次数用完）
+        # 会直接告诉攻击者"这个邮箱注册过"。登录入口统一回同一句话。
+        raise HTTPException(status_code=400, detail="邮箱或验证码不对")
     if user["banned_at"]:
         conn.close()
         raise AccountBanned(user["ban_reason"])
@@ -1722,6 +1758,9 @@ def change_password(req: PasswordChangeReq, user: dict = Depends(get_current_use
 
 @app.post("/api/account/avatar")
 async def upload_avatar(photo: UploadFile = File(None), user: dict = Depends(get_current_user)):
+    ok, _where, _n = rate_hit("avatar:%d" % user["id"], 20, 60)
+    if not ok:
+        raise HTTPException(status_code=429, detail="头像上传太频繁，请稍后再试")
     if not photo or not getattr(photo, "filename", None):
         raise HTTPException(status_code=400, detail="没有收到图片")
     raw = await photo.read(4 * 1024 * 1024 + 1)
@@ -1794,6 +1833,10 @@ def forgot_password(req: ForgotReq, request: Request):
     generic = {"code": 0, "msg": "如果这个邮箱绑定过账号且已通过验证，验证码已经发出，十分钟内有效"}
     if not mailer.email_shape_ok(addr):
         raise HTTPException(status_code=400, detail="邮箱格式不对，收不到信")
+    ok_ip, _where, _n = rate_hit("forgot-ip:" + _ip(request), _FORGOT_IP_LIMIT,
+                                 _FORGOT_IP_WINDOW)
+    if not ok_ip:
+        raise HTTPException(status_code=429, detail="请求太频繁，请稍后再试")
     st = mailer.status()
     if not st["ok"]:
         raise HTTPException(status_code=503, detail=st["why"])
@@ -2471,6 +2514,9 @@ def _progression(prev_weight, prev_waist, new_weight, new_waist, cycle_num, day,
 
 
 async def _new_cycle(user, weight_jin, waist_cm, photo, label):
+    ok, _where, _n = rate_hit("cycle:%d" % user["id"], 12, 3600)
+    if not ok:
+        raise HTTPException(status_code=429, detail="周期记录提交太频繁，请稍后再试")
     if not math.isfinite(weight_jin) or not 40<=weight_jin<=600 or not math.isfinite(waist_cm or 0) or not 0<=(waist_cm or 0)<=300:
         raise HTTPException(status_code=400,detail="体重或围度超出范围")
     raw=None
@@ -2574,13 +2620,19 @@ def set_day_mode(req: ModeReq, user: dict = Depends(get_current_user)):
 @app.post("/api/checklist")
 def save_checklist(req: ChecklistReq, user: dict = Depends(get_current_user)):
     """采购清单按日期存，换一天自然是一张空表。"""
+    try:
+        blob = json.dumps(req.state or {}, ensure_ascii=False)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="清单内容读不懂")
+    if len(blob.encode("utf-8")) > 4096:
+        raise HTTPException(status_code=413, detail="清单内容过大")
     conn = get_db()
     c = conn.cursor()
     today = date.today().isoformat()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     c.execute("INSERT INTO checklist_state (user_id, log_date, state_json, updated_at) VALUES (?, ?, ?, ?) "
               "ON CONFLICT(user_id, log_date) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at",
-              (user["id"], today, json.dumps(req.state or {}, ensure_ascii=False), now))
+              (user["id"], today, blob, now))
     conn.commit()
     conn.close()
     return {"code": 0}
@@ -2589,6 +2641,9 @@ def save_checklist(req: ChecklistReq, user: dict = Depends(get_current_user)):
 @app.get("/api/export.csv")
 def export_csv(user: dict = Depends(get_current_user)):
     """本人全部流水导出，UTF-8 BOM 保证 Excel 打开不乱码。"""
+    ok, _where, _n = rate_hit("export:%d" % user["id"], 6, 60)
+    if not ok:
+        raise HTTPException(status_code=429, detail="导出太频繁，请稍后再试")
     conn = get_db()
     c = conn.cursor()
     out = io.StringIO()
@@ -2664,6 +2719,29 @@ def _strip_tags(s):
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", s or "")).strip()
 
 
+class _BingRedirect(urllib.request.HTTPRedirectHandler):
+    """搜索请求只允许落在 Bing 自己的域名上。
+
+    urllib 默认跟随重定向；如果搜索结果页把 Location 指向内网地址，
+    服务端就会替调用者去请求它——这是公开接口最容易被忽视的一条 SSRF 通道。
+    Bing 正常只会跳到 cn.bing.com / www.bing.com；其它目标一律不跟。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            parts = urllib.parse.urlsplit(newurl)
+            host = (parts.hostname or "").lower()
+        except ValueError:
+            return None
+        # 只跟 HTTPS，不跟任何明文降级；搜索结果不值得为兼容一个 302 冒被改写的风险。
+        if (parts.scheme == "https"
+                and (host == "bing.com" or host.endswith(".bing.com"))):
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+        return None
+
+
+_BING_OPENER = urllib.request.build_opener(_BingRedirect())
+
+
 def web_search(query, limit=4):
     """抓必应国内版的自然结果；抓不到就返回空列表，不编。"""
     url = "https://cn.bing.com/search?q=" + urllib.parse.quote(query) + "&setmkt=zh-CN"
@@ -2672,8 +2750,11 @@ def web_search(query, limit=4):
                       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         "Accept-Language": "zh-CN,zh;q=0.9",
     })
-    with urllib.request.urlopen(req, timeout=12) as resp:
-        page = resp.read().decode("utf-8", "replace")
+    with _BING_OPENER.open(req, timeout=12) as resp:
+        raw = resp.read(2 * 1024 * 1024 + 1)
+    if len(raw) > 2 * 1024 * 1024:
+        return []
+    page = raw.decode("utf-8", "replace")
     items = re.findall(
         r'<li class="b_algo".*?<h2>.*?<a[^>]*href="([^"]+)".*?>(.*?)</a>.*?<p[^>]*>(.*?)</p>',
         page, re.S)
@@ -2974,10 +3055,26 @@ def body_looks_invented(p):
     return got == LEGACY_DEFAULT_BODY
 
 
+_LLM_PING = {"at": 0.0, "ok": False}
+
+
+def _llm_reachable():
+    """状态页每次刷新都真的去 ping 模型，会被人拿来反复烧外部额度/本机 CPU。
+    10 秒内复用同一个结论；超过 10 秒再探，界面仍然能在模型恢复后自己变绿。"""
+    now = time.time()
+    if now - _LLM_PING["at"] >= 10:
+        try:
+            ok = llm_chat("ping", max_tokens=4) is not None
+        except Exception:
+            ok = False
+        _LLM_PING.update(at=now, ok=ok)
+    return _LLM_PING["ok"]
+
+
 @app.get("/api/ai/status")
 def ai_status(user: dict = Depends(get_current_user)):
     """引擎健康面：本机模型、服务器模型、Redis 各自通不通，前端据此决定用谁。"""
-    ok = llm_chat("ping", max_tokens=4) is not None
+    ok = _llm_reachable()
     r_ok = redis_up()
     # 在线模型这一格原来直接拿 online_status()["ok"] 当"up"，而那个 ok 的含义是
     # **配置在**——模型挂了很久也照样显示 up（B06 点名的错）。现在按"有没有跑通过的证据"判：
@@ -3119,7 +3216,10 @@ def llm_chat(prompt, max_tokens=200, temperature=0.2):
                                  headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=_LLM_TIMEOUT) as resp:
-            got = json.loads(resp.read().decode("utf-8", "replace"))
+            raw = resp.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise ValueError("response_too_large")
+        got = json.loads(raw.decode("utf-8", "replace"))
         txt = ((got.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
         txt = txt.strip()
     except Exception as e:
@@ -3580,7 +3680,7 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
         return {"code": 0, "source": "none",
                 "answer": "联网搜到的 %d 条结果里没有一条真正讲到「%s」，都是不相干的页面，"
                           "我不拿无关内容凑答案。换个具体点的说法再问我试试，"
-                          "或者接着聊也行。" % (len(items), "、".join(terms)),
+                          "或者接着聊也行。" % (len(items), html_escape("、".join(terms))),
                 "items": []}
     items = kept
 
@@ -3602,13 +3702,16 @@ def ask(req: AskReq, user: dict = Depends(get_current_user)):
         "<div style='margin:4px 0;padding:5px 8px;background:#F8FAFC;border-radius:8px;'>"
         "<div style='font-weight:700;'>{}</div>"
         "<div style='font-size:10px;color:#94A3B8;margin-top:2px;'>{} · 搜索词已改写</div></div>".format(
-            it["title"], it["host"])
+            html_escape(_plain(it["title"])), html_escape(_plain(it["host"])))
         for it in items[:3])
     # source 必须与答案的来历一致：只有模型真合成过才叫 web_model，
     # 摘录兜底（不管是模型没跑还是模型说资料不够）一律叫 web
     return {"code": 0, "source": "web_model" if how == "model" else "web",
             "answer": answer + html_escape(tail) + "<br>" + src_rows,
-            "items": [{"title": it["title"], "url": it["url"], "host": it["host"]} for it in items]}
+            # items 也可能被别的客户端直接渲染；这里只回纯文本，别把上游 HTML
+            # 原样放进第二个出口（answer 已经转义过一次，items 不能成为漏网的那条）。
+            "items": [{"title": _plain(it["title"]), "url": it["url"],
+                       "host": _plain(it["host"])} for it in items]}
 # ==================== 100% REAL Chart Data API ====================
 
 def _deficit_rows(c, user_id: int, metrics: dict, days: int) -> list:
@@ -3905,7 +4008,8 @@ def private_photo(name: str, expires: int=0, signature: str="",audience:int=0, t
         payload+=f":{audience}:{user['share_secret']}"
     if scope: payload += f":{scope}:{ref}"
     expected=hmac.new(media_key(),payload.encode(),hashlib.sha256).hexdigest()
-    if expires<int(time.time()) or expires>time.time()+901 or not secrets.compare_digest(signature,expected):
+    if (expires<int(time.time()) or expires>time.time()+901
+            or not secrets.compare_digest(str(signature).encode("utf-8"), expected.encode("ascii"))):
         raise HTTPException(status_code=404,detail="照片不存在或授权已失效")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp|gif|mp4|webm|m4a|ogg|aac)",name,re.I):
         raise HTTPException(status_code=404,detail="照片不存在")
@@ -3942,7 +4046,12 @@ def private_photo(name: str, expires: int=0, signature: str="",audience:int=0, t
     finally:
         conn.close()
     path=os.path.join(UPLOAD_DIR,name)
-    if not os.path.isfile(path):raise HTTPException(status_code=404,detail="照片不存在")
+    # 扩展名白名单已经挡掉 ../ 与反斜杠；这里再按真实路径确认一次，
+    # 防止将来有人放宽上面的正则时直接把上传目录外的文件读出去。
+    upload_root=os.path.realpath(UPLOAD_DIR)
+    if (not os.path.isfile(path)
+            or not os.path.realpath(path).startswith(upload_root+os.sep)):
+        raise HTTPException(status_code=404,detail="照片不存在")
     mime = "audio/ogg" if name.endswith(".audio.ogg") else (mimetypes.guess_type(name)[0] or "application/octet-stream")
     # Authorization above controls fresh requests; no-store alone cannot revoke
     # a bearer URL. Only community thumbnails get a bounded cache window.
@@ -4027,10 +4136,16 @@ async def csp_violation_report(request: Request):
     和是否拦截，够回答"能不能转正"，也够不上变成第二个日志泄漏面。
     """
     try:
-        body = await request.body()
+        # 只收前 8KB：CSP 报告是匿名接口，直接 request.body() 会把
+        # nginx 允许的整个 40MB 请求体读进内存，等于给了一条廉价的内存 DoS。
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > 8192:
+                break
     except Exception:
         return Response(status_code=204)
-    content_security.record(body[:8192])
+    content_security.record(bytes(body[:8192]))
     return Response(status_code=204)
 
 @app.get("/health/live")
@@ -4596,6 +4711,9 @@ def _store_community_media(raw, user):
 
 @app.post('/api/community/media')
 async def community_media(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    ok, _where, _n = rate_hit("community-media:%d" % user["id"], 12, 60)
+    if not ok:
+        raise HTTPException(status_code=429, detail="上传太频繁，歇一会儿再传")
     raw = await media.read_upload(file, GIF_MAX, '图片或动图不能超过8MB')
     return await media.process(_store_community_media, raw, user)
 

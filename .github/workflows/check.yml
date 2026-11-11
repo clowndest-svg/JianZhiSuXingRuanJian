@@ -128,6 +128,7 @@ jobs:
           python tests/test_deployment_failures.py
           python tests/test_monitor_failures.py
           python tests/test_optimization_security.py
+          python tests/test_security_hardening.py
           python tests/test_optimization_data.py
           python tests/test_optimization_ux.py
       - run: python tests/test_ai_contract.py

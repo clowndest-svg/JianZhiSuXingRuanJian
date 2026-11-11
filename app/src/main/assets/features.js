@@ -1948,12 +1948,19 @@ function renderAtList(errText) {
     host.innerHTML = cm.atRows.map(function (u) {
         // 一排全是"小田"时选错就 @ 错人，所以把轻塑号一起显示出来分辨
         const sub = cmRegionTag(u.region) + (u.public_id ? " · #" + escapeHtml(String(u.public_id)) : "");
-        return '<button type="button" class="cmt-at-row" onclick="pickMention(' + Number(u.id) + ",'"
-            + escapeHtml(u.name || "").replace(/'/g, "%27") + "')\">"
+        return '<button type="button" class="cmt-at-row" onclick="pickMentionById(' + Number(u.id) + ')">'
             + '<span class="cm-avatar sm">' + cmAvatarInner(u) + "</span>"
             + '<span class="cmt-at-name">' + escapeHtml(u.name || "已注销用户") + "</span>"
             + '<span class="cmt-at-sub">' + sub + "</span></button>";
     }).join("");
+}
+
+/* 昵称是用户输入，不能再拼进 onclick 里的单引号字符串：
+   escapeHtml 会把 ' 变成 &#39;，浏览器解码后照样能提前闭合 JS 字符串。
+   按钮只传数字 id，昵称在内存里按 id 取。 */
+function pickMentionById(uid) {
+    const row = (cm.atRows || []).find(u => qsSameId(u.id, uid));
+    pickMention(Number(uid), String((row && row.name) || ""));
 }
 
 function pickMention(uid, name) {
@@ -3515,8 +3522,8 @@ function cmBubbleHTML(m, me, st) {
         + (window.QSChatTools ? ((!pending && !failed) ? window.QSChatTools.timeHTML(m) : "") : "<time>" + escapeHtml(pending || failed ? "" : cmAgo(m.created_at)) + "</time>")
         + (m.edited_at ? '<span class="dm-edited">已编辑</span>' : "")
         + (status ? '<span class="dm-status ' + statusCls + '">' + status
-            + (failed ? '<button type="button" class="dm-retry" onclick="dmRetrySend(\''
-                + escapeHtml(m.request_id || "") + '\')">重试</button>' : "") + "</span>" : "")
+            + (failed ? '<button type="button" class="dm-retry" data-rid="'
+                + escapeHtml(m.request_id || "") + '" onclick="dmRetrySendFrom(this)">重试</button>' : "") + "</span>" : "")
         + (dressed ? "</span>" : "")
         + "</div>";
     // 自己发的靠右、对方靠左，各带一个头像——小红书的私信就是这条规矩；
@@ -3694,6 +3701,9 @@ async function dmRetrySend(rid) {
     cm.pending[rid] = f;
     if (dmScopeAlive(f.scope)) paintThread();
     await dmSendNow(rid, f.scope, f.msg, false);
+}
+function dmRetrySendFrom(btn) {
+    dmRetrySend(String((btn && btn.getAttribute && btn.getAttribute("data-rid")) || ""));
 }
 
 async function sendDM() {
