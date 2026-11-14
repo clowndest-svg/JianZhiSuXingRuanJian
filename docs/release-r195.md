@@ -14,4 +14,8 @@
 
 前一轮 r194 实际已部署成功：GitHub Actions 42942099674，生产 revision 为 5439d5fbd6268709e4e19d79f486347e4b7df05f。本轮补交其已有本地审计证据。
 
-验证与部署证据保存在 `docs/release-evidence-r195/`。本机 Linux 专用备份快照测试的 4 项跳过单列；实体 Android 安装、系统权限、锁屏、省电与真实双端通话尚未复验。生产数据、上传目录、签名材料和有效恢复备份保留；只清理已确认的审查临时文件与缓存。
+本轮 [GitHub Actions 43614928512](https://github.com/clowndest-svg/JianZhiSuXingRuanJian/actions/runs/43614928512) 的 Android、integration、deploy 全部成功。生产 release 为 r43614928512，revision 为 4b07cf8d9555022a0ac22fc3b2de304b6c7c74a4。主页及介绍页返回200，三条接口文档入口返回404；实际下载 APK 的大小、MD5、SHA-256 与清单逐项一致，SHA-256 仍为 e95f003677bc43bd7e3ef1365caf6a549f930038aae3026ee9d598721945ebcb。
+
+部署前后主要记录数量及账号标识摘要完全一致，数据库完整性正常、无外键错误。前后各完成一次加密备份拉取与本机恢复验证，23个媒体文件全部恢复成功。隔离QA配置、数据库及上传目录已由发布流程清理；回退快照位于 `/opt/qingsu/backups/release-20261115-004417`。
+
+验证与部署证据保存在 `docs/release-evidence-r195/`。本机 Linux 专用备份快照测试的 4 项跳过单列；实体 Android 安装、系统权限、锁屏、省电与真实双端通话尚未复验。生产数据、上传目录、签名材料和有效恢复备份保留；审查临时目录 `_audit_sandbox` 和 `app/build` 已移入 Windows 回收站，并重新建立空沙箱目录。永久删除命令被自动审批以 `blocked by policy` 拦截，采用可恢复清理后成功。

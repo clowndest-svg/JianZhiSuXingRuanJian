@@ -1,0 +1,14 @@
+
+PAGE_ERRORS []
+DIAG { header: '170cm · 160斤 · 留肌塑形', modal: 'modal-overlay', toast: '' }
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+page.waitForFunction: Timeout 60000ms exceeded.
+    at D:\RuanJian\JiaZhiSuXianApk\tests\chat-ui.mjs:146:14 {
+  log: [],
+  name: 'TimeoutError'
+}
+
+Node.js v24.14.1

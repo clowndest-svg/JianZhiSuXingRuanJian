@@ -1,0 +1,20 @@
+{
+  "run_id": 43614928512,
+  "url": "https://github.com/clowndest-svg/JianZhiSuXingRuanJian/actions/runs/43614928512",
+  "revision": "4b07cf8d9555022a0ac22fc3b2de304b6c7c74a4",
+  "conclusion": "success",
+  "jobs": [
+    {
+      "name": "android",
+      "conclusion": "success"
+    },
+    {
+      "name": "integration",
+      "conclusion": "success"
+    },
+    {
+      "name": "deploy",
+      "conclusion": "success"
+    }
+  ]
+}

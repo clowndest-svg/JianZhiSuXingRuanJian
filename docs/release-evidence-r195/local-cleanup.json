@@ -1,0 +1,13 @@
+{
+  "method": "Windows Recycle Bin",
+  "paths": [
+    "D:/RuanJian/JiaZhiSuXianApk/_audit_sandbox",
+    "D:/RuanJian/JiaZhiSuXianApk/app/build"
+  ],
+  "preserved": [
+    "production database",
+    "uploads",
+    "keys",
+    "recovery backups"
+  ]
+}
