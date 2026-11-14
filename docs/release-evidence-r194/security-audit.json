@@ -1,0 +1,35 @@
+{
+ "scope": ["网页 https://scientificexploration.art", "下载入口 /qingsu.apk 与 version.json", "Android 包 2.4.5(78)", "服务端 server.py + app_modules", "服务器配置只读核对"],
+ "method": "独立临时库启动真实 server.py 做动态攻击；前端 innerHTML/内联 onclick 全量静态审计；Android Manifest/WebView 桥/导出组件审计；线上只读探测；依赖公开公告(OSV)",
+ "confirmed_and_fixed": [
+  {"id": "XSS-ask-host", "type": "存储型 XSS", "where": "/api/ask 搜索结果来源行 host 原样拼 HTML，前端 innerHTML 渲染", "fix": "标题/域名先 _plain 再 html_escape；items 也纯文本化", "gate": "test_security_hardening.py::test_ai_source_rows_are_escaped"},
+  {"id": "XSS-at-nickname", "type": "DOM 型 XSS", "where": "renderAtList 把 escapeHtml 后的昵称放进 onclick=\"pickMention(3,'昵称')\"，&#39; 在属性里被解码回单引号", "fix": "按钮只传数字 id，昵称按 id 从 cm.atRows 取(pickMentionById)；私信重试改 data-rid + dmRetrySendFrom(this)", "gate": "frontend-integration.mjs / legacy-frontend.mjs 恶意昵称判据"},
+  {"id": "public-api-map", "type": "信息暴露/侦察面", "where": "/docs /redoc /openapi.json 公网可达，openapi 列出 151 条路由", "fix": "默认不注册三条路由，本地排查需 QINGSU_DOCS=1", "gate": "test_security_hardening.py::test_api_map_is_not_public"},
+  {"id": "pillow-jpeg", "type": "依赖内存破坏", "where": "Pillow 12.3.0 JPEG 解码多条公告(含 ImagingJpegDecode 堆越界)", "fix": "钉到 Pillow==13.0.0", "gate": "test_security_hardening.py::test_pillow_has_the_jpeg_decoder_fix"},
+  {"id": "anon-abuse", "type": "匿名接口可刷/资源耗尽", "where": "login/login-email 仅按 IP+账号限流；forgot 未绑定邮箱完全绕过限流；community-media/周期照片/头像/导出/estimate 无闸；ai-status 反复烧模型；checklist 无大小限制；CSP 报告去重表无上限", "fix": "login IP 60/min、forgot 6/10min、community-media 12/min、周期照片 12/h、头像 20/min、导出 6/min、estimate 20/min；ai-status 探测缓存 10s；checklist 4KB；CSP 报告读前 8KB 且去重表 4096 上限回收", "gate": "test_forgot_has_an_anonymous_rate_limit / test_community_media_upload_is_rate_limited"},
+  {"id": "email-enumeration", "type": "账号/邮箱枚举", "where": "login/email 按文案区分未绑定与验证码错；login 不存在用户名响应更快；forgot 匿名无闸", "fix": "login/email 统一文案；不存在用户名也跑同代价 scrypt；密码与分享密钥比较改 hmac.compare_digest", "gate": "test_email_login_does_not_say_whether_the_mailbox_is_bound"},
+  {"id": "ssrf-search-redirect", "type": "SSRF/无界读取", "where": "web_search 跟随任意重定向且无响应大小上限；模型/ASR 响应无上限", "fix": "Bing 重定向只允许 https 且 host 为 bing.com 及子域；搜索读取 2MB 上限；本机/在线模型/ASR 各 1MB 上限", "gate": "test_optimization_security / test_ai_contract 复跑"},
+  {"id": "file-and-browser", "type": "越权读取/浏览器侧", "where": "媒体读取仅扩展名白名单；无 Permissions-Policy；health 可缓存；离线页 retry 接受任意 scheme；Android 定位 startsWith 可被仿冒源骗过；vibrate 无上限；evaluateJavascript 文本未转义 U+2028/2029", "fix": "realpath 目录边界复核；新增 Permissions-Policy；health no-store；offline retry 只收 HTTPS+本站源/现役域名；定位按 URI 精确 host/端口校验；vibrate 上限 1s；转义 U+2028/U+2029", "gate": "test_security_headers_and_health_cache / test_non_ascii_secrets_are_rejected_not_500 + Android lint"},
+  {"id": "download-entry", "type": "入口不一致", "where": "make_version_json.py 清单默认地址硬编码 IP", "fix": "默认地址改现役域名(可 QINGSU_SITE_BASE 覆盖)；保留 build<45 从 IP 取清单的兼容回落", "gate": "download-link-ui.mjs / legacy-backend 发布顺序判据"}
+ ],
+ "tested_not_vulnerable": [
+  "SQL 注入：全参数化 + 排序/筛选白名单，实测注入串未绕过",
+  "路径穿越：媒体/上传/备份路径实测 ../ 与绝对路径被挡，新增 realpath 第二道门",
+  "IDOR：跨用户读写实测被鉴权挡下",
+  "签名链接篡改：HMAC 签名媒体 URL 改签名/改路径均 403/404",
+  "WS 伪造票据：伪造/过期 ticket 实测被拒",
+  "CORS：白名单且不带 credentials，实测跨源被拒",
+  "上传伪装/SVG：扩展名+内容校验，SVG/脚本伪装被挡",
+  "CSV 公式注入：导出对 =/+/-/@ 前缀做防护",
+  "管理后台转义：后台页面输出转义实测无注入",
+  "服务器权限/监听：8000/8055/8100 只绑 Docker 桥；keys 700、密钥 600/640；backups 700 root；qingsu 用户 + ProtectSystem=strict/ProtectHome=yes/NoNewPrivileges=yes",
+  "CI/部署路径与密钥处理：签名密钥在仓库外，部署脚本路径安全",
+  "APK 签名：v2/v3 通过，证书指纹 c6b15363…738f 未变"
+ ],
+ "deliberately_unchanged": [
+  "CSP 仍 Report-Only（186 处内联处理器，未达转正式策略门槛；XSS 走输出转义而非靠 CSP）",
+  "App 内 API_BASE 仍为 IP（换域名需单独评估旧客户端/证书链/备案）",
+  "线上 min_build 仍为 0（强更门人工刹车，抬门需真机确认）"
+ ],
+ "not_covered": ["OS/内核审计", "管理员后台独立渗透", "真机重装/省电/多系统矩阵"]
+}

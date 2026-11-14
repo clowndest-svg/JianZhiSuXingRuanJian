@@ -19,6 +19,25 @@ class ChatHistory(unittest.TestCase):
     def history(self,h=None,**params):
         h=h or self.headers;peer=self.a if h is self.h2 else self.b
         return self.c.get('/api/chat/messages',headers=h,params={'with_user':peer,**params}).json()
+    def test_recall_syncs_both_accounts_without_replacing_newer_identical_preview(self):
+        first=self.send('same recall preview');last=self.send('same recall preview')
+        with patch.object(self.s,'_push') as push:
+            r=self.c.post('/api/chat/recall',headers=self.headers,json={'message_id':first['id']})
+        self.assertEqual(r.status_code,200,r.text)
+        self.assertEqual({call.args[0] for call in push.call_args_list},{self.a,self.b})
+        self.assertTrue(all(call.args[1]['message_id']==first['id'] for call in push.call_args_list))
+        c=self.s.get_db()
+        try:
+            self.assertEqual(c.execute('SELECT last_body FROM conversations WHERE conv_key=?',
+                (self.s.chat.conv_key(self.a,self.b),)).fetchone()[0],'same recall preview')
+        finally:c.close()
+        self.assertEqual(self.c.post('/api/chat/recall',headers=self.headers,
+            json={'message_id':last['id']}).status_code,200)
+        for h in (self.headers,self.h2):
+            messages={m['id']:m for m in self.history(h)['items']}
+            for mid in (first['id'],last['id']):
+                self.assertTrue(messages[mid]['recalled_at'])
+                self.assertEqual(messages[mid]['body'],'')
     def test_edit_permissions_revision_and_attribution(self):
         m=self.send();payload={'message_id':m['id'],'text':'更新的消息','expected_version':0}
         self.assertEqual(self.c.post('/api/chat/edit',headers=self.h2,json=payload).status_code,403)

@@ -1,0 +1,31 @@
+{
+ "stage": "local-built-and-signed",
+ "apk": "qingsu.apk",
+ "size": 9421123,
+ "md5": "0581acd82311d4efc0d49d9602f9ecc0",
+ "sha256": "3d506f7398746c012d9cfbf367994abdc1a4eaa80d9729cc597078b65f886464",
+ "manifest": {
+  "version_code": 78,
+  "version_name": "2.4.5",
+  "min_version_code": 78,
+  "apk_url": "https://scientificexploration.art/qingsu.apk",
+  "size": 9421123,
+  "md5": "0581acd82311d4efc0d49d9602f9ecc0",
+  "sha256": "3d506f7398746c012d9cfbf367994abdc1a4eaa80d9729cc597078b65f886464"
+ },
+ "manifest_matches_apk": true,
+ "in_app_build": {
+  "APP_BUILD": 78,
+  "sw BUILD": 78
+ },
+ "signature": {
+  "apksigner": "Verifies",
+  "v2": true,
+  "v3": true,
+  "cert_sha256": "c6b15363badb1035563e5c731874fb78d4b08eeb88e223ced625faaa8fbd738f",
+  "key": "RSA-4096",
+  "dn": "CN=QingSu Release, O=QingSu, C=CN"
+ },
+ "artifact_verifier": "release artifacts agree: version_code=78 size=9421123 sha256=3d506f739874 (exit 0)",
+ "live_download": "部署后回填"
+}

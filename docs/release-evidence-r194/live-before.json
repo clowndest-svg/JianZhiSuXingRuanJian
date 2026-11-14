@@ -1,0 +1,8 @@
+{
+ "fetched_at": "2026-11-11 部署前",
+ "note": "r194 部署前的生产现役状态，作为前后对照基线（同一探针）",
+ "api_map_status": {"/docs": 200, "/openapi.json": 200},
+ "health_ready": {"release": "r42171538711", "source_revision": "648c511c673bd4058ebc6cd373df5e1dc63df406"},
+ "version_json": {"version_code": 77, "version_name": "2.4.4", "sha256_prefix": "d8717cc5eb94"},
+ "interpretation": "公开 /docs 与 /openapi.json 在 r193 仍可达（本轮要下线的侦察面）；部署后应转为 404，release 应变为 r42942099674、source_revision 变为 5439d5f，version_code 应变为 78"
+}

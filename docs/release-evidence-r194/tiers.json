@@ -1,0 +1,53 @@
+{
+ "generated_from": {
+  "python": "full-python-1794326928",
+  "node": "full-node-1794361466",
+  "browser": "full-browser-1794361468"
+ },
+ "python": {
+  "suites": 33,
+  "red_suites": [],
+  "skipped": {
+   "test_backup_snapshot.py": [
+    "4"
+   ]
+  },
+  "note": "test_backup_snapshot 的 4 条为 Linux-only 跳过；其余全绿"
+ },
+ "node": {
+  "suites": 10,
+  "red_suites": []
+ },
+ "browser": {
+  "suites": 15,
+  "red_suites": [],
+  "note": "真 Chromium + 真 uvicorn，针对最终代码复跑"
+ },
+ "gates": {
+  "legacy_backend": {
+   "green": 628,
+   "red": 0,
+   "exit": 0
+  },
+  "legacy_frontend": {
+   "green": 356,
+   "red": 0,
+   "exit": 0
+  },
+  "security_hardening": {
+   "tests": 8,
+   "result": "OK"
+  },
+  "test_integration": 64,
+  "test_content_security": 24,
+  "test_native_media_contract": 21,
+  "test_optimization_security": 24,
+  "test_multiprocess": 25
+ },
+ "android": {
+  "assembleRelease": "success",
+  "lintRelease": "success",
+  "note": "lint 仅依赖版本/图标形状提示，无安全错误"
+ },
+ "rerun_reason": "node/browser 首跑早于最后两处 server.py 改动（Bing 重定向只允许 bing.com、/api/ask items 纯文本化），故对最终代码整体复跑，三层全绿"
+}

@@ -70,7 +70,7 @@ FastAPI 默认把 `/docs`、`/redoc`、`/openapi.json` 暴露在公网，实测 
 
 ## 发布与回读
 
-（部署后回填：CI run、生产 `/docs`/`/openapi.json` 404、APK 指纹、`security.txt` 之外的入口一致性、回退快照。）
+GitHub Actions [42942099674](https://github.com/clowndest-svg/JianZhiSuXingRuanJian/actions/runs/42942099674) 成功。2026-11-15 复查生产 `/health/ready`：release=r42942099674，source_revision=5439d5fbd6268709e4e19d79f486347e4b7df05f，结构版本17。Android 为2.4.5（78），APK SHA-256=e95f003677bc43bd7e3ef1365caf6a549f930038aae3026ee9d598721945ebcb，下载地址为现役域名。后续发布核验见 r195 证据。
 
 ## 打开与入口
 

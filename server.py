@@ -6074,6 +6074,8 @@ def chat_recall(req: RecallReq, user: dict = Depends(get_current_user)):
     但正文不再外发（_message_dict 里按 recalled_at 抹掉）。"""
     conn = get_db()
     try:
+        # Serialize the read/check/write with message edits and sends.
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute("SELECT * FROM messages WHERE id=?", (int(req.message_id),)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="这条消息不在了")
@@ -6091,11 +6093,13 @@ def chat_recall(req: RecallReq, user: dict = Depends(get_current_user)):
         stamp = _now()
         conn.execute("UPDATE messages SET recalled_at=? WHERE id=?", (stamp, int(row["id"])))
         # 会话摘要如果正是这一句，跟着改口，否则列表会一直显示一句已经撤回的话
-        conn.execute("UPDATE conversations SET last_body=? WHERE conv_key=? AND last_body=?",
-                     (u'（已撤回）', row["conv_key"], row["body"]))
+        conn.execute("UPDATE conversations SET last_body=? WHERE conv_key=? "
+                     "AND ?=(SELECT MAX(id) FROM messages WHERE conv_key=?)",
+                     (u'（已撤回）', row["conv_key"], row["id"], row["conv_key"]))
         conn.commit()
-        _push(int(row["to_id"]), {"t": "recall", "message_id": int(row["id"]),
-                                  "recalled_at": stamp, "by": int(user["id"])})
+        for target in (int(row["from_id"]), int(row["to_id"])):
+            _push(target, {"t": "recall", "message_id": int(row["id"]),
+                           "recalled_at": stamp, "by": int(user["id"])})
         return {"code": 0, "recalled_at": stamp}
     finally:
         conn.close()
